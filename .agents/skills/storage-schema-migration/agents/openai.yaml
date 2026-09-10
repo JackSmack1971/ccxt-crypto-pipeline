@@ -1,0 +1,4 @@
+interface:
+  display_name: "Storage Schema Migration"
+  short_description: "Evolve DuckDB/Parquet storage safely"
+  default_prompt: "Use $storage-schema-migration to evolve /storage/ while preserving data, version discipline, accessor synchronization, and fixture-only tests."

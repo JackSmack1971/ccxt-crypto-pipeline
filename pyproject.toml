@@ -1,0 +1,21 @@
+[build-system]
+requires = ["setuptools==75.8.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "ccxt-crypto-pipeline"
+version = "0.1.0"
+description = "Local CEX and DEX crypto data-ingestion pipeline"
+requires-python = ">=3.10"
+dependencies = [
+    "ccxt==4.5.10",
+    "duckdb==1.5.5",
+    "pyarrow==25.0.1",
+    "pandas==2.3.3",
+    "requests==2.32.5",
+    "python-dotenv==1.1.1",
+    "APScheduler==3.11.0",
+]
+
+[tool.setuptools.packages.find]
+include = ["config*", "ingestion*", "normalization*", "scheduler*", "storage*"]

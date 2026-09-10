@@ -1,0 +1,10 @@
+# OPTIONAL MERGE SNIPPET — do not overwrite an existing .codex/config.toml.
+# Current Codex versions enable multi-agent workflows by default. These settings are
+# only useful if you want an explicit project-level concurrency policy.
+
+[agents]
+enabled = true
+max_concurrent_threads_per_session = 6
+# Intentionally omit default_subagent_model/default_subagent_reasoning_effort:
+# each custom agent in .codex/agents/ declares its own model/effort where needed,
+# and built-in agents can continue inheriting the parent/session defaults.
