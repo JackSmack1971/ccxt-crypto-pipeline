@@ -134,6 +134,14 @@ def _timestamp(value: Any) -> datetime | None:
     return None
 
 
+def _number(value: Any) -> float | None:
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return None
+    return number if number > 0 else None
+
+
 def normalize_pool(item: dict[str, Any], network: str, tokens: dict[str, dict[str, Any]] | None = None):
     attributes = item.get("attributes", item)
     relationships = item.get("relationships", {})
@@ -154,6 +162,15 @@ def normalize_pool(item: dict[str, Any], network: str, tokens: dict[str, dict[st
         "quote_token_address": _token_address(token_data["quote_token"]),
         "base_token": tokens.get(token_data["base_token"], {}),
         "quote_token": tokens.get(token_data["quote_token"], {}),
-        "reserve_usd": attributes.get("reserve_in_usd"),
+        "reserve_usd": _number(attributes.get("reserve_in_usd")),
+        "price_observations": [item for item in (
+            {"token_address": _token_address(token_data["base_token"]),
+             "price": _number(attributes.get("base_token_price_usd")), "quote_asset": "USD"},
+            {"token_address": _token_address(token_data["quote_token"]),
+             "price": _number(attributes.get("quote_token_price_usd")), "quote_asset": "USD"},
+        ) if item["token_address"] and item["price"] is not None],
+        "volume_usd": _number((attributes.get("volume_usd") or {}).get("h24")
+                               if isinstance(attributes.get("volume_usd"), dict)
+                               else attributes.get("volume_usd")),
         "raw": item,
     }

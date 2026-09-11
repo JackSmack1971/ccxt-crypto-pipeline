@@ -186,6 +186,29 @@ def upsert_asset_relationship(relationship: Mapping[str, Any], db_path: str | Pa
         _finish(conn, owned)
 
 
+def upsert_price_observation(observation: Mapping[str, Any], db_path: str | Path | None = None, *,
+                             connection=None) -> None:
+    """Persist one provider-normalized, address-scoped market observation."""
+    conn, owned = _connection(db_path, connection)
+    try:
+        evidence = observation.get("evidence_json", {})
+        if not isinstance(evidence, str):
+            evidence = json.dumps(evidence, default=str, sort_keys=True)
+        conn.execute(
+            """INSERT INTO price_observations VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT (asset_canonical_id, market_canonical_id, observed_at, source)
+            DO UPDATE SET price = excluded.price, quote_asset = excluded.quote_asset,
+            liquidity_usd = excluded.liquidity_usd, volume_usd = excluded.volume_usd,
+            cadence = excluded.cadence, evidence_json = excluded.evidence_json""",
+            [observation["asset_canonical_id"], observation["market_canonical_id"],
+             observation["observed_at"], observation["price"], observation["quote_asset"],
+             observation.get("liquidity_usd"), observation.get("volume_usd"),
+             observation["cadence"], observation["source"], evidence],
+        )
+    finally:
+        _finish(conn, owned)
+
+
 def upsert_metadata(metadata: Mapping[str, Any], db_path: str | Path | None = None, *, connection=None) -> None:
     conn, owned = _connection(db_path, connection)
     try:
@@ -263,6 +286,16 @@ def read_asset_relationships(db_path=None, *, connection=None):
         cursor = conn.execute("""SELECT * FROM asset_relationships
                                ORDER BY market_canonical_id, asset_canonical_id, relationship_type,
                                         venue, observed_at, source""")
+        return [dict(zip([column[0] for column in cursor.description], row)) for row in cursor.fetchall()]
+    finally:
+        _finish(conn, owned)
+
+
+def read_price_observations(db_path=None, *, connection=None):
+    conn, owned = _connection(db_path, connection)
+    try:
+        cursor = conn.execute("""SELECT * FROM price_observations
+                               ORDER BY observed_at, asset_canonical_id, market_canonical_id, source""")
         return [dict(zip([column[0] for column in cursor.description], row)) for row in cursor.fetchall()]
     finally:
         _finish(conn, owned)
