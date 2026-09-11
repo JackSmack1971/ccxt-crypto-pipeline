@@ -10,6 +10,7 @@ from typing import Any
 from .report import research_report
 
 def _plain(value: Any) -> Any:
+    if hasattr(value, "as_artifact"): return _plain(value.as_artifact())
     if is_dataclass(value): return _plain(asdict(value))
     if isinstance(value, dict): return {str(k): _plain(v) for k, v in value.items()}
     if isinstance(value, (list, tuple)): return [_plain(v) for v in value]
@@ -32,10 +33,14 @@ def write_research_run(output_dir: str | Path, *, dataset_identity: str, cohort_
                        cohort=(), features=(), labels=(), candidates=(), hypotheses=(), split=None,
                        report: str | None = None) -> Path:
     """Write immutable Phase 3 evidence files; reruns with identical inputs are byte-identical."""
+    hypothesis_artifact = _plain(hypotheses)
+    report_hypotheses = (hypothesis_artifact.get("hypotheses", [])
+                         if isinstance(hypothesis_artifact, dict) else hypothesis_artifact)
     artifacts = {"cohort.json": cohort, "features.json": features, "labels.json": labels,
-                 "candidates.json": candidates, "hypotheses.json": hypotheses,
+                 "candidates.json": candidates, "hypotheses.json": hypothesis_artifact,
                  "report.md": report if report is not None else research_report(cohort=cohort, labels=labels,
-                    candidates=candidates, split=split, hypotheses=[_plain(x) for x in hypotheses], dataset_identity=dataset_identity)}
+                    candidates=candidates, split=split, hypotheses=report_hypotheses,
+                    dataset_identity=dataset_identity)}
     artifact_hashes = {name: hashlib.sha256(_dump(value)).hexdigest() for name, value in artifacts.items()}
     payload = {"dataset_identity": dataset_identity, "cohort_config": cohort_config, "split": split,
                "artifacts": artifact_hashes}

@@ -77,7 +77,7 @@ The repository has moved beyond its original phase prose. The current baseline i
 
 - **Phase 1 ingestion/storage:** CEX, Tier-0 DEX, EVM, Solana, normalization, scheduling, DuckDB/Parquet persistence, schema version 5, timestamped metadata/lineage observations, and source-scoped OHLCV.
 - **Phase 2 backtesting:** read-only point-in-time snapshots, a narrow strategy protocol, deterministic single-CEX next-bar-open simulation, fees/slippage, metrics, and immutable run artifacts.
-- **Phase 3 research:** cohort extraction, temporal feature registry, fixed-horizon labels, chronological discovery/validation/holdout partition objects, baseline/candidate evaluation helpers, multiple-testing helpers, deterministic research artifacts, and Phase-2-compatible handoff metadata.
+- **Phase 3 research:** cohort extraction, temporal feature registry, fixed-horizon labels, purged chronological discovery/validation/holdout partitions, governed candidate-promotion states, multiple-testing helpers, deterministic research artifacts, and Phase-2-compatible handoff metadata.
 - **Phase 4 reporting:** hash-verified Phase 3 linkage, hash-verified staged inputs, claim/chart validation, deterministic SVG rendering, Markdown package generation, secret checks, immutable package artifacts, and a pending human-review gate.
 - **Cross-phase evidence:** the test suite includes an offline, content-addressed Phase 1 → Phase 3 → approved Phase 4 fixture chain.
 - **Continuous verification:** GitHub Actions runs the locked fixture/unit suite, storage migration guard, byte-compilation, and whitespace checks for pull requests and `main` without provider credentials.
@@ -88,8 +88,6 @@ The latest hardening work fixed several earlier weaknesses: metadata/lineage his
 
 The following remain open and define the active frontier:
 
-- the declared Phase 3 embargo is metadata only; `build_split()` does not actually purge/embargo observations around boundaries;
-- `validated_alpha` can currently become true from coverage/completeness alone rather than requiring discovery correction, validation replication, sealed holdout confirmation, baseline superiority, and cost robustness;
 - short-horizon real-data coverage for new DEX/on-chain assets is not yet a production ingestion contract comparable to the synthetic 1h fixtures;
 - token/pool/market identity semantics still need a production-grade contract where provider events describe pools but research evaluates token-level outcomes;
 - quote-to-USD semantics are not yet a durable historical conversion contract for non-USD quote assets;
@@ -166,7 +164,7 @@ Evidence:
 
 ## Slice 4R.3 — Candidate promotion state machine
 
-**Status:** ACTIVE
+**Status:** DONE
 
 Replace the current coverage-only `validated_alpha` shortcut with explicit research states.
 
@@ -193,9 +191,16 @@ Acceptance:
 - the hypothesis registry and candidate artifact preserve all promotion inputs and decisions;
 - tests cover false-positive prevention and successful promotion.
 
+Evidence:
+
+- `analysis/alpha/evaluation.py` defines versioned promotion policy/evidence/decision records and enforces sequential discovery, validation, and sealed-holdout gates with explicit terminal reasons.
+- Candidate results can report validated status only after `holdout_confirmed`; ranking uses governed states rather than the former coverage-derived boolean.
+- The hypothesis registry and content-addressed research artifacts retain candidate statistics, policy, submitted evidence, decisions, and rejection reasons.
+- `tests/test_phase3.py` covers coverage-only false-positive prevention, each successful state transition, a mandatory-gate rejection, and persisted promotion evidence.
+
 ## Slice 4R.4 — Quote-currency and USD conversion provenance
 
-**Status:** PLANNED
+**Status:** ACTIVE
 
 Make forward-return labels economically explicit for non-USD quote assets.
 
@@ -557,4 +562,4 @@ For a fresh agent, the intended pickup sequence is:
 
 `AGENTS.md` → `ROADMAP.md` → active `docs/plans/phase-*.md` → relevant code/tests → Git history/status.
 
-The current frontier is **Phase 4R.3 — Candidate promotion state machine**. Phase 4R.1 established the mandatory CI gate; do not begin Phase 5 until every mandatory Phase 4R closure criterion is satisfied.
+The current frontier is **Phase 4R.4 — Quote-currency and USD conversion provenance**. Phase 4R.1 established the mandatory CI gate; do not begin Phase 5 until every mandatory Phase 4R closure criterion is satisfied.

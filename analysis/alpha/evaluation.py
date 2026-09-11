@@ -83,10 +83,23 @@ class Hypothesis:
     raw_p_value: float | None; adjusted_value: float | None = None; decision: str = "rejected"
 
 class HypothesisRegistry:
-    def __init__(self): self.items: list[Hypothesis] = []
+    def __init__(self):
+        self.items: list[Hypothesis] = []
+        self.promotions: list[dict[str, Any]] = []
     def add(self, hypothesis: Hypothesis): self.items.append(hypothesis)
     def as_dicts(self): return [asdict(x) for x in self.items]
     def count(self): return len(self.items)
+
+    def record_promotion(self, candidate: CandidateResult, inputs: PromotionEvidence,
+                         decision: PromotionDecision) -> None:
+        """Retain the exact governed inputs and decision beside hypotheses."""
+        candidate_inputs = {key: value for key, value in asdict(candidate).items() if key != "promotion"}
+        self.promotions.append({"candidate": candidate.name, "candidate_inputs": candidate_inputs,
+                                "inputs": asdict(inputs),
+                                "decision": asdict(decision)})
+
+    def as_artifact(self) -> dict[str, Any]:
+        return {"hypotheses": self.as_dicts(), "promotions": list(self.promotions)}
 
 def apply_bh_fdr(hypotheses: list[Hypothesis], q: float = .05) -> tuple[Hypothesis, ...]:
     indexed = sorted(((h.raw_p_value, i) for i, h in enumerate(hypotheses) if h.raw_p_value is not None), key=lambda x: x[0])
@@ -105,10 +118,123 @@ def apply_holm(hypotheses: list[Hypothesis], alpha: float = .05) -> tuple[Hypoth
     return tuple(Hypothesis(**{**asdict(h), "adjusted_value": adjusted[i], "decision": "confirmed" if adjusted[i] is not None and adjusted[i] <= alpha else "rejected"}) for i, h in enumerate(hypotheses))
 
 @dataclass(frozen=True)
+class PromotionPolicy:
+    """Versioned mandatory gates for candidate research-state promotion."""
+
+    version: str = "candidate-promotion-v1"
+    minimum_sample_size: int = 10
+    minimum_independent_launches: int = 10
+    minimum_coverage: float = .8
+    discovery_correction: str = "benjamini-hochberg"
+    discovery_q: float = .05
+    confirmation_correction: str = "holm-bonferroni"
+    confirmation_alpha: float = .05
+
+
+@dataclass(frozen=True)
+class PromotionEvidence:
+    """Frozen evidence submitted to a promotion stage; ``None`` means absent."""
+
+    target_stage: str = "discovery"
+    discovery_adjusted_p_value: float | None = None
+    validation_replicated: bool | None = None
+    validation_semantics_frozen: bool | None = None
+    holdout_adjusted_p_value: float | None = None
+    baseline_superior: bool | None = None
+    uncertainty_supports_effect: bool | None = None
+    cost_sensitivity_passed: bool | None = None
+
+
+@dataclass(frozen=True)
+class PromotionDecision:
+    state: str
+    reasons: tuple[str, ...]
+    policy: dict[str, Any]
+    inputs: dict[str, Any]
+
+
+@dataclass(frozen=True)
 class CandidateResult:
     name: str; horizon: str; sample_size: int; independent_launches: int; coverage: float; missingness: float
     mean_return: float | None; uncertainty: dict[str, float | None]; baseline_comparison: dict[str, Any]
-    cost_sensitivity: dict[str, float]; validated_alpha: bool; status: str = "research_only"
+    cost_sensitivity: dict[str, float | None]
+    promotion: PromotionDecision
+
+    @property
+    def validated_alpha(self) -> bool:
+        """Compatibility view: only sealed-holdout confirmation is validated."""
+        return self.promotion.state == "holdout_confirmed"
+
+    @property
+    def status(self) -> str:
+        return self.promotion.state
+
+
+def _promotion_decision(state: str, reasons: list[str], policy: PromotionPolicy,
+                        evidence: PromotionEvidence) -> PromotionDecision:
+    return PromotionDecision(state, tuple(reasons), asdict(policy), asdict(evidence))
+
+
+def evaluate_candidate_promotion(candidate: CandidateResult, evidence: PromotionEvidence,
+                                 policy: PromotionPolicy = PromotionPolicy()) -> PromotionDecision:
+    """Evaluate sequential research gates without inferring missing evidence.
+
+    Discovery correction, baseline superiority, uncertainty/effect evidence, and
+    configured cost sensitivity are mandatory before the first promotion.
+    Validation then requires replication under frozen semantics, and final
+    confirmation requires corrected testing of the sealed holdout.
+    """
+    if evidence.target_stage not in {"discovery", "validation", "holdout"}:
+        raise ValueError("target_stage must be discovery, validation, or holdout")
+    if candidate.sample_size < policy.minimum_sample_size:
+        return _promotion_decision("insufficient_coverage", ["MINIMUM_SAMPLE_SIZE"], policy, evidence)
+    if candidate.independent_launches < policy.minimum_independent_launches:
+        return _promotion_decision("insufficient_coverage", ["MINIMUM_INDEPENDENT_LAUNCHES"], policy, evidence)
+    if candidate.coverage < policy.minimum_coverage:
+        return _promotion_decision("insufficient_coverage", ["MINIMUM_COVERAGE"], policy, evidence)
+
+    required = {
+        "MISSING_DISCOVERY_CORRECTION": evidence.discovery_adjusted_p_value,
+        "MISSING_BASELINE_COMPARISON": evidence.baseline_superior,
+        "MISSING_UNCERTAINTY_EFFECT_EVIDENCE": evidence.uncertainty_supports_effect,
+        "MISSING_COST_SENSITIVITY": evidence.cost_sensitivity_passed,
+    }
+    missing = [reason for reason, value in required.items() if value is None]
+    if missing:
+        return _promotion_decision("insufficient_evidence", missing, policy, evidence)
+    failed = []
+    if evidence.discovery_adjusted_p_value > policy.discovery_q:
+        failed.append("DISCOVERY_CORRECTION_FAILED")
+    if not evidence.baseline_superior: failed.append("BASELINE_COMPARISON_FAILED")
+    if not evidence.uncertainty_supports_effect: failed.append("UNCERTAINTY_EFFECT_FAILED")
+    if not evidence.cost_sensitivity_passed: failed.append("COST_SENSITIVITY_FAILED")
+    if candidate.baseline_comparison.get("difference") is None or candidate.baseline_comparison["difference"] <= 0:
+        failed.append("BASELINE_EVIDENCE_NOT_POSITIVE")
+    if candidate.uncertainty.get("ci95_low") is None or candidate.uncertainty["ci95_low"] <= 0:
+        failed.append("UNCERTAINTY_EVIDENCE_NOT_POSITIVE")
+    if not candidate.cost_sensitivity or any(value is None or value <= 0
+                                             for value in candidate.cost_sensitivity.values()):
+        failed.append("COST_EVIDENCE_NOT_ROBUST")
+    if failed: return _promotion_decision("rejected", failed, policy, evidence)
+    if evidence.target_stage == "discovery":
+        return _promotion_decision("discovery_promoted", [], policy, evidence)
+
+    validation = {"MISSING_VALIDATION_REPLICATION": evidence.validation_replicated,
+                  "MISSING_FROZEN_VALIDATION_SEMANTICS": evidence.validation_semantics_frozen}
+    missing = [reason for reason, value in validation.items() if value is None]
+    if missing: return _promotion_decision("insufficient_evidence", missing, policy, evidence)
+    failed = [reason for reason, value in (("VALIDATION_REPLICATION_FAILED", evidence.validation_replicated),
+                                           ("VALIDATION_SEMANTICS_NOT_FROZEN", evidence.validation_semantics_frozen))
+              if not value]
+    if failed: return _promotion_decision("rejected", failed, policy, evidence)
+    if evidence.target_stage == "validation":
+        return _promotion_decision("validation_confirmed", [], policy, evidence)
+
+    if evidence.holdout_adjusted_p_value is None:
+        return _promotion_decision("insufficient_evidence", ["MISSING_HOLDOUT_CORRECTION"], policy, evidence)
+    if evidence.holdout_adjusted_p_value > policy.confirmation_alpha:
+        return _promotion_decision("rejected", ["HOLDOUT_CORRECTION_FAILED"], policy, evidence)
+    return _promotion_decision("holdout_confirmed", [], policy, evidence)
 
 def descriptive_baseline(labels: tuple[Any, ...], *, horizon: str) -> dict[str, Any]:
     """Compute the unconditional Stage A baseline without selecting winners."""
@@ -173,13 +299,13 @@ def score_candidate(name: str, labels: tuple[Any, ...], *, horizon: str, selecte
     variance = sum((v - mean) ** 2 for v in vals) / (len(vals) - 1) if len(vals) > 1 else None
     se = math.sqrt(variance / len(vals)) if variance is not None else None
     coverage = len(chosen) / n if n else 0.0
-    validated = coverage >= min_coverage and bool(vals) and all(x.status == "COMPLETE" for x in chosen)
     return CandidateResult(name, horizon, len(chosen), len({x.token_id for x in chosen}), coverage,
                            1.0 - coverage, mean, {"standard_error": se, "ci95_low": mean - 1.96 * se if mean is not None and se is not None else None,
                            "ci95_high": mean + 1.96 * se if mean is not None and se is not None else None},
                            {"baseline_mean": baseline_mean, "difference": mean - baseline_mean if mean is not None and baseline_mean is not None else None},
                            {str(c): (mean - turnover * c) if mean is not None else None for c in costs},
-                           validated)
+                           PromotionDecision("discovered", (), asdict(PromotionPolicy(minimum_coverage=min_coverage)),
+                                             asdict(PromotionEvidence())))
 
 def validate_temporal_alignment(cohort: tuple[Any, ...], feature_rows: tuple[dict[str, Any], ...],
                                 labels: tuple[Any, ...]) -> None:
@@ -204,6 +330,7 @@ def validate_temporal_alignment(cohort: tuple[Any, ...], feature_rows: tuple[dic
             raise ValueError("label row is permuted or future-aligned")
 
 def rank_candidates(candidates: tuple[CandidateResult, ...] | list[CandidateResult]) -> tuple[CandidateResult, ...]:
-    """Stable research ranking; low coverage is never treated as validated alpha."""
-    return tuple(sorted(candidates, key=lambda x: (-int(x.validated_alpha),
+    """Stable ranking by governed research state, then descriptive return."""
+    priority = {"holdout_confirmed": 3, "validation_confirmed": 2, "discovery_promoted": 1}
+    return tuple(sorted(candidates, key=lambda x: (-priority.get(x.promotion.state, 0),
         -(x.mean_return if x.mean_return is not None else float("-inf")), x.name, x.horizon)))
