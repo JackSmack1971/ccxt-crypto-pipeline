@@ -66,12 +66,39 @@ def test_labels_use_fixed_horizon_and_report_right_censoring():
 
 def test_split_is_chronological_sealed_and_corrections_are_recorded():
     class Row:
-        def __init__(self, i): self.t0 = datetime(2025, 1, 1) + timedelta(days=i); self.token_id = str(i)
-    split = build_split(tuple(Row(i) for i in range(10)))
-    assert len(split.discovery) == 6 and len(split.validation) == 2 and len(split.holdout) == 2 and split.sealed
+        def __init__(self, i): self.t0 = datetime(2025, 1, 1) + timedelta(days=i * 10); self.token_id = str(i)
+    rows = tuple(Row(i) for i in range(10))
+    split = build_split(rows, label_horizon=timedelta(days=1))
+    assert split.discovery == tuple(str(i) for i in range(6))
+    assert split.validation == ("7",) and split.holdout == ("9",) and split.sealed
+    assert [row["reason"] for row in split.removed] == ["EMBARGO", "EMBARGO"]
+    assert build_split(rows, embargo_days=0, label_horizon=timedelta(days=1)).validation == ("6", "7")
+    assert split.as_dict() == build_split(rows, label_horizon=timedelta(days=1)).as_dict()
     hs = [Hypothesis("e", "f", (), None, "1h", None, "baseline", "2025-01-01", "d", p) for p in (.01, .02, .8)]
     assert apply_bh_fdr(hs)[0].adjusted_value == pytest.approx(.03)
     assert apply_holm(hs)[0].adjusted_value == pytest.approx(.03)
+
+
+def test_split_purges_feature_and_label_windows_at_fixed_boundaries():
+    class Row:
+        def __init__(self, i):
+            self.t0 = datetime(2025, 1, 1) + timedelta(days=i)
+            self.token_id = str(i)
+
+    split = build_split(tuple(Row(i) for i in range(10)), embargo_days=0,
+                        feature_lookback=timedelta(days=2), label_horizon=timedelta(days=2))
+    assert split.discovery == ("0", "1", "2", "3")
+    assert split.validation == ()
+    assert split.holdout == ()
+    assert [(row["token_id"], row["reason"], row["boundary"]) for row in split.removed] == [
+        ("4", "LABEL_WINDOW_OVERLAP", "discovery_validation"),
+        ("5", "LABEL_WINDOW_OVERLAP", "discovery_validation"),
+        ("6", "FEATURE_WINDOW_OVERLAP", "discovery_validation"),
+        ("7", "FEATURE_WINDOW_OVERLAP", "discovery_validation"),
+        ("8", "FEATURE_WINDOW_OVERLAP", "validation_holdout"),
+        ("9", "FEATURE_WINDOW_OVERLAP", "validation_holdout"),
+    ]
+    assert split.boundaries[1]["first_later_token_id"] == "8"
 
 
 def test_candidate_low_coverage_is_not_validated_alpha_and_handoff_is_phase2_compatible():

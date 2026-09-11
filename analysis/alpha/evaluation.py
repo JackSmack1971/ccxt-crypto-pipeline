@@ -2,25 +2,79 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass, asdict
-from datetime import timedelta
+from datetime import datetime, timedelta
 from typing import Any, Callable
 
 @dataclass(frozen=True)
 class SplitResult:
     discovery: tuple[str, ...]; validation: tuple[str, ...]; holdout: tuple[str, ...]
-    embargo_days: int = 7; sealed: bool = True
+    boundaries: tuple[dict[str, str], ...] = ()
+    removed: tuple[dict[str, str], ...] = ()
+    embargo_days: int = 7
+    feature_lookback_seconds: int = 0
+    label_horizon_seconds: int = 7 * 24 * 60 * 60
+    sealed: bool = True
 
     def as_dict(self) -> dict[str, Any]:
         return {"discovery": list(self.discovery), "validation": list(self.validation),
-                "holdout": list(self.holdout), "embargo_days": self.embargo_days,
+                "holdout": list(self.holdout), "boundaries": list(self.boundaries),
+                "removed": list(self.removed), "embargo_days": self.embargo_days,
+                "feature_lookback_seconds": self.feature_lookback_seconds,
+                "label_horizon_seconds": self.label_horizon_seconds,
                 "sealed": self.sealed}
 
-def build_split(cohort: tuple[Any, ...], *, embargo_days: int = 7) -> SplitResult:
+def build_split(cohort: tuple[Any, ...], *, embargo_days: int = 7,
+                feature_lookback: timedelta = timedelta(0),
+                label_horizon: timedelta = timedelta(days=7)) -> SplitResult:
+    """Build a chronological split and remove rows that leak across boundaries.
+
+    The initial 60/20/20 assignment fixes both boundaries and sealed holdout
+    membership.  A row on the earlier side is purged when its label window
+    reaches the next boundary.  A row on the later side is purged when its
+    feature lookback reaches before that boundary, and is embargoed when its
+    decision time is inside the configured post-boundary interval.
+    """
     if embargo_days < 0:
         raise ValueError("embargo_days must be non-negative")
+    if feature_lookback < timedelta(0) or label_horizon < timedelta(0):
+        raise ValueError("feature lookback and label horizon must be non-negative")
     ordered = sorted(cohort, key=lambda x: (x.t0, x.token_id)); n = len(ordered)
     a, b = int(n * .6), int(n * .8)
-    return SplitResult(tuple(x.token_id for x in ordered[:a]), tuple(x.token_id for x in ordered[a:b]), tuple(x.token_id for x in ordered[b:]), embargo_days)
+    groups = [ordered[:a], ordered[a:b], ordered[b:]]
+    boundary_rows = (("discovery_validation", ordered[a]) if a < n else None,
+                     ("validation_holdout", ordered[b]) if b < n else None)
+    boundaries = tuple({"name": name, "timestamp": row.t0.isoformat(), "first_later_token_id": row.token_id}
+                       for item in boundary_rows if item is not None for name, row in (item,))
+    removed: list[dict[str, str]] = []
+    embargo = timedelta(days=embargo_days)
+
+    def reject(row: Any, partition: str, boundary_name: str, boundary: datetime,
+               *, earlier: bool) -> bool:
+        reason = None
+        if earlier and row.t0 + label_horizon >= boundary:
+            reason = "LABEL_WINDOW_OVERLAP"
+        elif not earlier and row.t0 - feature_lookback < boundary:
+            reason = "FEATURE_WINDOW_OVERLAP"
+        elif not earlier and embargo and row.t0 < boundary + embargo:
+            reason = "EMBARGO"
+        if reason:
+            removed.append({"token_id": row.token_id, "partition": partition, "reason": reason,
+                            "boundary": boundary_name, "boundary_timestamp": boundary.isoformat()})
+        return reason is not None
+
+    names = ("discovery", "validation", "holdout")
+    kept: list[list[Any]] = [list(group) for group in groups]
+    if a < n:
+        boundary = ordered[a].t0
+        kept[0] = [row for row in kept[0] if not reject(row, names[0], "discovery_validation", boundary, earlier=True)]
+        kept[1] = [row for row in kept[1] if not reject(row, names[1], "discovery_validation", boundary, earlier=False)]
+    if b < n:
+        boundary = ordered[b].t0
+        kept[1] = [row for row in kept[1] if not reject(row, names[1], "validation_holdout", boundary, earlier=True)]
+        kept[2] = [row for row in kept[2] if not reject(row, names[2], "validation_holdout", boundary, earlier=False)]
+    return SplitResult(*(tuple(row.token_id for row in group) for group in kept), boundaries,
+                       tuple(removed), embargo_days, int(feature_lookback.total_seconds()),
+                       int(label_horizon.total_seconds()))
 
 @dataclass(frozen=True)
 class Hypothesis:
