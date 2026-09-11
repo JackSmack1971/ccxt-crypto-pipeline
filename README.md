@@ -178,7 +178,7 @@ Use the pinned project manifest and [`uv.lock`](uv.lock) for repeatable dependen
 | Security policy | [`SECURITY.md`](SECURITY.md) |
 | Code of conduct | No `CODE_OF_CONDUCT.md` found |
 | License | No license file found |
-| Support | Repository-local documentation and issue discussion |
+| Support | [`SUPPORT.md`](SUPPORT.md) and GitHub Issues |
 
 ## Contributing
 

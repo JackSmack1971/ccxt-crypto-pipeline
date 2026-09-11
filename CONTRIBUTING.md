@@ -205,4 +205,5 @@ log, test fixture, report, chart, or commit message.
 The repository currently has no `LICENSE` or `CODE_OF_CONDUCT.md`. Until those
 policies are added, do not assume that the code is broadly reusable or that a
 separate conduct-enforcement process exists. See [`SECURITY.md`](SECURITY.md)
-for vulnerability reporting and secret-handling rules.
+for vulnerability reporting and secret-handling rules. For usage questions and
+non-sensitive issue discussion, see [`SUPPORT.md`](SUPPORT.md).
