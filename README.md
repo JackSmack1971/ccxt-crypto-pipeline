@@ -135,7 +135,7 @@ Safe examples are provided in [`.env.example`](.env.example). YAML settings live
 
 ## Testing & Verification
 
-The repository contains pytest tests under `tests/`. Run them with `python -m pytest`. If the host interpreter lacks project dependencies, use `./scripts/run-tests`; it selects the already-provisioned `.venv` dependencies without retrieving packages. Fixture tests do not prove live provider acceptance; use the live-check prerequisites in [`docs/RUNBOOK.md`](docs/RUNBOOK.md) and inspect stored rows and `scheduler.status`.
+The repository contains pytest tests under `tests/`. Run them with the project interpreter: on PowerShell use `./scripts/run-tests.ps1`, and on POSIX shells use `./scripts/run-tests`. These entry points select the already-provisioned `.venv` dependencies instead of a host interpreter that may not have `duckdb` or `APScheduler`. Provision the environment first with `uv sync --locked` if needed. Fixture tests do not prove live provider acceptance; use the live-check prerequisites in [`docs/RUNBOOK.md`](docs/RUNBOOK.md) and inspect stored rows and `scheduler.status`.
 
 ## Troubleshooting
 
