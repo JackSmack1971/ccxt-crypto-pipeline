@@ -175,14 +175,14 @@ Use the pinned project manifest and [`uv.lock`](uv.lock) for repeatable dependen
 | Area | Status |
 | --- | --- |
 | Contribution guidelines | [`CONTRIBUTING.md`](CONTRIBUTING.md) |
-| Security policy | No `SECURITY.md` found |
+| Security policy | [`SECURITY.md`](SECURITY.md) |
 | Code of conduct | No `CODE_OF_CONDUCT.md` found |
 | License | No license file found |
 | Support | Repository-local documentation and issue discussion |
 
 ## Contributing
 
-Read [`CONTRIBUTING.md`](CONTRIBUTING.md) before opening an issue or pull request. It documents the repository’s phase boundaries, offline verification requirements, storage migration rules, provider integration constraints, and review expectations.
+Read [`CONTRIBUTING.md`](CONTRIBUTING.md) before opening an issue or pull request. It documents the repository’s phase boundaries, offline verification requirements, storage migration rules, provider integration constraints, and review expectations. See [`SECURITY.md`](SECURITY.md) for private vulnerability reporting and secret-handling rules.
 
 ## Roadmap
 

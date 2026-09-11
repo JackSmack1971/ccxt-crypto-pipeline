@@ -202,6 +202,7 @@ rotate it, remove it from all affected artifacts, and notify the maintainers
 privately through GitHub. Do not publish the value in an issue, pull request,
 log, test fixture, report, chart, or commit message.
 
-The repository currently has no `LICENSE`, `SECURITY.md`, or
-`CODE_OF_CONDUCT.md`. Until those policies are added, do not assume that the
-code is broadly reusable or that a separate security-reporting SLA exists.
+The repository currently has no `LICENSE` or `CODE_OF_CONDUCT.md`. Until those
+policies are added, do not assume that the code is broadly reusable or that a
+separate conduct-enforcement process exists. See [`SECURITY.md`](SECURITY.md)
+for vulnerability reporting and secret-handling rules.
