@@ -4,6 +4,7 @@ import yaml
 
 
 WORKFLOW_PATH = Path(__file__).parents[1] / ".github" / "workflows" / "ci.yml"
+TEST_RUNNER_PATH = Path(__file__).parents[1] / "scripts" / "run-tests"
 
 
 def _workflow():
@@ -43,3 +44,12 @@ def test_fixture_ci_has_no_provider_credentials_or_live_commands():
 
     forbidden = ("api_key", "rpc_url", "secret", "scheduler --once", "backfill", "live")
     assert not any(term in workflow_text for term in forbidden)
+
+
+def test_local_test_runner_reuses_provisioned_dependencies_without_uv_sync():
+    runner = TEST_RUNNER_PATH.read_text(encoding="utf-8")
+
+    assert ".venv/bin/python -m pytest" in runner
+    assert "sysconfig.get_path(\"purelib\")" in runner
+    assert "exec python -m pytest \"$@\"" in runner
+    assert "uv run" not in runner
