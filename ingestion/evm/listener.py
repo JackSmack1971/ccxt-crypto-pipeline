@@ -6,14 +6,15 @@ import json
 from datetime import datetime, timezone
 from typing import Any
 
-from storage.db import insert_event, log_run_end, log_run_start, safe_error_message, upsert_asset, upsert_metadata
+from storage.db import (insert_event, log_run_end, log_run_start, safe_error_message, upsert_asset,
+                        upsert_asset_relationship, upsert_metadata)
 
 from .config import ROOT, load_chain, load_evm_config
 from .models import CapabilityStatus
 from .providers import build_provider
 from .risk import risk_flags
 from .risk import HoneypotRiskProvider
-from .rpc import EVMRPCClient, decode_created_asset, rpc_url_from_env
+from .rpc import EVMRPCClient, decode_created_market, rpc_url_from_env
 
 
 def enrich_asset(chain: str, chain_id: int, address: str, provider, risk_provider, *, db_path: str,
@@ -47,10 +48,24 @@ def observe_once(chain_config: dict[str, Any], rpc: EVMRPCClient, provider, risk
     try:
         logs = rpc.get_factory_logs(chain_config.get("factories", []), from_block, to_block)
         for log in logs:
-            address = decode_created_asset(log)
-            if address:
-                enrich_asset(chain_config["name"], int(chain_config["chain_id"]), address,
-                             provider, risk_provider, db_path=db_path)
+            decoded = decode_created_market(log)
+            if decoded:
+                address = decoded["market_address"]
+                now = log.get("timestamp") or datetime.now(timezone.utc)
+                upsert_asset({"canonical_id": f"{chain_config['name']}:{address}", "source_type": "dex",
+                              "chain_or_exchange": chain_config["name"], "symbol_or_contract": address,
+                              "first_seen": now}, db_path)
+                for index, token_address in enumerate(decoded["constituents"]):
+                    if token_address is None:
+                        continue
+                    enrich_asset(chain_config["name"], int(chain_config["chain_id"]), token_address,
+                                 provider, risk_provider, db_path=db_path, now=now)
+                    upsert_asset_relationship({"market_canonical_id": f"{chain_config['name']}:{address}",
+                                               "asset_canonical_id": f"{chain_config['name']}:{token_address}",
+                                               "relationship_type": f"constituent_{index}",
+                                               "venue": str(log.get("protocol") or "unknown"),
+                                               "observed_at": now, "source": "evm_rpc",
+                                               "evidence_json": {"log": log}}, db_path)
                 if log.get("timestamp") is not None:
                     insert_event({"canonical_id": f"{chain_config['name']}:{address}",
                                   "event_type": "new_pool_detected", "timestamp": log["timestamp"],

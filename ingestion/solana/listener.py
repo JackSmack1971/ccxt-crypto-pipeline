@@ -6,7 +6,8 @@ import argparse
 from datetime import datetime, timezone
 from typing import Any, Iterable
 
-from storage.db import insert_event, log_run_end, log_run_start, safe_error_message, upsert_asset, upsert_metadata
+from storage.db import (insert_event, log_run_end, log_run_start, safe_error_message, upsert_asset,
+                        upsert_asset_relationship, upsert_metadata)
 
 from .config import ROOT, load_config
 from .helius import HeliusClient
@@ -40,6 +41,12 @@ def extract_mints(transaction: dict[str, Any]) -> list[str]:
     names = {"mint", "tokenmint", "token_mint", "token1mint", "token2mint"}
     return list(dict.fromkeys(mint for mint in _find_values(transaction, names)
                              if is_solana_address(mint)))
+
+
+def extract_pool_addresses(transaction: dict[str, Any]) -> list[str]:
+    names = {"pool", "pooladdress", "pool_address", "pair", "pairaddress", "pair_address"}
+    return list(dict.fromkeys(address for address in _find_values(transaction, names)
+                             if is_solana_address(address)))
 
 
 def _event_type(transaction: dict[str, Any], configured_types: list[str]) -> str | None:
@@ -87,12 +94,29 @@ def run_once(*, db_path: str, config: dict[str, Any] | None = None, client: Heli
                 if not tx.get("timestamp") and now is None:
                     continue
                 timestamp = datetime.fromtimestamp(tx["timestamp"], timezone.utc) if tx.get("timestamp") else now
+                pool_addresses = extract_pool_addresses(tx) if event_type == "new_pool_detected" else []
+                # A pool relationship is persisted only when its two-sided
+                # identity can be represented without guessing from symbols or
+                # unrelated transaction accounts.
+                if event_type == "new_pool_detected" and (len(pool_addresses) != 1 or len(mints) != 2):
+                    continue
                 for mint in mints:
                     canonical_id = f"solana:{mint}"
-                    insert_event({"canonical_id": canonical_id, "event_type": event_type,
+                    event_identity = f"solana:{pool_addresses[0]}" if len(pool_addresses) == 1 else canonical_id
+                    if len(pool_addresses) == 1:
+                        upsert_asset({"canonical_id": event_identity, "source_type": "dex",
+                                      "chain_or_exchange": "solana", "symbol_or_contract": pool_addresses[0],
+                                      "first_seen": timestamp}, db_path)
+                    insert_event({"canonical_id": event_identity, "event_type": event_type,
                                   "timestamp": timestamp, "payload_json": {"program": program_name, "transaction": tx},
                                   "source": "helius"}, db_path)
                     written += persist_launch(mint, tx, client, db_path=db_path, now=timestamp)
+                    if len(pool_addresses) == 1:
+                        upsert_asset_relationship({"market_canonical_id": event_identity,
+                                                   "asset_canonical_id": canonical_id,
+                                                   "relationship_type": f"constituent_{mints.index(mint)}",
+                                                   "venue": program_name, "observed_at": timestamp,
+                                                   "source": "helius", "evidence_json": {"transaction": tx}}, db_path)
         log_run_end(run_id, "success", db_path, rows_written=written)
         return written
     except Exception as exc:

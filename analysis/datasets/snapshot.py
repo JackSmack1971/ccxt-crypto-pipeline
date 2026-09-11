@@ -93,7 +93,7 @@ class DatasetSnapshot:
     def __init__(self, assets: tuple[Asset, ...], bars: tuple[Bar, ...],
                  metadata: tuple[Metadata, ...], events: tuple[dict[str, Any], ...],
                  lineage: tuple[dict[str, Any], ...], policy: DatasetPolicy,
-                 dataset_identity: str):
+                 dataset_identity: str, asset_relationships: tuple[dict[str, Any], ...] = ()):
         self.assets = tuple(sorted(assets, key=lambda item: item.canonical_id))
         self.bars = tuple(sorted((bar for bar in bars if policy.allows(bar)),
                                  key=lambda item: (item.timestamp, item.canonical_id,
@@ -115,6 +115,9 @@ class DatasetSnapshot:
         self.lineage = tuple(sorted(lineage, key=lambda item: (str(item.get("dex_canonical_id", "")),
                                                                str(item.get("cex_canonical_id", "")),
                                                                _time(item["linked_at"]))))
+        self.asset_relationships = tuple(sorted(asset_relationships, key=lambda item: (
+            str(item.get("market_canonical_id", "")), str(item.get("asset_canonical_id", "")),
+            str(item.get("relationship_type", "")), _time(item["observed_at"]), str(item.get("source", "")))))
         self.policy = policy
         self.dataset_identity = dataset_identity
         self._asset_ids = {item.canonical_id for item in assets}
@@ -136,7 +139,7 @@ class DatasetSnapshot:
             tables = {row[0] for row in conn.execute(
                 "SELECT table_name FROM information_schema.tables WHERE table_schema = 'main'"
             ).fetchall()}
-            required = {"assets", "ohlcv", "metadata", "events", "lineage"}
+            required = {"assets", "ohlcv", "metadata", "events", "lineage", "asset_relationships"}
             missing = sorted(required - tables)
             if missing:
                 raise ValueError(f"dataset is missing required tables: {', '.join(missing)}")
@@ -190,21 +193,33 @@ class DatasetSnapshot:
                                                     "ORDER BY dex_canonical_id, cex_canonical_id, linked_at").fetchall())
             for link in lineage:
                 link["linked_at"] = _time(link["linked_at"])
+            relationship_columns = ("market_canonical_id", "asset_canonical_id", "relationship_type", "venue",
+                                    "observed_at", "source", "evidence_json")
+            relationships = tuple(dict(zip(relationship_columns, row)) for row in conn.execute(
+                "SELECT " + ", ".join(relationship_columns) + " FROM asset_relationships "
+                "ORDER BY market_canonical_id, asset_canonical_id, relationship_type, venue, observed_at, source"
+            ).fetchall())
+            for relationship in relationships:
+                relationship["observed_at"] = _time(relationship["observed_at"])
             asset_ids = {asset.canonical_id for asset in assets}
             unknown_metadata = sorted(item.canonical_id for item in metadata if item.canonical_id not in asset_ids)
             unknown_events = sorted(item["canonical_id"] for item in events if item["canonical_id"] not in asset_ids)
             unknown_lineage = sorted({item[key] for item in lineage for key in ("dex_canonical_id", "cex_canonical_id")
                                       if item[key] not in asset_ids})
-            if unknown_metadata or unknown_events or unknown_lineage:
+            unknown_relationships = sorted({item[key] for item in relationships
+                                            for key in ("market_canonical_id", "asset_canonical_id")
+                                            if item[key] not in asset_ids})
+            if unknown_metadata or unknown_events or unknown_lineage or unknown_relationships:
                 raise ValueError("dataset references unknown canonical asset identities: " +
-                                 ", ".join(unknown_metadata + unknown_events + unknown_lineage))
+                                 ", ".join(unknown_metadata + unknown_events + unknown_lineage + unknown_relationships))
         finally:
             conn.close()
         payload = {"assets": [asdict(x) for x in assets], "bars": [asdict(x) for x in bars],
                    "metadata": [asdict(x) for x in metadata], "events": list(events), "lineage": list(lineage),
+                   "asset_relationships": list(relationships),
                    "policy": asdict(policy)}
         identity = hashlib.sha256(json.dumps(payload, default=str, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
-        return cls(assets, tuple(bars), metadata, events, lineage, policy, identity)
+        return cls(assets, tuple(bars), metadata, events, lineage, policy, identity, relationships)
 
     def bars_for(self, canonical_id: str) -> tuple[Bar, ...]:
         if canonical_id not in self._asset_ids:
@@ -223,6 +238,13 @@ class DatasetSnapshot:
                      if (link.get("dex_canonical_id") == canonical_id or
                          link.get("cex_canonical_id") == canonical_id)
                      and _time(link["linked_at"]) <= point)
+
+    def relationships_at(self, canonical_id: str, decision_time: datetime) -> tuple[dict[str, Any], ...]:
+        """Return market/constituent links observed no later than the decision."""
+        point = _time(decision_time)
+        return tuple(item for item in self.asset_relationships
+                     if (item["market_canonical_id"] == canonical_id or item["asset_canonical_id"] == canonical_id)
+                     and _time(item["observed_at"]) <= point)
 
     def events_at(self, canonical_id: str, decision_time: datetime) -> tuple[dict[str, Any], ...]:
         point = _time(decision_time)

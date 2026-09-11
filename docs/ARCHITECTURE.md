@@ -17,7 +17,8 @@ External providers
                                                ▼
                               storage/db.py (single persistence boundary)
                                 ├─ DuckDB: assets, ohlcv, events, metadata,
-                                │          runs, lineage, schema_version
+                                │          runs, lineage, asset_relationships,
+                                │          schema_version
                                 └─ Parquet: ohlcv/source=<source>/date=<UTC date>
                                                │
                          normalization/reconcile.py ── scheduler/status.py
@@ -31,7 +32,7 @@ External providers
 
 ## Canonical storage schema
 
-`storage/schema.py` owns the idempotent DuckDB schema and `SCHEMA_VERSION = 5`. `storage/db.py` is the shared access layer.
+`storage/schema.py` owns the idempotent DuckDB schema and `SCHEMA_VERSION = 6`. `storage/db.py` is the shared access layer.
 
 | Table | Key/important fields | Meaning |
 | --- | --- | --- |
@@ -41,8 +42,15 @@ External providers
 | `metadata` | `(canonical_id, last_updated)` primary key | Timestamped holder, verification, deployer, LP and risk observations |
 | `runs` | `run_id` primary key | Job start/end, status, row count, and error |
 | `lineage` | `(dex_canonical_id, cex_canonical_id, linked_at)` primary key | Timestamped address-evidence links without replacing either identity |
+| `asset_relationships` | market ID, constituent asset ID, role, venue, observation time, source | Point-in-time pool/market constituent identity without symbol inference |
 
-Canonical IDs are `exchange:symbol` for CEX, `chain:contract_address` for EVM/DEX, and `solana:mint_address` for Solana. OHLCV writes use conflict updates and rewrite complete affected Parquet partitions, so replaying a backfill does not create duplicate logical rows.
+Canonical IDs are `exchange:symbol` for CEX and address-scoped `chain:address`
+identities for DEX markets and tokens. A market and a token therefore remain
+distinct even when upstream payloads use a generic address field; the
+`asset_relationships` rows identify base/quote or ordered constituents and the
+time that relationship became visible. OHLCV writes use conflict updates and
+rewrite complete affected Parquet partitions, so replaying a backfill does not
+create duplicate logical rows.
 
 ## Provider separation and routing
 

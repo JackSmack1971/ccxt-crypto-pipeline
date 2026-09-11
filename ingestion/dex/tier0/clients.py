@@ -148,6 +148,7 @@ def normalize_pool(item: dict[str, Any], network: str, tokens: dict[str, dict[st
         "network": network,
         "pool_address": pool_address,
         "name": attributes.get("name"),
+        "dex_id": attributes.get("dex_id"),
         "created_at": _timestamp(attributes.get("pool_created_at") or attributes.get("created_at")),
         "base_token_address": _token_address(token_data["base_token"]),
         "quote_token_address": _token_address(token_data["quote_token"]),

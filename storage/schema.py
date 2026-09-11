@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import duckdb
 
-SCHEMA_VERSION = 5
+SCHEMA_VERSION = 6
 
 SCHEMA_SQL = """
 CREATE TABLE IF NOT EXISTS assets (
@@ -63,6 +63,17 @@ CREATE TABLE IF NOT EXISTS lineage (
     cex_canonical_id VARCHAR NOT NULL,
     linked_at TIMESTAMP NOT NULL,
     PRIMARY KEY (dex_canonical_id, cex_canonical_id, linked_at)
+);
+
+CREATE TABLE IF NOT EXISTS asset_relationships (
+    market_canonical_id VARCHAR NOT NULL,
+    asset_canonical_id VARCHAR NOT NULL,
+    relationship_type VARCHAR NOT NULL CHECK (relationship_type IN ('base', 'quote', 'constituent_0', 'constituent_1')),
+    venue VARCHAR NOT NULL,
+    observed_at TIMESTAMP NOT NULL,
+    source VARCHAR NOT NULL,
+    evidence_json VARCHAR NOT NULL,
+    PRIMARY KEY (market_canonical_id, asset_canonical_id, relationship_type, venue, observed_at, source)
 );
 
 CREATE TABLE IF NOT EXISTS schema_version (
@@ -127,7 +138,7 @@ def initialize(connection: duckdb.DuckDBPyConnection) -> None:
                 SELECT dex_canonical_id, cex_canonical_id, linked_at FROM lineage""")
             connection.execute("DROP TABLE lineage")
             connection.execute("ALTER TABLE lineage_v4 RENAME TO lineage")
-            connection.execute("UPDATE schema_version SET version = ?", [SCHEMA_VERSION])
+            connection.execute("UPDATE schema_version SET version = 4")
             connection.execute("COMMIT")
         except Exception:
             connection.execute("ROLLBACK")
@@ -154,6 +165,25 @@ def initialize(connection: duckdb.DuckDBPyConnection) -> None:
                 FROM ohlcv""")
             connection.execute("DROP TABLE ohlcv")
             connection.execute("ALTER TABLE ohlcv_v5 RENAME TO ohlcv")
+            connection.execute("UPDATE schema_version SET version = ?", [SCHEMA_VERSION])
+            connection.execute("COMMIT")
+        except Exception:
+            connection.execute("ROLLBACK")
+            raise
+        versions = (5,)
+    if versions[0] < 6:
+        connection.execute("BEGIN TRANSACTION")
+        try:
+            connection.execute("""CREATE TABLE IF NOT EXISTS asset_relationships (
+                market_canonical_id VARCHAR NOT NULL,
+                asset_canonical_id VARCHAR NOT NULL,
+                relationship_type VARCHAR NOT NULL CHECK (relationship_type IN ('base', 'quote', 'constituent_0', 'constituent_1')),
+                venue VARCHAR NOT NULL,
+                observed_at TIMESTAMP NOT NULL,
+                source VARCHAR NOT NULL,
+                evidence_json VARCHAR NOT NULL,
+                PRIMARY KEY (market_canonical_id, asset_canonical_id, relationship_type, venue, observed_at, source)
+            )""")
             connection.execute("UPDATE schema_version SET version = ?", [SCHEMA_VERSION])
             connection.execute("COMMIT")
         except Exception:
