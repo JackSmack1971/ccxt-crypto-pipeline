@@ -325,7 +325,7 @@ Evidence:
 
 ## Slice 4R.8 — Canonical approved-research handoff
 
-**Status:** ACTIVE
+**Status:** DONE
 
 Eliminate hand-assembled Phase 4 manifests as the normal integration path.
 
@@ -344,9 +344,21 @@ Acceptance:
 - approval does not mutate the original research run;
 - Phase 4 cannot consume an unapproved or unverifiable result.
 
+Evidence:
+
+- `reporting/package/handoff.py` provides the versioned `phase4-approved-v1`
+  builder and strict validator. It stages only hash-verified Phase 3 artifacts,
+  records approval identity/reviewer/time/scope and research-run identity, and
+  produces a deterministic immutable handoff without modifying the source run.
+- `reporting/package/generate.py` validates canonical handoffs before loading
+  staged inputs. Phase 4 tests use the builder for normal fixtures and cover
+  deterministic replay, changed-artifact rejection, unknown-field rejection,
+  explicit approval, and unchanged Phase 3 source bytes.
+- The locked full suite passed with 88 tests and no network access.
+
 ## Slice 4R.9 — Evidence-bound claims and chart semantics
 
-**Status:** PLANNED
+**Status:** ACTIVE
 
 Upgrade Phase 4 from evidence *reference* validation to evidence *derivation* validation where factual numbers are emitted.
 
@@ -601,4 +613,4 @@ For a fresh agent, the intended pickup sequence is:
 
 `AGENTS.md` → `ROADMAP.md` → active `docs/plans/phase-*.md` → relevant code/tests → Git history/status.
 
-The current frontier is **Phase 4R.7 — Phase 2 metric/time-index hardening**. Phase 4R.1 established the mandatory CI gate; do not begin Phase 5 until every mandatory Phase 4R closure criterion is satisfied.
+The current frontier is **Phase 4R.9 — Evidence-bound claims and chart semantics**. Phase 4R.1 established the mandatory CI gate; do not begin Phase 5 until every mandatory Phase 4R closure criterion is satisfied.
