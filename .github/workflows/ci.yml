@@ -1,0 +1,41 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  fixture-verification:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+          python-version: "3.12"
+
+      - name: Install locked project dependencies
+        run: |
+          uv sync --locked
+          uv pip install pytest==9.0.3
+
+      - name: Run storage migration guard
+        run: uv run --no-sync python -m pytest tests/test_storage.py::test_v1_store_migrates_in_place_and_preserves_rows
+
+      - name: Run fixture and unit tests
+        run: uv run --no-sync python -m pytest
+
+      - name: Compile Python sources
+        run: uv run --no-sync python -m compileall -q analysis ingestion normalization reporting scheduler storage tests
+
+      - name: Check whitespace
+        run: git diff --check

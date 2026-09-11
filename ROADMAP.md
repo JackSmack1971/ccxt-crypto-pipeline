@@ -67,7 +67,7 @@ Every slice must satisfy the gates that apply to it:
 - `git diff --check` or equivalent whitespace validation;
 - no unresolved regression in an earlier phase contract.
 
-CI evidence SHOULD become mandatory once Phase 4R.1 lands.
+Green CI evidence is mandatory for Phase 4R.2 and every later slice.
 
 ---
 
@@ -80,6 +80,7 @@ The repository has moved beyond its original phase prose. The current baseline i
 - **Phase 3 research:** cohort extraction, temporal feature registry, fixed-horizon labels, chronological discovery/validation/holdout partition objects, baseline/candidate evaluation helpers, multiple-testing helpers, deterministic research artifacts, and Phase-2-compatible handoff metadata.
 - **Phase 4 reporting:** hash-verified Phase 3 linkage, hash-verified staged inputs, claim/chart validation, deterministic SVG rendering, Markdown package generation, secret checks, immutable package artifacts, and a pending human-review gate.
 - **Cross-phase evidence:** the test suite includes an offline, content-addressed Phase 1 → Phase 3 → approved Phase 4 fixture chain.
+- **Continuous verification:** GitHub Actions runs the locked fixture/unit suite, storage migration guard, byte-compilation, and whitespace checks for pull requests and `main` without provider credentials.
 
 The latest hardening work fixed several earlier weaknesses: metadata/lineage history is retained by observation time, OHLCV is source-scoped, ambiguous source selection fails closed, Phase 3 run identity commits to artifact hashes, and Phase 4 verifies linked research/staged content hashes.
 
@@ -94,7 +95,6 @@ The following remain open and define the active frontier:
 - quote-to-USD semantics are not yet a durable historical conversion contract for non-USD quote assets;
 - Phase 2 portfolio metrics need timestamp-level aggregation/frequency-aware annualization before broader multi-asset research use;
 - Phase 4 claim validation proves provenance linkage but does not yet prove that a number stated in prose is a declared derivation of the referenced evidence value;
-- GitHub currently lacks a repository CI workflow/status gate proving every `main` change continuously.
 
 These gaps are why the project is considered **in Phase 4, but not yet Phase 4-complete**.
 
@@ -110,7 +110,7 @@ Do not add publishing, live/paper trading, strategy optimization, paid-data fall
 
 ## Slice 4R.1 — Continuous verification and merge evidence
 
-**Status:** PLANNED
+**Status:** DONE
 
 Establish repository-native CI before additional behavioral expansion.
 
@@ -131,9 +131,16 @@ Acceptance:
 
 Exit gate: later slices SHOULD NOT be marked DONE without green CI evidence after this lands.
 
+Evidence:
+
+- `.github/workflows/ci.yml` installs the project from `uv.lock`, pins the test runner, and runs on pull requests and pushes to `main` with read-only repository permissions.
+- `tests/test_ci.py` guards workflow triggers, locked installation, required repository checks, and the absence of live/provider credentials or commands.
+- The workflow runs the complete fixture/unit suite, the version-1 storage migration fixture, byte-compilation, and `git diff --check`; a temporary failing test confirmed that pytest failures propagate as a nonzero status.
+- Hosted CI remains the merge-time evidence for each pull request; fixture CI does not claim live-provider acceptance.
+
 ## Slice 4R.2 — Real purge/embargo split semantics
 
-**Status:** PLANNED
+**Status:** ACTIVE
 
 Make the Phase 3 chronological split enforce what the report says it enforces.
 
@@ -544,4 +551,4 @@ For a fresh agent, the intended pickup sequence is:
 
 `AGENTS.md` → `ROADMAP.md` → active `docs/plans/phase-*.md` → relevant code/tests → Git history/status.
 
-The current frontier is **Phase 4R.1 — Continuous verification and merge evidence**. Do not begin Phase 5 until every mandatory Phase 4R closure criterion is satisfied.
+The current frontier is **Phase 4R.2 — Real purge/embargo split semantics**. Phase 4R.1 established the mandatory CI gate; do not begin Phase 5 until every mandatory Phase 4R closure criterion is satisfied.
