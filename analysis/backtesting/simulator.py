@@ -118,6 +118,7 @@ def simulate(dataset: DatasetSnapshot, strategy: Strategy, config: BacktestConfi
                 if config.halted_bar_policy == "error":
                     raise ValueError(f"halted bar encountered for {bar.canonical_id} at {bar.timestamp.isoformat()}")
                 orders.append({"canonical_id": bar.canonical_id, "status": "skipped_halted", "timestamp": bar.timestamp.isoformat()})
+                history[bar.canonical_id] = previous + (bar,)
                 continue
             if any(price <= 0 for price in (bar.open, bar.high, bar.low, bar.close)):
                 raise ValueError(f"bar contains a non-positive price: {bar.canonical_id} at {bar.timestamp.isoformat()}")

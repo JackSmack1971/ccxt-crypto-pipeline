@@ -203,6 +203,18 @@ def test_stale_signal_policy_is_explicit_for_missing_gap(tmp_path):
     assert any(order["status"] == "skipped_stale_signal" for order in result.orders)
 
 
+def test_halted_bar_does_not_make_signal_stale(tmp_path):
+    db = _fixture(tmp_path / "halted")
+    conn = connect(db)
+    conn.execute("DELETE FROM ohlcv WHERE timestamp = '2025-01-02'")
+    conn.execute("INSERT INTO ohlcv VALUES ('kraken:AAA/USD', '2025-01-02', 0, 0, 0, 0, 0, '1d', 'kraken')")
+    conn.close()
+    dataset = DatasetSnapshot.from_duckdb(db)
+    result = simulate(dataset, BuyAndHoldStrategy(), BacktestConfig(stale_signal_policy="skip"))
+    assert result.trades[0]["timestamp"] == "2025-01-03T00:00:00"
+    assert not any(order["status"] == "skipped_stale_signal" for order in result.orders)
+
+
 def test_parquet_failure_rolls_back_ohlcv_write(tmp_path):
     db = _fixture(tmp_path)
     bad_path = tmp_path / "not-a-directory"
