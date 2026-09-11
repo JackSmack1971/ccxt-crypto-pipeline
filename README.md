@@ -174,7 +174,7 @@ Use the pinned project manifest and [`uv.lock`](uv.lock) for repeatable dependen
 
 | Area | Status |
 | --- | --- |
-| Contribution guidelines | Not formalized; open an issue before a large change |
+| Contribution guidelines | [`CONTRIBUTING.md`](CONTRIBUTING.md) |
 | Security policy | No `SECURITY.md` found |
 | Code of conduct | No `CODE_OF_CONDUCT.md` found |
 | License | No license file found |
@@ -182,7 +182,7 @@ Use the pinned project manifest and [`uv.lock`](uv.lock) for repeatable dependen
 
 ## Contributing
 
-Contribution guidelines are not yet formalized. Open an issue before making a large change and preserve the Phase 1 boundary and local-storage contract.
+Read [`CONTRIBUTING.md`](CONTRIBUTING.md) before opening an issue or pull request. It documents the repository’s phase boundaries, offline verification requirements, storage migration rules, provider integration constraints, and review expectations.
 
 ## Roadmap
 
