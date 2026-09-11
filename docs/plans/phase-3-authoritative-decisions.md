@@ -19,5 +19,19 @@ This companion decision record resolves the open decisions in
   testing uses Holm-Bonferroni at alpha=0.05. The chronological split is 60/20/20
   with a 7-day embargo and a sealed final holdout.
 
-The implementation is local-only and file-based; it does not change the Phase 1
-storage schema or add provider access to analysis.
+The implementation is local-only and file-based; it adds no provider access to
+analysis. Phase 1 schema version 5 now retains timestamped metadata, lineage,
+and source-scoped OHLCV history so point-in-time readers can select evidence at
+or before the decision time.
+
+## Verification record
+
+`tests/test_phase3.py::test_phase1_to_phase3_replay_uses_persisted_snapshot_and_is_deterministic`
+loads a real Phase 1 DuckDB fixture through `DatasetSnapshot.from_duckdb`, runs
+cohort extraction, point-in-time features, labels, baseline candidate scoring,
+and research artifact writing with network access denied, then repeats the run
+and compares persisted artifacts byte-for-byte. This proves the narrow
+Phase 1-to-Phase 3 fixture boundary; it does not establish complete live-data
+coverage or predictive alpha. The companion
+`test_research_run_identity_changes_when_evidence_content_changes` check proves
+that a changed evidence artifact receives a different content-addressed run ID.

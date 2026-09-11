@@ -58,9 +58,18 @@ def validate_claims(claims: Iterable[Claim | dict[str, Any]], manifest: dict[str
             raise ValueError(f"factual claim has no evidence: {claim.id}")
         if claim.factual and claim.numeric_or_comparative:
             for evidence in claim.evidence:
-                if evidence.artifact not in staged and evidence.artifact not in manifest.get("artifacts", {}):
+                if evidence.artifact not in staged:
                     raise ValueError(f"claim {claim.id} references unstaged artifact {evidence.artifact}")
-                if evidence.artifact in staged and evidence.row is not None:
+                expected_dataset = manifest.get("dataset_identity", manifest.get("inputs", {}).get("dataset_identity"))
+                expected_config = manifest.get("query_config_identity", manifest.get("config_identity"))
+                if evidence.dataset_identity != expected_dataset:
+                    raise ValueError(f"claim {claim.id} has mismatched dataset identity")
+                if expected_config is not None and evidence.query_config_identity != expected_config:
+                    raise ValueError(f"claim {claim.id} has mismatched query/config identity")
+                expected_range = manifest.get("time_range", manifest.get("inputs", {}).get("time_range", {}))
+                if evidence.time_range != expected_range:
+                    raise ValueError(f"claim {claim.id} has mismatched time range")
+                if evidence.row is not None:
                     rows = staged[evidence.artifact]
                     if isinstance(rows, list) and (not isinstance(evidence.row, int) or not 0 <= evidence.row < len(rows)):
                         raise ValueError(f"claim {claim.id} references missing row {evidence.row}")

@@ -95,12 +95,19 @@ class DatasetSnapshot:
                  lineage: tuple[dict[str, Any], ...], policy: DatasetPolicy,
                  dataset_identity: str):
         self.assets = tuple(sorted(assets, key=lambda item: item.canonical_id))
-        self.bars = tuple(sorted(bars, key=lambda item: (item.timestamp, item.canonical_id,
-                                                           item.timeframe, item.source)))
-        bar_keys = [(item.canonical_id, item.timestamp, item.timeframe) for item in self.bars]
+        self.bars = tuple(sorted((bar for bar in bars if policy.allows(bar)),
+                                 key=lambda item: (item.timestamp, item.canonical_id,
+                                                   item.timeframe, item.source)))
+        bar_keys = [(item.canonical_id, item.timestamp, item.timeframe, item.source) for item in self.bars]
         if len(set(bar_keys)) != len(bar_keys):
             raise ValueError("duplicate bar identity")
+        selected_keys = [(item.canonical_id, item.timestamp, item.timeframe) for item in self.bars]
+        if len(set(selected_keys)) != len(selected_keys):
+            raise ValueError("ambiguous bar source: select one source in DatasetPolicy.sources")
         self.metadata = tuple(sorted(metadata, key=lambda item: (item.canonical_id, item.last_updated)))
+        metadata_keys = [(item.canonical_id, item.last_updated) for item in self.metadata]
+        if len(set(metadata_keys)) != len(metadata_keys):
+            raise ValueError("duplicate metadata observation")
         self.events = tuple(sorted(events, key=lambda item: (_time(item["timestamp"]),
                                                                str(item.get("canonical_id", "")),
                                                                str(item.get("event_type", "")),
@@ -111,11 +118,12 @@ class DatasetSnapshot:
         self.policy = policy
         self.dataset_identity = dataset_identity
         self._asset_ids = {item.canonical_id for item in assets}
-        self._metadata = {item.canonical_id: item for item in metadata}
+        self._metadata: dict[str, tuple[Metadata, ...]] = {}
+        for item in self.metadata:
+            self._metadata.setdefault(item.canonical_id, tuple())
+            self._metadata[item.canonical_id] += (item,)
         self._bars_by_asset: dict[str, tuple[Bar, ...]] = {}
-        for bar in bars:
-            if not policy.allows(bar):
-                continue
+        for bar in self.bars:
             self._bars_by_asset.setdefault(bar.canonical_id, tuple())
             self._bars_by_asset[bar.canonical_id] += (bar,)
 
@@ -160,7 +168,7 @@ class DatasetSnapshot:
                           float(row[5]), float(row[6]), row[7], row[8])
                 if not all(math.isfinite(value) for value in (bar.open, bar.high, bar.low, bar.close, bar.volume)):
                     raise ValueError(f"bar contains a non-finite price or volume: {bar.canonical_id} at {bar.timestamp.isoformat()}")
-                key = (bar.canonical_id, bar.timestamp, bar.timeframe)
+                key = (bar.canonical_id, bar.timestamp, bar.timeframe, bar.source)
                 if key in seen:
                     raise ValueError(f"duplicate bar identity: {key}")
                 seen.add(key)
@@ -170,7 +178,7 @@ class DatasetSnapshot:
                     bars.append(bar)
             metadata = tuple(Metadata(*row[:6], _time(row[6])) for row in conn.execute(
                 "SELECT canonical_id, holder_count, lp_locked, contract_verified, deployer_address, "
-                "risk_flags_json, last_updated FROM metadata ORDER BY canonical_id"
+                "risk_flags_json, last_updated FROM metadata ORDER BY canonical_id, last_updated"
             ).fetchall())
             events = tuple(dict(zip(("canonical_id", "event_type", "timestamp", "payload_json", "source"), row))
                            for row in conn.execute("SELECT canonical_id, event_type, timestamp, payload_json, source "
@@ -179,7 +187,7 @@ class DatasetSnapshot:
                 event["timestamp"] = _time(event["timestamp"])
             lineage = tuple(dict(zip(("dex_canonical_id", "cex_canonical_id", "linked_at"), row))
                             for row in conn.execute("SELECT dex_canonical_id, cex_canonical_id, linked_at FROM lineage "
-                                                    "ORDER BY dex_canonical_id, cex_canonical_id").fetchall())
+                                                    "ORDER BY dex_canonical_id, cex_canonical_id, linked_at").fetchall())
             for link in lineage:
                 link["linked_at"] = _time(link["linked_at"])
             asset_ids = {asset.canonical_id for asset in assets}
@@ -204,10 +212,9 @@ class DatasetSnapshot:
         return self._bars_by_asset.get(canonical_id, ())
 
     def metadata_at(self, canonical_id: str, decision_time: datetime) -> Metadata | None:
-        value = self._metadata.get(canonical_id)
-        if value is None or value.last_updated > _time(decision_time):
-            return None
-        return value
+        observations = self._metadata.get(canonical_id, ())
+        available = [item for item in observations if item.last_updated <= _time(decision_time)]
+        return max(available, key=lambda item: item.last_updated) if available else None
 
     def lineage_at(self, canonical_id: str, decision_time: datetime) -> tuple[dict[str, Any], ...]:
         """Return only lineage known at the point in time being evaluated."""

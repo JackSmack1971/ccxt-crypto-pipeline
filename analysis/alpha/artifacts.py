@@ -32,16 +32,18 @@ def write_research_run(output_dir: str | Path, *, dataset_identity: str, cohort_
                        cohort=(), features=(), labels=(), candidates=(), hypotheses=(), split=None,
                        report: str | None = None) -> Path:
     """Write immutable Phase 3 evidence files; reruns with identical inputs are byte-identical."""
-    payload = {"dataset_identity": dataset_identity, "cohort_config": cohort_config, "split": split,
-               "hypothesis_count": len(hypotheses)}
-    run_id = hashlib.sha256(_dump(payload)).hexdigest()[:24]
-    target = Path(output_dir) / run_id; target.mkdir(parents=True, exist_ok=True)
     artifacts = {"cohort.json": cohort, "features.json": features, "labels.json": labels,
                  "candidates.json": candidates, "hypotheses.json": hypotheses,
                  "report.md": report if report is not None else research_report(cohort=cohort, labels=labels,
                     candidates=candidates, split=split, hypotheses=[_plain(x) for x in hypotheses], dataset_identity=dataset_identity)}
+    artifact_hashes = {name: hashlib.sha256(_dump(value)).hexdigest() for name, value in artifacts.items()}
+    payload = {"dataset_identity": dataset_identity, "cohort_config": cohort_config, "split": split,
+               "artifacts": artifact_hashes}
+    run_id = hashlib.sha256(_dump(payload)).hexdigest()[:24]
+    target = Path(output_dir) / run_id; target.mkdir(parents=True, exist_ok=True)
     manifest = {"manifest_version": "phase3-v1", "run_id": run_id, "immutable": True,
-                "inputs": payload, "artifacts": {name: hashlib.sha256(_dump(value)).hexdigest() for name, value in artifacts.items()}}
+                "inputs": {"dataset_identity": dataset_identity, "cohort_config": cohort_config, "split": split},
+                "artifacts": artifact_hashes}
     for name, value in {**artifacts, "manifest.json": manifest}.items():
         path = target / name; content = _dump(value)
         if path.exists() and path.read_bytes() != content: raise FileExistsError(f"immutable artifact differs: {path}")

@@ -138,4 +138,4 @@ cannot provide a cross-filesystem atomic commit.
 
 ## Data safety and phase boundaries
 
-Do not delete `storage/pipeline.duckdb` or `storage/parquet` while jobs are running. They are local persisted state and can be recreated, but deletion removes collected data. The Phase 2 backtesting slice reads these persisted inputs locally and must not call providers. Phase 3 alpha discovery and Phase 4 article/visualization generation are separate and are not implemented here. No phase authorizes live or paper trading, automated execution, or external publication.
+Do not delete `storage/pipeline.duckdb` or `storage/parquet` while jobs are running. They are local persisted state and can be recreated, but deletion removes collected data. The Phase 2 and Phase 3 analysis slices read these persisted inputs locally and must not call providers. Phase 4 consumes approved local research artifacts and emits pending review packages; it does not publish externally. No phase authorizes live or paper trading, automated execution, or external publication.

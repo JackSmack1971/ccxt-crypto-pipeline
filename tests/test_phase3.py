@@ -1,3 +1,4 @@
+import json
 from dataclasses import replace
 from datetime import datetime, timedelta
 
@@ -9,6 +10,7 @@ from analysis.alpha import (CohortConfig, FeatureDefinition, FeatureRegistry, HO
                             descriptive_baseline, phase2_strategy_spec, rank_candidates, score_candidate, write_research_run,
                             validate_temporal_alignment, baseline_comparison)
 from analysis.datasets import Asset, Bar, DatasetPolicy, DatasetSnapshot
+from storage.db import connect, insert_event, insert_ohlcv_batch, upsert_asset
 
 
 def snapshot():
@@ -99,6 +101,19 @@ def test_temporal_alignment_rejects_permuted_labels_and_artifacts_replay_identic
     assert (first / "manifest.json").read_bytes() == (second / "manifest.json").read_bytes()
 
 
+def test_research_run_identity_changes_when_evidence_content_changes(tmp_path):
+    data = snapshot()
+    cohort = extract_cohort(data, CohortConfig(datetime(2025, 1, 1), datetime(2025, 1, 2), chains=("ethereum",)))
+    first = write_research_run(tmp_path / "runs", dataset_identity=data.dataset_identity,
+                               cohort_config=CohortConfig(datetime(2025, 1, 1), datetime(2025, 1, 2)),
+                               cohort=cohort, report="original evidence")
+    changed = write_research_run(tmp_path / "runs", dataset_identity=data.dataset_identity,
+                                 cohort_config=CohortConfig(datetime(2025, 1, 1), datetime(2025, 1, 2)),
+                                 cohort=cohort, report="changed evidence")
+    assert changed != first
+    assert changed.name != first.name
+
+
 def test_future_source_timestamp_is_rejected_and_policy_filters_bars():
     data = snapshot()
     cohort = extract_cohort(data, CohortConfig(datetime(2025, 1, 1), datetime(2025, 1, 2), chains=("ethereum",)))
@@ -137,3 +152,52 @@ def test_unavailable_quote_conversion_is_explicit_censoring():
     assert comparison["baseline_family"] == "no_trade_unconditional"
     assert comparison["families"]["age_liquidity"]["status"] == "unavailable"
     assert comparison["families"]["momentum"]["status"] == "unavailable"
+
+
+def test_phase1_to_phase3_replay_uses_persisted_snapshot_and_is_deterministic(tmp_path, monkeypatch):
+    """Exercise the real Phase 1 storage boundary, not only in-memory snapshots."""
+    import socket
+
+    monkeypatch.setattr(socket, "socket", lambda *args, **kwargs: (_ for _ in ()).throw(
+        AssertionError("Phase 3 attempted network access")))
+    db_path = tmp_path / "phase1.duckdb"
+    connection = connect(db_path)
+    t0 = datetime(2025, 1, 1)
+    upsert_asset({"canonical_id": "ethereum:0xaaa", "source_type": "dex",
+                  "chain_or_exchange": "ethereum", "symbol_or_contract": "0xaaa",
+                  "contract_address": "0xaaa", "first_seen": t0}, connection=connection)
+    insert_ohlcv_batch([
+        {"canonical_id": "ethereum:0xaaa", "timestamp": t0 + timedelta(hours=i),
+         "open": 10 + i, "high": 10 + i, "low": 10 + i, "close": 10 + i,
+         "volume": 1, "timeframe": "1h", "source": "fixture"}
+        for i in range(3)
+    ], connection=connection)
+    insert_event({"canonical_id": "ethereum:0xaaa", "event_type": "new_pool_detected",
+                  "timestamp": t0, "payload_json": {"token_address": "0xaaa", "reserve_usd": 12_000},
+                  "source": "fixture"}, connection=connection)
+    connection.close()
+
+    policy = DatasetPolicy(timeframe="1h", start=t0, end=t0 + timedelta(hours=2))
+    dataset = DatasetSnapshot.from_duckdb(db_path, policy)
+    config = CohortConfig(t0, t0 + timedelta(days=1), chains=("ethereum",))
+    cohort = extract_cohort(dataset, config)
+    registry = FeatureRegistry()
+    registry.register(FeatureDefinition("liquidity", ("event.reserve_usd",), "t0", timedelta(0),
+                                        compute=lambda row, bars: row.liquidity_usd))
+    features = compute_features(dataset, cohort, registry)
+    labels = generate_labels(dataset, cohort, LabelDefinition("return_1h", "1h"))
+    validate_temporal_alignment(cohort, features, labels)
+    candidate = score_candidate("liquidity", labels, horizon="1h",
+                                baseline_mean=descriptive_baseline(labels, horizon="1h")["mean_return"])
+
+    first = write_research_run(tmp_path / "runs", dataset_identity=dataset.dataset_identity,
+                               cohort_config=config, cohort=cohort, features=features, labels=labels,
+                               candidates=(candidate,), split=build_split(cohort).as_dict())
+    second = write_research_run(tmp_path / "runs", dataset_identity=dataset.dataset_identity,
+                                cohort_config=config, cohort=cohort, features=features, labels=labels,
+                                candidates=(candidate,), split=build_split(cohort).as_dict())
+
+    assert first == second
+    assert (first / "manifest.json").read_bytes() == (second / "manifest.json").read_bytes()
+    assert (first / "cohort.json").read_bytes() == (second / "cohort.json").read_bytes()
+    assert json.loads((first / "cohort.json").read_text(encoding="utf-8"))[0]["provenance"]["dataset_identity"] == dataset.dataset_identity

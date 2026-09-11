@@ -44,7 +44,7 @@ def reconcile_assets(db_path: str, *, linked_at: datetime | None = None) -> list
             connection.execute(
                 """INSERT INTO lineage (dex_canonical_id, cex_canonical_id, linked_at)
                    VALUES (?, ?, ?)
-                   ON CONFLICT (dex_canonical_id, cex_canonical_id) DO UPDATE SET linked_at = excluded.linked_at""",
+                   ON CONFLICT (dex_canonical_id, cex_canonical_id, linked_at) DO NOTHING""",
                 [dex_id, cex_id, linked_at],
             )
             links.append({"dex_canonical_id": dex_id, "cex_canonical_id": cex_id,
@@ -76,11 +76,11 @@ def data_quality_report(db_path: str, *, now: datetime | None = None) -> dict[st
 
         duplicate_queries = {
             "assets": "canonical_id",
-            "ohlcv": "canonical_id, timestamp, timeframe",
+            "ohlcv": "canonical_id, timestamp, timeframe, source",
             "events": "canonical_id, event_type, timestamp, source",
-            "metadata": "canonical_id",
+            "metadata": "canonical_id, last_updated",
             "runs": "run_id",
-            "lineage": "dex_canonical_id, cex_canonical_id",
+            "lineage": "dex_canonical_id, cex_canonical_id, linked_at",
         }
         duplicates = {}
         for table, keys in duplicate_queries.items():

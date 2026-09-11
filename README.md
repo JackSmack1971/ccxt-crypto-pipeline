@@ -184,8 +184,10 @@ Read [`CONTRIBUTING.md`](CONTRIBUTING.md) before opening an issue or pull reques
 
 Phase 1 ingestion is frozen. Phase 2 currently supports one CEX venue at a time,
 next-bar-open execution, long-only buy-and-hold, explicit fee/slippage handling,
-and immutable local run artifacts. Phase 3 alpha discovery and Phase 4 reporting
-remain separate future phases.
+and immutable local run artifacts. Phase 3 provides baseline-first research
+artifacts, and Phase 4 provides an approved-input, pending-review reporting
+package. Broader provider-observation completeness and publication remain out
+of scope.
 
 ## License
 

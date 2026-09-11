@@ -11,6 +11,7 @@ from storage.db import (
     read_events,
     read_metadata,
     read_ohlcv,
+    read_lineage,
     read_runs,
     safe_error_message,
     upsert_asset,
@@ -47,7 +48,7 @@ def test_storage_round_trip_and_idempotent_init(tmp_path):
     run_id = log_run_start("fixture_job", db_path, started_at=timestamp, run_id="run-1")
     log_run_end(run_id, "success", db_path, finished_at=timestamp, rows_written=1)
 
-    assert SCHEMA_VERSION == 2
+    assert SCHEMA_VERSION == 5
     asset = read_assets(db_path)[0]
     assert (asset["canonical_id"], asset["source_type"], asset["chain_or_exchange"],
             asset["symbol_or_contract"]) == ("kraken:BTC/USDT", "cex", "kraken", "BTC/USDT")
@@ -78,14 +79,39 @@ def test_v1_store_migrates_in_place_and_preserves_rows(tmp_path):
         first_seen TIMESTAMP NOT NULL)""")
     connection.execute("INSERT INTO assets VALUES ('kraken:BTC/USDT', 'cex', 'kraken', 'BTC/USDT', ?)",
                        [datetime(2025, 1, 1)])
+    connection.execute("""CREATE TABLE metadata (
+        canonical_id VARCHAR PRIMARY KEY, holder_count BIGINT, lp_locked BOOLEAN,
+        contract_verified BOOLEAN, deployer_address VARCHAR, risk_flags_json VARCHAR,
+        last_updated TIMESTAMP NOT NULL)""")
+    connection.execute("INSERT INTO metadata VALUES ('kraken:BTC/USDT', 3, NULL, NULL, NULL, NULL, ?)",
+                       [datetime(2025, 1, 2)])
+    connection.execute("""CREATE TABLE lineage (
+        dex_canonical_id VARCHAR NOT NULL, cex_canonical_id VARCHAR NOT NULL,
+        linked_at TIMESTAMP NOT NULL,
+        PRIMARY KEY (dex_canonical_id, cex_canonical_id))""")
+    connection.execute("INSERT INTO lineage VALUES ('ethereum:0xabc', 'kraken:ABC/USD', ?)",
+                       [datetime(2025, 1, 3)])
+    connection.execute("""CREATE TABLE ohlcv (
+        canonical_id VARCHAR NOT NULL, timestamp TIMESTAMP NOT NULL,
+        open DOUBLE NOT NULL, high DOUBLE NOT NULL, low DOUBLE NOT NULL,
+        close DOUBLE NOT NULL, volume DOUBLE NOT NULL, timeframe VARCHAR NOT NULL,
+        source VARCHAR NOT NULL, PRIMARY KEY (canonical_id, timestamp, timeframe))""")
+    connection.execute("INSERT INTO ohlcv VALUES ('ethereum:0xabc', ?, 1, 1, 1, 1, 1, '1d', 'fixture')",
+                       [datetime(2025, 1, 3)])
     connection.close()
 
     init_db(db_path)
     connection = duckdb.connect(str(db_path))
-    assert connection.execute("SELECT version FROM schema_version").fetchone() == (2,)
+    assert connection.execute("SELECT version FROM schema_version").fetchone() == (5,)
     assert connection.execute("SELECT contract_address FROM assets").fetchone() == (None,)
-    assert connection.execute("SELECT COUNT(*) FROM lineage").fetchone() == (0,)
+    assert connection.execute("SELECT COUNT(*) FROM lineage").fetchone() == (1,)
     assert connection.execute("SELECT canonical_id FROM assets").fetchone() == ("kraken:BTC/USDT",)
+    assert connection.execute("SELECT canonical_id, holder_count FROM metadata").fetchone() == ("kraken:BTC/USDT", 3)
+    assert connection.execute("SELECT dex_canonical_id, cex_canonical_id FROM lineage").fetchone() == (
+        "ethereum:0xabc", "kraken:ABC/USD")
+    assert connection.execute("SELECT canonical_id, source FROM ohlcv").fetchone() == ("ethereum:0xabc", "fixture")
+    assert connection.execute("SELECT dex_canonical_id, cex_canonical_id FROM lineage").fetchone() == (
+        "ethereum:0xabc", "kraken:ABC/USD")
     migrated_signature = connection.execute(
         """SELECT table_name, column_name, data_type, ordinal_position
            FROM information_schema.columns
@@ -103,6 +129,66 @@ def test_v1_store_migrates_in_place_and_preserves_rows(tmp_path):
     ).fetchall()
     assert migrated_signature == fresh_signature
     fresh.close()
+    init_db(db_path)
+    repeat = duckdb.connect(str(db_path))
+    assert repeat.execute("SELECT version FROM schema_version").fetchone() == (5,)
+    assert repeat.execute("SELECT COUNT(*) FROM metadata").fetchone() == (1,)
+    assert repeat.execute("SELECT COUNT(*) FROM lineage").fetchone() == (1,)
+    assert repeat.execute("SELECT COUNT(*) FROM ohlcv").fetchone() == (1,)
+    repeat.close()
+
+
+def test_metadata_observations_preserve_point_in_time_history_and_are_idempotent(tmp_path):
+    db_path = tmp_path / "metadata-history.duckdb"
+    timestamp = datetime(2025, 1, 1)
+    upsert_asset({"canonical_id": "ethereum:0xabc", "source_type": "dex",
+                  "chain_or_exchange": "ethereum", "symbol_or_contract": "0xabc",
+                  "first_seen": timestamp}, db_path)
+    upsert_metadata({"canonical_id": "ethereum:0xabc", "holder_count": 10,
+                     "last_updated": timestamp}, db_path)
+    upsert_metadata({"canonical_id": "ethereum:0xabc", "holder_count": 20,
+                     "last_updated": timestamp.replace(day=2)}, db_path)
+    upsert_metadata({"canonical_id": "ethereum:0xabc", "holder_count": 11,
+                     "last_updated": timestamp}, db_path)
+
+    assert [(row["holder_count"], row["last_updated"]) for row in read_metadata(db_path)] == [
+        (11, timestamp), (20, timestamp.replace(day=2))
+    ]
+
+
+def test_asset_identity_preserves_earliest_observation_boundary(tmp_path):
+    db_path = tmp_path / "asset-history.duckdb"
+    first = datetime(2025, 1, 1)
+    later = datetime(2025, 1, 3)
+    upsert_asset({"canonical_id": "ethereum:0xabc", "source_type": "dex",
+                  "chain_or_exchange": "ethereum", "symbol_or_contract": "0xabc",
+                  "first_seen": first}, db_path)
+    upsert_asset({"canonical_id": "ethereum:0xabc", "source_type": "dex",
+                  "chain_or_exchange": "ethereum", "symbol_or_contract": "0xabc",
+                  "first_seen": later}, db_path)
+    assert read_assets(db_path)[0]["first_seen"] == first
+
+
+def test_lineage_observations_preserve_point_in_time_history_and_are_idempotent(tmp_path):
+    db_path = tmp_path / "lineage-history.duckdb"
+    first = datetime(2025, 1, 1)
+    second = datetime(2025, 1, 2)
+    from normalization.reconcile import reconcile_assets
+    upsert_asset({"canonical_id": "ethereum:0xabc", "source_type": "dex",
+                  "chain_or_exchange": "ethereum", "symbol_or_contract": "0xabc",
+                  "first_seen": first}, db_path)
+    upsert_asset({"canonical_id": "kraken:ABC/USD", "source_type": "cex",
+                  "chain_or_exchange": "kraken", "symbol_or_contract": "ABC/USD",
+                  "contract_address": "0xabc", "first_seen": first}, db_path)
+
+    assert len(reconcile_assets(str(db_path), linked_at=first)) == 1
+    assert len(reconcile_assets(str(db_path), linked_at=first)) == 1
+    assert len(reconcile_assets(str(db_path), linked_at=second)) == 1
+    assert [(row["linked_at"], row["dex_canonical_id"], row["cex_canonical_id"])
+            for row in read_lineage(db_path)] == [
+                (first, "ethereum:0xabc", "kraken:ABC/USD"),
+                (second, "ethereum:0xabc", "kraken:ABC/USD"),
+            ]
 
 
 def test_same_time_events_from_distinct_sources_are_preserved(tmp_path):
