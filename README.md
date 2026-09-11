@@ -182,12 +182,9 @@ Read [`CONTRIBUTING.md`](CONTRIBUTING.md) before opening an issue or pull reques
 
 ## Roadmap
 
-Phase 1 ingestion is frozen. Phase 2 currently supports one CEX venue at a time,
-next-bar-open execution, long-only buy-and-hold, explicit fee/slippage handling,
-and immutable local run artifacts. Phase 3 provides baseline-first research
-artifacts, and Phase 4 provides an approved-input, pending-review reporting
-package. Broader provider-observation completeness and publication remain out
-of scope.
+The canonical forward execution roadmap is [`ROADMAP.md`](ROADMAP.md). It records the current phase frontier, dependency-ordered implementation slices, per-slice acceptance gates, phase exit criteria, deferred boundaries, and the maintenance contract agents must follow as work lands.
+
+The current frontier is Phase 4 completion and integrity reconciliation. Phase 1–4 kernels are implemented, but the roadmap intentionally keeps Phase 4 open until the remaining statistical-governance, real-data observation, quote-currency, identity, metrics, claim-derivation, and continuous-verification gaps are closed with executable evidence.
 
 ## License
 
