@@ -9,7 +9,8 @@ from analysis.alpha import (CohortConfig, FeatureDefinition, FeatureRegistry, HO
                             build_split, compute_features, extract_cohort, generate_labels, normalize_usd_price,
                             descriptive_baseline, phase2_strategy_spec, rank_candidates, score_candidate, write_research_run,
                             validate_temporal_alignment, baseline_comparison, HypothesisRegistry,
-                            PromotionEvidence, evaluate_candidate_promotion)
+                            PromotionEvidence, evaluate_candidate_promotion,
+                            ConversionObservation, ConversionPolicy)
 from analysis.datasets import Asset, Bar, DatasetPolicy, DatasetSnapshot
 from storage.db import connect, insert_event, insert_ohlcv_batch, upsert_asset
 
@@ -234,6 +235,51 @@ def test_unavailable_quote_conversion_is_explicit_censoring():
     assert comparison["baseline_family"] == "no_trade_unconditional"
     assert comparison["families"]["age_liquidity"]["status"] == "unavailable"
     assert comparison["families"]["momentum"]["status"] == "unavailable"
+
+
+def test_non_usd_labels_use_temporally_valid_conversion_provenance():
+    data = snapshot()
+    cohort = extract_cohort(data, CohortConfig(datetime(2025, 1, 1), datetime(2025, 1, 2), chains=("ethereum",)))
+    observations = (
+        ConversionObservation("ETH", datetime(2025, 1, 1), 2_000, "local-reference"),
+        ConversionObservation("ETH", datetime(2025, 1, 1, 1), 2_200, "local-reference"),
+        # This later observation must never be selected for either endpoint.
+        ConversionObservation("ETH", datetime(2025, 1, 1, 2), 9_999, "future-reference"),
+    )
+    label = generate_labels(
+        data, cohort, LabelDefinition("return", "1h"),
+        quote_assets={"ethereum:0xaaa": "ETH"}, conversion_observations=observations,
+    )[0]
+
+    assert label.value == pytest.approx(__import__("math").log((11 * 2_200) / (10 * 2_000)))
+    assert label.provenance["raw_quote"] == "ETH"
+    assert label.provenance["conversion_policy"] == "phase3-quote-usd-v1"
+    assert label.provenance["start_conversion"] == {
+        "quote_asset": "ETH", "conversion_rate": 2_000,
+        "conversion_source": "local-reference", "conversion_time": "2025-01-01T00:00:00",
+        "conversion_policy": "phase3-quote-usd-v1",
+    }
+    assert label.provenance["end_conversion"]["conversion_time"] == "2025-01-01T01:00:00"
+
+
+def test_non_usd_quote_without_conversion_fails_closed_and_stablecoin_parity_is_explicit():
+    data = snapshot()
+    cohort = extract_cohort(data, CohortConfig(datetime(2025, 1, 1), datetime(2025, 1, 2), chains=("ethereum",)))
+    unavailable = generate_labels(
+        data, cohort, LabelDefinition("return", "1h"),
+        quote_assets={"ethereum:0xaaa": "ETH"},
+    )[0]
+    assert unavailable.status == "DATA_CENSORED" and unavailable.value is None
+    assert unavailable.provenance["conversion_unavailable"] == "no temporally valid ETH/USD conversion"
+
+    stable = generate_labels(
+        data, cohort, LabelDefinition("return", "1h"),
+        quote_assets={"ethereum:0xaaa": "USDC"},
+        conversion_policy=ConversionPolicy(approved_stablecoins=("USDC",)),
+    )[0]
+    assert stable.status == "COMPLETE"
+    assert stable.provenance["start_conversion"]["conversion_source"] == "approved_stablecoin_parity"
+    assert stable.provenance["start_conversion"]["conversion_rate"] == 1.0
 
 
 def test_phase1_to_phase3_replay_uses_persisted_snapshot_and_is_deterministic(tmp_path, monkeypatch):
