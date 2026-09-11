@@ -8,7 +8,7 @@ from analysis.datasets import Asset, Bar, DatasetPolicy, DatasetSnapshot
 from analysis.metrics import compute_metrics
 from analysis.runs import write_failed_run, write_run
 from analysis.strategies import BuyAndHoldStrategy
-from storage.db import connect, insert_event, insert_ohlcv_batch, upsert_asset, upsert_metadata
+from storage.db import connect, insert_event, insert_ohlcv_batch, read_ohlcv, upsert_asset, upsert_metadata
 
 
 def _fixture(tmp_path, *, future_metadata=False):
@@ -97,12 +97,16 @@ def test_unsupported_execution_is_actionable(tmp_path):
         simulate(dataset, BuyAndHoldStrategy(), BacktestConfig(execution="close"))
 
 
-def test_duplicate_bars_are_rejected(tmp_path):
+def test_multi_source_bars_are_preserved_and_unambiguous_selection_is_required(tmp_path):
     db = _fixture(tmp_path)
     conn = connect(db)
-    with pytest.raises(Exception, match="Duplicate key"):
-        conn.execute("INSERT INTO ohlcv VALUES ('kraken:AAA/USD', '2025-01-1 00:00:00', 10, 11, 9, 10, 1, '1d', 'other')")
+    conn.execute("INSERT INTO ohlcv VALUES ('kraken:AAA/USD', '2025-01-1 00:00:00', 10, 11, 9, 10, 1, '1d', 'other')")
     conn.close()
+    assert len(read_ohlcv(db)) == 4
+    with pytest.raises(ValueError, match="ambiguous bar source"):
+        DatasetSnapshot.from_duckdb(db)
+    selected = DatasetSnapshot.from_duckdb(db, DatasetPolicy(sources=("kraken",)))
+    assert {bar.source for bar in selected.all_bars()} == {"kraken"}
 
 
 def test_missing_halted_and_insufficient_bars_are_explicit(tmp_path):

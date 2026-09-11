@@ -71,7 +71,7 @@ def upsert_asset(asset: Mapping[str, Any], db_path: str | Path | None = None, *,
                 source_type = excluded.source_type,
                 chain_or_exchange = excluded.chain_or_exchange,
                 symbol_or_contract = excluded.symbol_or_contract,
-                first_seen = excluded.first_seen,
+                first_seen = LEAST(assets.first_seen, excluded.first_seen),
                 contract_address = COALESCE(excluded.contract_address, assets.contract_address)""",
             [asset["canonical_id"], asset["source_type"], asset["chain_or_exchange"],
              asset["symbol_or_contract"], asset["first_seen"], asset.get("contract_address")],
@@ -93,7 +93,7 @@ def insert_ohlcv_batch(rows: Iterable[Mapping[str, Any]], db_path: str | Path | 
         conn.execute("BEGIN TRANSACTION")
         conn.executemany(
             """INSERT INTO ohlcv VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-            ON CONFLICT (canonical_id, timestamp, timeframe) DO UPDATE SET
+            ON CONFLICT (canonical_id, timestamp, timeframe, source) DO UPDATE SET
                 open = excluded.open, high = excluded.high, low = excluded.low,
                 close = excluded.close, volume = excluded.volume, source = excluded.source""",
             values,
@@ -174,7 +174,7 @@ def upsert_metadata(metadata: Mapping[str, Any], db_path: str | Path | None = No
             risk_flags = json.dumps(risk_flags, sort_keys=True)
         conn.execute(
             """INSERT INTO metadata VALUES (?, ?, ?, ?, ?, ?, ?)
-            ON CONFLICT (canonical_id) DO UPDATE SET holder_count = excluded.holder_count,
+            ON CONFLICT (canonical_id, last_updated) DO UPDATE SET holder_count = excluded.holder_count,
             lp_locked = excluded.lp_locked, contract_verified = excluded.contract_verified,
             deployer_address = excluded.deployer_address, risk_flags_json = excluded.risk_flags_json,
             last_updated = excluded.last_updated""",
@@ -221,6 +221,19 @@ def _read(table: str, db_path: str | Path | None = None, *, connection=None) -> 
 def read_assets(db_path=None, *, connection=None): return _read("assets", db_path, connection=connection)
 def read_ohlcv(db_path=None, *, connection=None): return _read("ohlcv", db_path, connection=connection)
 def read_events(db_path=None, *, connection=None): return _read("events", db_path, connection=connection)
-def read_metadata(db_path=None, *, connection=None): return _read("metadata", db_path, connection=connection)
+def read_metadata(db_path=None, *, connection=None):
+    conn, owned = _connection(db_path, connection)
+    try:
+        cursor = conn.execute("SELECT * FROM metadata ORDER BY canonical_id, last_updated")
+        return [dict(zip([column[0] for column in cursor.description], row)) for row in cursor.fetchall()]
+    finally:
+        _finish(conn, owned)
 def read_runs(db_path=None, *, connection=None): return _read("runs", db_path, connection=connection)
-def read_lineage(db_path=None, *, connection=None): return _read("lineage", db_path, connection=connection)
+def read_lineage(db_path=None, *, connection=None):
+    conn, owned = _connection(db_path, connection)
+    try:
+        cursor = conn.execute("""SELECT * FROM lineage
+                               ORDER BY dex_canonical_id, cex_canonical_id, linked_at""")
+        return [dict(zip([column[0] for column in cursor.description], row)) for row in cursor.fetchall()]
+    finally:
+        _finish(conn, owned)

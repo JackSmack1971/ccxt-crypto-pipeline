@@ -15,7 +15,8 @@ strategy end to end without becoming a live trading system.
 
 - Phase 1 persists `assets`, `ohlcv`, `events`, `metadata`, `runs`, and `lineage`.
 - Analysis code reads local persisted data and never calls market or on-chain APIs.
-- Canonical IDs and OHLCV idempotency remain unchanged.
+- Canonical IDs remain unchanged; OHLCV idempotency is source-scoped so distinct
+  provider observations are preserved.
 - Results need dataset/version/config provenance; a result without those fields is
   not reproducible.
 - New persistent tables or fields require the storage migration procedure and a
@@ -142,7 +143,8 @@ fixture twice and an inspection of the generated manifest and ledger.
 ## Resolved first-slice decisions
 
 - Results are immutable, versioned JSON artifacts under `analysis/runs/`; the
-  Phase 1 DuckDB schema is unchanged and no new persistent table is introduced.
+  Phase 1 DuckDB schema is extended only through the reviewed versioned storage
+  migrations; no analysis-owned persistent table is introduced.
 - The first execution universe is one CEX venue at a time, with canonical asset
   identity required. DEX observations remain readable as local dataset inputs but
   are not executable by the first simulator.

@@ -1,6 +1,6 @@
 # Phase 4 design pass: article and visualization generation
 
-**Status:** Proposed design; implementation intentionally deferred
+**Status:** Local kernel and approved-research handoff implemented; publication and richer formats remain deferred
 **Date:** 2026-09-09
 **Depends on:** Phase 2 reproducible results and Phase 3 provenance-rich research
 artifacts
@@ -135,13 +135,13 @@ that extension. Verification uses the existing `python -m pytest` command, an
 offline fixture-package run, repeated-output checksum comparison, accessibility
 checks for rendered charts, and a secret/artifact scan.
 
-## Open decisions before implementation
+## Deferred decisions after the first local delivery
 
-- Required output format: Markdown only, or Markdown plus HTML/PDF.
-- Static renderer and accessibility validation tool supported by the project.
-- Whether generated artifacts are committed, stored outside Git, or referenced by
-  immutable local manifests.
-- Human approval representation and retention policy.
+- HTML/PDF and interactive output are not part of the first local delivery.
+- The standard-library SVG renderer and repository-owned accessibility checks are
+  the supported first-delivery path.
+- Generated packages remain caller-supplied, file-based, and pending human
+  review; external publication is not authorized.
 
 ## Phase boundary
 

@@ -23,6 +23,21 @@ def _read(path: Path) -> Any:
     return json.loads(path.read_text(encoding="utf-8"))
 
 
+def _safe_input_path(root: Path, relative_value: str, label: str) -> Path:
+    relative = Path(relative_value)
+    if relative.is_absolute() or ".." in relative.parts:
+        raise ValueError(f"{label} escapes input package")
+    path = (root / relative).resolve()
+    if root.resolve() not in path.parents:
+        raise ValueError(f"{label} escapes input package")
+    return path
+
+
+def _verified_digest(path: Path, expected: str, label: str) -> None:
+    if hashlib.sha256(path.read_bytes()).hexdigest() != expected:
+        raise ValueError(f"{label} content hash mismatch")
+
+
 def _security_scan(values: Any) -> None:
     text = json.dumps(values, default=str, sort_keys=True)
     patterns = (r"(?i)sk-[A-Za-z0-9_-]{10,}", r"(?i)(api[_-]?key|secret|password|token|private[_-]?key)\s*[:=]\s*[^\s,;]+",
@@ -35,14 +50,40 @@ def _security_scan(values: Any) -> None:
 def _load_staged(root: Path, manifest: dict[str, Any]) -> dict[str, Any]:
     staged = {}
     for name in sorted(manifest.get("staged_tables", {})):
-        relative = Path(manifest["staged_tables"][name])
-        if relative.is_absolute() or ".." in relative.parts:
-            raise ValueError(f"staged table escapes input package: {name}")
-        path = (root / relative).resolve()
-        if root.resolve() not in path.parents:
-            raise ValueError(f"staged table escapes input package: {name}")
+        entry = manifest["staged_tables"][name]
+        if not isinstance(entry, dict) or not entry.get("path") or not entry.get("sha256"):
+            raise ValueError(f"staged table lacks a content hash: {name}")
+        path = _safe_input_path(root, entry["path"], f"staged table {name}")
+        _verified_digest(path, entry["sha256"], f"staged table {name}")
         staged[name] = _read(path)
     return staged
+
+
+def _validate_research_link(root: Path, manifest: dict[str, Any]) -> dict[str, Any]:
+    link = manifest.get("research_run")
+    if not isinstance(link, dict) or not link.get("path") or not link.get("sha256"):
+        raise ValueError("approved manifest lacks a hash-verified research manifest")
+    path = _safe_input_path(root, link["path"], "research manifest")
+    _verified_digest(path, link["sha256"], "research manifest")
+    research = _read(path)
+    if research.get("manifest_version") != "phase3-v1" or research.get("immutable") is not True:
+        raise ValueError("research manifest is not an immutable Phase 3 artifact")
+    if not research.get("run_id") or not isinstance(research.get("artifacts"), dict):
+        raise ValueError("research manifest lacks run identity or artifact hashes")
+    expected_dataset = manifest.get("dataset_identity")
+    if research.get("inputs", {}).get("dataset_identity") != expected_dataset:
+        raise ValueError("approved manifest dataset does not match research manifest")
+    linked = manifest.get("research_artifacts")
+    if not isinstance(linked, dict) or not linked:
+        raise ValueError("approved manifest lacks linked research artifacts")
+    for name, entry in linked.items():
+        if name not in research["artifacts"] or not isinstance(entry, dict):
+            raise ValueError(f"research artifact is not declared by Phase 3: {name}")
+        artifact_path = _safe_input_path(root, entry.get("path", ""), f"research artifact {name}")
+        _verified_digest(artifact_path, entry.get("sha256", ""), f"research artifact {name}")
+        if entry["sha256"] != research["artifacts"][name]:
+            raise ValueError(f"research artifact does not match Phase 3 manifest: {name}")
+    return {"run_id": research["run_id"], "manifest_sha256": link["sha256"]}
 
 
 def generate_package(input_dir: str | Path, output_dir: str | Path) -> Path:
@@ -51,6 +92,10 @@ def generate_package(input_dir: str | Path, output_dir: str | Path) -> Path:
     manifest = _read(root / "manifest.json")
     if not manifest.get("immutable") or manifest.get("approved") is not True:
         raise ValueError("Phase 4 requires an immutable approved manifest")
+    approval = manifest.get("approval")
+    if not isinstance(approval, dict) or approval.get("status") != "approved" or not approval.get("reviewer"):
+        raise ValueError("Phase 4 requires explicit approval metadata")
+    research_link = _validate_research_link(root, manifest)
     staged = _load_staged(root, manifest)
     _security_scan(manifest)
     claims = validate_claims(manifest.get("claims", ()), manifest, staged)
@@ -61,6 +106,7 @@ def generate_package(input_dir: str | Path, output_dir: str | Path) -> Path:
         validate_accessibility(svg, chart)
         chart["_svg"] = svg
     inputs = {"manifest_identity": manifest.get("manifest_identity", manifest.get("run_id", "approved")),
+              "research_run_id": research_link["run_id"], "research_manifest_sha256": research_link["manifest_sha256"],
               "dataset_identity": manifest.get("dataset_identity", manifest.get("inputs", {}).get("dataset_identity", "unknown")),
               "code_version": manifest.get("code_version", "unknown"), "config_identity": manifest.get("config_identity", "unknown"),
               "time_range": manifest.get("time_range", manifest.get("inputs", {}).get("time_range", {})),

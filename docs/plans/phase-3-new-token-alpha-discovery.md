@@ -133,14 +133,17 @@ schema-review gate. Verification uses the existing `python -m pytest` command pl
 offline fixture runs that compare manifests, execute leakage fixtures, and inspect
 the complete exclusion and provenance output.
 
-## Open decisions before implementation
+## Deferred research questions
 
-- The canonical definition of “new token” when provider observation begins after
-  actual launch.
-- Minimum liquidity/coverage gates and how unavailable bars are censored.
-- First-release label horizons and quote-currency policy.
-- Whether model training is in scope after the baseline methodology, and what
-  statistical correction is required for multiple candidate searches.
+- “First observed” remains an observation boundary rather than proof of on-chain
+  genesis; better genesis evidence would require a separately approved Phase 1
+  ingestion enhancement.
+- Complex model training remains deferred until the baseline evidence contract
+  has broader real-data coverage.
+
+The first-release gates, label horizons, quote-currency policy, censoring rules,
+and multiple-testing corrections are resolved in
+`phase-3-authoritative-decisions.md`.
 
 ## Phase boundary
 
