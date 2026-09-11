@@ -57,14 +57,27 @@ class EVMRPCClient:
         return logs
 
 
-def decode_created_asset(log: dict[str, Any]) -> str | None:
+def _topic_address(value: Any) -> str | None:
+    encoded = str(value).removeprefix("0x")
+    return "0x" + encoded[-40:] if len(encoded) == 64 else None
+
+
+def decode_created_market(log: dict[str, Any]) -> dict[str, Any] | None:
+    """Decode a supported factory log into its market and two constituents."""
     topics = log.get("topics") or []
     data = str(log.get("data", ""))[2:]
-    if len(topics) >= 3 and str(topics[0]).lower() == PAIR_CREATED_TOPIC:
-        return "0x" + data[24:64] if len(data) >= 64 else None
-    if len(topics) >= 3 and str(topics[0]).lower() == POOL_CREATED_TOPIC:
-        return "0x" + data[-40:] if len(data) >= 40 else None
+    if len(topics) >= 3 and str(topics[0]).lower() in {PAIR_CREATED_TOPIC, POOL_CREATED_TOPIC}:
+        market = "0x" + (data[24:64] if str(topics[0]).lower() == PAIR_CREATED_TOPIC else data[-40:])
+        if len(market) != 42:
+            return None
+        return {"market_address": market, "constituents": (_topic_address(topics[1]), _topic_address(topics[2]))}
     return None
+
+
+def decode_created_asset(log: dict[str, Any]) -> str | None:
+    """Backward-compatible market-address decoder."""
+    decoded = decode_created_market(log)
+    return decoded["market_address"] if decoded else None
 
 
 def rpc_url_from_env(env_name: str) -> str:

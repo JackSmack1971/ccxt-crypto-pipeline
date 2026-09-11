@@ -8,6 +8,7 @@ from storage.db import (
     log_run_end,
     log_run_start,
     read_assets,
+    read_asset_relationships,
     read_events,
     read_metadata,
     read_ohlcv,
@@ -15,6 +16,7 @@ from storage.db import (
     read_runs,
     safe_error_message,
     upsert_asset,
+    upsert_asset_relationship,
     upsert_metadata,
 )
 import duckdb
@@ -48,7 +50,7 @@ def test_storage_round_trip_and_idempotent_init(tmp_path):
     run_id = log_run_start("fixture_job", db_path, started_at=timestamp, run_id="run-1")
     log_run_end(run_id, "success", db_path, finished_at=timestamp, rows_written=1)
 
-    assert SCHEMA_VERSION == 5
+    assert SCHEMA_VERSION == 6
     asset = read_assets(db_path)[0]
     assert (asset["canonical_id"], asset["source_type"], asset["chain_or_exchange"],
             asset["symbol_or_contract"]) == ("kraken:BTC/USDT", "cex", "kraken", "BTC/USDT")
@@ -102,7 +104,7 @@ def test_v1_store_migrates_in_place_and_preserves_rows(tmp_path):
 
     init_db(db_path)
     connection = duckdb.connect(str(db_path))
-    assert connection.execute("SELECT version FROM schema_version").fetchone() == (5,)
+    assert connection.execute("SELECT version FROM schema_version").fetchone() == (6,)
     assert connection.execute("SELECT contract_address FROM assets").fetchone() == (None,)
     assert connection.execute("SELECT COUNT(*) FROM lineage").fetchone() == (1,)
     assert connection.execute("SELECT canonical_id FROM assets").fetchone() == ("kraken:BTC/USDT",)
@@ -131,11 +133,52 @@ def test_v1_store_migrates_in_place_and_preserves_rows(tmp_path):
     fresh.close()
     init_db(db_path)
     repeat = duckdb.connect(str(db_path))
-    assert repeat.execute("SELECT version FROM schema_version").fetchone() == (5,)
+    assert repeat.execute("SELECT version FROM schema_version").fetchone() == (6,)
     assert repeat.execute("SELECT COUNT(*) FROM metadata").fetchone() == (1,)
     assert repeat.execute("SELECT COUNT(*) FROM lineage").fetchone() == (1,)
     assert repeat.execute("SELECT COUNT(*) FROM ohlcv").fetchone() == (1,)
     repeat.close()
+
+
+def test_v5_store_adds_identity_relationship_contract_without_losing_rows(tmp_path):
+    db_path = tmp_path / "v5.duckdb"
+    connection = duckdb.connect(str(db_path))
+    connection.execute("CREATE TABLE schema_version (version INTEGER NOT NULL)")
+    connection.execute("INSERT INTO schema_version VALUES (5)")
+    # The v5 fixture uses the complete old schema to exercise the supported upgrade.
+    from storage.schema import SCHEMA_SQL
+    for statement in SCHEMA_SQL.split(";"):
+        if statement.strip() and "asset_relationships" not in statement:
+            connection.execute(statement)
+    connection.execute("INSERT INTO assets VALUES ('ethereum:0xpool', 'dex', 'ethereum', '0xpool', ?, NULL)",
+                       [datetime(2025, 1, 1)])
+    connection.close()
+
+    init_db(db_path)
+    connection = duckdb.connect(str(db_path))
+    assert connection.execute("SELECT version FROM schema_version").fetchone() == (6,)
+    assert connection.execute("SELECT canonical_id FROM assets").fetchone() == ("ethereum:0xpool",)
+    assert connection.execute("SELECT COUNT(*) FROM asset_relationships").fetchone() == (0,)
+    connection.close()
+
+
+def test_asset_relationships_round_trip_point_in_time_evidence(tmp_path):
+    db_path = tmp_path / "relationships.duckdb"
+    observed = datetime(2025, 1, 1)
+    for address in ("0xpool", "0xbase", "0xquote"):
+        upsert_asset({"canonical_id": f"ethereum:{address}", "source_type": "dex",
+                      "chain_or_exchange": "ethereum", "symbol_or_contract": address,
+                      "first_seen": observed}, db_path)
+    for role, address in (("base", "0xbase"), ("quote", "0xquote")):
+        upsert_asset_relationship({"market_canonical_id": "ethereum:0xpool",
+                                   "asset_canonical_id": f"ethereum:{address}",
+                                   "relationship_type": role, "venue": "fixture-dex",
+                                   "observed_at": observed, "source": "fixture",
+                                   "evidence_json": {"role": role}}, db_path)
+    rows = read_asset_relationships(db_path)
+    assert [(row["relationship_type"], row["asset_canonical_id"]) for row in rows] == [
+        ("base", "ethereum:0xbase"), ("quote", "ethereum:0xquote")]
+    assert rows[0]["evidence_json"] == '{"role": "base"}'
 
 
 def test_metadata_observations_preserve_point_in_time_history_and_are_idempotent(tmp_path):

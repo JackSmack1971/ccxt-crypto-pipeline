@@ -2,8 +2,8 @@ import json
 from datetime import datetime, timezone
 
 from ingestion.solana.helius import HeliusClient
-from ingestion.solana.listener import extract_mints, is_solana_address, run_once
-from storage.db import read_assets, read_events, read_metadata, read_runs
+from ingestion.solana.listener import extract_mints, extract_pool_addresses, is_solana_address, run_once
+from storage.db import read_asset_relationships, read_assets, read_events, read_metadata, read_runs
 
 
 class Response:
@@ -62,6 +62,30 @@ def test_run_once_persists_comparable_solana_event_and_metadata(tmp_path):
     assert metadata["holder_count"] == 1
     assert json.loads(metadata["risk_flags_json"])["token_metadata"]["symbol"] == "FIX"
     assert read_runs(db)[0]["status"] == "success"
+
+
+def test_create_pool_persists_market_and_address_scoped_constituents(tmp_path):
+    pool = "11111111111111111111111111111111"
+    mint_a = "So11111111111111111111111111111111111111112"
+    mint_b = "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
+    transaction = {"type": "CREATE_POOL", "timestamp": 1735787040, "feePayer": "deployer",
+                   "events": {"poolAddress": pool, "token1Mint": mint_a, "token2Mint": mint_b}}
+
+    class Client:
+        def recent_transactions(self, address, *, limit): return [transaction]
+        def get(self, address): return None
+        def get_asset(self, address): return {}
+        def largest_accounts(self, address): return []
+
+    assert extract_pool_addresses(transaction) == [pool]
+    db = str(tmp_path / "solana-pool.duckdb")
+    cfg = {"programs": {"orca": "program"},
+           "discovery": {"limit": 1, "transaction_types": ["CREATE_POOL"]}}
+    assert run_once(db_path=db, config=cfg, client=Client()) == 2
+    assert read_events(db)[0]["canonical_id"] == f"solana:{pool}"
+    relationships = read_asset_relationships(db)
+    assert {(row["relationship_type"], row["asset_canonical_id"]) for row in relationships} == {
+        ("constituent_0", f"solana:{mint_a}"), ("constituent_1", f"solana:{mint_b}")}
 
 
 def test_config_includes_required_solana_venues():

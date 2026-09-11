@@ -73,6 +73,18 @@ def extract_cohort(snapshot: DatasetSnapshot, config: CohortConfig) -> tuple[Coh
             continue
         chain = str(getattr(asset, "chain_or_exchange", ""))
         if config.chains and chain not in config.chains: continue
+        relationships = snapshot.relationships_at(asset.canonical_id, when)
+        constituents = sorted({item["asset_canonical_id"] for item in relationships
+                               if item["market_canonical_id"] == asset.canonical_id})
+        if constituents:
+            for token_id in constituents:
+                grouped.setdefault(token_id, []).append(event)
+            continue
+        # A relationship observed only later is not available at this decision
+        # boundary and must not cause the pool address to become a token identity.
+        if any(item["market_canonical_id"] == asset.canonical_id for item in snapshot.asset_relationships):
+            grouped.setdefault(f"unresolved:{asset.canonical_id}", []).append(event)
+            continue
         address = _address(event, asset)
         if not address:
             grouped.setdefault(f"unresolved:{asset.canonical_id}", []).append(event)
@@ -83,7 +95,7 @@ def extract_cohort(snapshot: DatasetSnapshot, config: CohortConfig) -> tuple[Coh
     for token_id, events in grouped.items():
         events = sorted(events, key=lambda e: (as_time(e["timestamp"]), str(e.get("source", "")), str(e.get("canonical_id", ""))))
         first_event = events[0]; t0 = as_time(first_event["timestamp"])
-        asset = assets.get(first_event.get("canonical_id"))
+        asset = assets.get(token_id)
         chain = str(asset.chain_or_exchange) if asset else "unknown"
         address = "" if token_id.startswith("unresolved:") else (token_id.split(":", 1)[1] if ":" in token_id else "")
         evidence = tuple({"canonical_id": e["canonical_id"], "event_type": e["event_type"],
@@ -108,8 +120,10 @@ def extract_cohort(snapshot: DatasetSnapshot, config: CohortConfig) -> tuple[Coh
                 analysis = False
                 reason = "INSUFFICIENT_COVERAGE"
         first_seen = asset.first_seen if asset else t0
-        result.append(CohortRow(token_id, chain, address, first_event.get("canonical_id", ""), t0, first_seen, eligible, analysis,
+        result.append(CohortRow(token_id, chain, address, token_id if asset else first_event.get("canonical_id", ""), t0, first_seen, eligible, analysis,
                                 reason, liquidity, tuple(sorted({e["event_type"] for e in events})), evidence,
                                 {"dataset_identity": snapshot.dataset_identity, "cohort_config": asdict(config),
+                                 "market_canonical_ids": tuple(sorted({e["canonical_id"] for e in events
+                                                                       if e["canonical_id"] != token_id})),
                                  "coverage": coverage}))
     return tuple(sorted(result, key=lambda r: (r.t0 or datetime.max, r.token_id)))

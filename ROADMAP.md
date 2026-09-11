@@ -232,7 +232,7 @@ Evidence:
 
 ## Slice 4R.5 — Token / pool / market identity closure
 
-**Status:** ACTIVE
+**Status:** DONE
 
 Remove ambiguity between what was discovered (pool/market) and what is evaluated (token/asset).
 
@@ -251,9 +251,16 @@ Acceptance:
 - one pool with two constituents is represented unambiguously;
 - EVM/Solana fixtures prove address-scoped identity and point-in-time relationship visibility.
 
+Evidence:
+
+- Schema version 6 adds a canonical, idempotent `asset_relationships` observation table linking a market to each address-scoped constituent, its structural role, venue, source, observation time, and raw evidence.
+- Tier-0 persists provider-declared base/quote relationships; supported EVM factory logs decode the market plus both indexed constituents; Solana pool events retain a distinct pool identity and constituent links.
+- Phase 3 resolves market discovery events through only relationships visible at the decision timestamp, evaluates constituent asset IDs rather than market IDs, and fails closed when the relationship was observed later.
+- Fixture-only storage migration, Tier-0, EVM, Solana, and Phase 3 tests cover migration preservation, two-constituent representation, address-scoped identity, and point-in-time visibility.
+
 ## Slice 4R.6 — Short-horizon DEX/on-chain price observation contract
 
-**Status:** PLANNED
+**Status:** ACTIVE
 
 Provide the persisted observations required by the declared 1h/6h/24h/7d label horizons for new-token research.
 

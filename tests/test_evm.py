@@ -84,9 +84,12 @@ def test_listener_persists_enrichment_and_run(tmp_path):
         def enrich(self, address): return result
     class Risk:
         def screen(self, address, chain_id): return {"provider": "fixture", "summary": {"risk": "low"}}
+    token0 = "0x1111111111111111111111111111111111111111"
+    token1 = "0x2222222222222222222222222222222222222222"
     class RPC:
         def get_factory_logs(self, factories, from_block, to_block):
-            return [{"topics": [PAIR_CREATED_TOPIC, "0x01", "0x02"],
+            return [{"topics": [PAIR_CREATED_TOPIC, "0x" + "0" * 24 + token0[2:],
+                                "0x" + "0" * 24 + token1[2:]],
                      "data": "0x" + "0" * 24 + address[2:],
                      "timestamp": datetime(2025, 1, 1, tzinfo=timezone.utc)}]
     db = str(tmp_path / "db.duckdb")
@@ -99,6 +102,9 @@ def test_listener_persists_enrichment_and_run(tmp_path):
     assert flags["enrichment"]["contract_verified"]["status"] == "AVAILABLE"
     assert read_events(db)[0]["event_type"] == "new_pool_detected"
     assert read_runs(db)[0]["status"] == "success"
+    from storage.db import read_asset_relationships
+    assert {row["asset_canonical_id"] for row in read_asset_relationships(db)} == {
+        f"ethereum:{token0}", f"ethereum:{token1}"}
 
 
 def test_chain_configuration_contains_all_required_evm_networks():

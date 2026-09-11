@@ -10,7 +10,8 @@ from typing import Any
 
 import yaml
 
-from storage.db import insert_event, log_run_end, log_run_start, safe_error_message, upsert_asset
+from storage.db import (insert_event, log_run_end, log_run_start, safe_error_message,
+                        upsert_asset, upsert_asset_relationship)
 
 from .clients import GeckoTerminalClient, ProviderError
 
@@ -56,6 +57,15 @@ def poll_network(network_config: dict[str, Any], *, db_path="storage/pipeline.du
                 token_address = pool.get(token_key)
                 if token_address:
                     upsert_asset(_asset(network, token_address, pool.get(token_key, {}), now), db_path)
+                    upsert_asset_relationship({
+                        "market_canonical_id": canonical_id,
+                        "asset_canonical_id": f"{network}:{token_address}",
+                        "relationship_type": token_key.removesuffix("_token_address"),
+                        "venue": str(pool.get("dex_id") or "unknown"),
+                        "observed_at": now,
+                        "source": "geckoterminal",
+                        "evidence_json": {"pool_created_at": pool["created_at"]},
+                    }, db_path)
     return written
 
 

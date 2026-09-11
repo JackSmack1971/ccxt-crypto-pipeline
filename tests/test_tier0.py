@@ -2,7 +2,7 @@ from datetime import datetime, timezone
 
 from ingestion.dex.tier0.clients import normalize_pool
 from ingestion.dex.tier0.poller import poll_network
-from storage.db import read_assets, read_events
+from storage.db import read_asset_relationships, read_assets, read_events
 
 
 def test_normalize_pool_and_poll_writes_canonical_rows(tmp_path):
@@ -26,3 +26,6 @@ def test_normalize_pool_and_poll_writes_canonical_rows(tmp_path):
     assert {row["canonical_id"] for row in read_assets(db)} == {
         "ethereum:0xpool", "ethereum:0xbase", "ethereum:0xquote"
     }
+    assert [(row["relationship_type"], row["asset_canonical_id"])
+            for row in read_asset_relationships(db)] == [
+                ("base", "ethereum:0xbase"), ("quote", "ethereum:0xquote")]

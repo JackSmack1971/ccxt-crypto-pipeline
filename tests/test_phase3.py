@@ -43,6 +43,31 @@ def test_cohort_deduplicates_launches_and_preserves_liquidity_exclusion():
     assert len(result[0].source_evidence) == 2
 
 
+def test_pool_constituents_are_address_scoped_and_relationships_are_point_in_time():
+    t0 = datetime(2025, 1, 1)
+    assets = (
+        Asset("ethereum:0xpool", "dex", "ethereum", "SAME", t0, "0xpool"),
+        Asset("ethereum:0xbase", "dex", "ethereum", "SAME", t0, "0xbase"),
+        Asset("ethereum:0xquote", "dex", "ethereum", "SAME", t0, "0xquote"),
+    )
+    event = ({"canonical_id": "ethereum:0xpool", "event_type": "new_pool_detected", "timestamp": t0,
+              "payload_json": '{"reserve_usd": 12000}', "source": "fixture"},)
+    relationships = (
+        {"market_canonical_id": "ethereum:0xpool", "asset_canonical_id": "ethereum:0xbase",
+         "relationship_type": "base", "venue": "dex", "observed_at": t0,
+         "source": "fixture", "evidence_json": "{}"},
+        {"market_canonical_id": "ethereum:0xpool", "asset_canonical_id": "ethereum:0xquote",
+         "relationship_type": "quote", "venue": "dex", "observed_at": t0 + timedelta(hours=1),
+         "source": "fixture", "evidence_json": "{}"},
+    )
+    data = DatasetSnapshot(assets, (), (), event, (), DatasetPolicy(timeframe="1h"), "fixture", relationships)
+    cohort = extract_cohort(data, CohortConfig(t0, t0))
+    assert [row.token_id for row in cohort] == ["ethereum:0xbase"]
+    assert cohort[0].canonical_id == "ethereum:0xbase"
+    assert cohort[0].provenance["market_canonical_ids"] == ("ethereum:0xpool",)
+    assert data.relationships_at("ethereum:0xpool", t0) == (relationships[0],)
+
+
 def test_feature_registry_carries_temporal_contract_and_rejects_future_definition():
     cohort = extract_cohort(snapshot(), CohortConfig(datetime(2025, 1, 1), datetime(2025, 1, 2), chains=("ethereum",)))
     registry = FeatureRegistry()

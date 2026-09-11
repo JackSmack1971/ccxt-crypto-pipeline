@@ -166,6 +166,26 @@ def insert_event(event: Mapping[str, Any], db_path: str | Path | None = None, *,
         _finish(conn, owned)
 
 
+def upsert_asset_relationship(relationship: Mapping[str, Any], db_path: str | Path | None = None, *,
+                              connection=None) -> None:
+    """Persist a point-in-time market constituent observation without symbol inference."""
+    conn, owned = _connection(db_path, connection)
+    try:
+        evidence = relationship.get("evidence_json", {})
+        if not isinstance(evidence, str):
+            evidence = json.dumps(evidence, default=str, sort_keys=True)
+        conn.execute(
+            """INSERT INTO asset_relationships VALUES (?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT (market_canonical_id, asset_canonical_id, relationship_type, venue, observed_at, source)
+            DO UPDATE SET evidence_json = excluded.evidence_json""",
+            [relationship["market_canonical_id"], relationship["asset_canonical_id"],
+             relationship["relationship_type"], relationship["venue"], relationship["observed_at"],
+             relationship["source"], evidence],
+        )
+    finally:
+        _finish(conn, owned)
+
+
 def upsert_metadata(metadata: Mapping[str, Any], db_path: str | Path | None = None, *, connection=None) -> None:
     conn, owned = _connection(db_path, connection)
     try:
@@ -234,6 +254,15 @@ def read_lineage(db_path=None, *, connection=None):
     try:
         cursor = conn.execute("""SELECT * FROM lineage
                                ORDER BY dex_canonical_id, cex_canonical_id, linked_at""")
+        return [dict(zip([column[0] for column in cursor.description], row)) for row in cursor.fetchall()]
+    finally:
+        _finish(conn, owned)
+def read_asset_relationships(db_path=None, *, connection=None):
+    conn, owned = _connection(db_path, connection)
+    try:
+        cursor = conn.execute("""SELECT * FROM asset_relationships
+                               ORDER BY market_canonical_id, asset_canonical_id, relationship_type,
+                                        venue, observed_at, source""")
         return [dict(zip([column[0] for column in cursor.description], row)) for row in cursor.fetchall()]
     finally:
         _finish(conn, owned)
