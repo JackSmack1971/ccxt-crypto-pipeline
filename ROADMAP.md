@@ -200,7 +200,7 @@ Evidence:
 
 ## Slice 4R.4 — Quote-currency and USD conversion provenance
 
-**Status:** ACTIVE
+**Status:** DONE
 
 Make forward-return labels economically explicit for non-USD quote assets.
 
@@ -219,9 +219,20 @@ Acceptance:
 - label provenance identifies raw quote, conversion source, time, rate, and policy;
 - unavailable conversion produces explicit censoring/unavailability, not fabricated USD returns.
 
+Evidence:
+
+- `analysis/alpha/labels.py` defines the versioned conversion policy and local
+  conversion observations, selects only unambiguous observations available at
+  each endpoint, and records raw quote and conversion provenance on every label.
+- Stablecoin parity is opt-in through the policy; other non-USD quotes without
+  valid evidence are data-censored.
+- `tests/test_phase3.py` covers future-observation exclusion, changing endpoint
+  rates, explicit stablecoin treatment, conversion provenance, and unavailable
+  conversion censoring.
+
 ## Slice 4R.5 — Token / pool / market identity closure
 
-**Status:** PLANNED
+**Status:** ACTIVE
 
 Remove ambiguity between what was discovered (pool/market) and what is evaluated (token/asset).
 
@@ -562,4 +573,4 @@ For a fresh agent, the intended pickup sequence is:
 
 `AGENTS.md` → `ROADMAP.md` → active `docs/plans/phase-*.md` → relevant code/tests → Git history/status.
 
-The current frontier is **Phase 4R.4 — Quote-currency and USD conversion provenance**. Phase 4R.1 established the mandatory CI gate; do not begin Phase 5 until every mandatory Phase 4R closure criterion is satisfied.
+The current frontier is **Phase 4R.5 — Token / pool / market identity closure**. Phase 4R.1 established the mandatory CI gate; do not begin Phase 5 until every mandatory Phase 4R closure criterion is satisfied.
