@@ -135,7 +135,7 @@ Safe examples are provided in [`.env.example`](.env.example). YAML settings live
 
 ## Testing & Verification
 
-The repository contains pytest tests under `tests/`. Run them with `python -m pytest`. Fixture tests do not prove live provider acceptance; use the live-check prerequisites in [`docs/RUNBOOK.md`](docs/RUNBOOK.md) and inspect stored rows and `scheduler.status`.
+The repository contains pytest tests under `tests/`. Run them with `python -m pytest`. If the host interpreter lacks project dependencies, `./scripts/run-tests` reuses the already-provisioned `.venv` dependencies without retrieving packages. Fixture tests do not prove live provider acceptance; use the live-check prerequisites in [`docs/RUNBOOK.md`](docs/RUNBOOK.md) and inspect stored rows and `scheduler.status`.
 
 ## Troubleshooting
 

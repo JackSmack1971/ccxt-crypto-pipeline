@@ -93,11 +93,23 @@ The baseline repository check is:
 python -m pytest
 ```
 
+If the default interpreter is not the provisioned project interpreter, use
+`./scripts/run-tests`. The wrapper prefers the project virtual environment. In managed workspaces
+where project dependencies are already present in `.venv` but `pytest` is
+provided by the host interpreter, it combines those two existing environments
+without downloading packages. Arguments are passed through, so a focused,
+quiet run is `./scripts/run-tests tests/test_phase3.py -q`.
+
 When using the locked environment, the equivalent is:
 
 ```powershell
-uv run python -m pytest
+uv run --locked --no-sync python -m pytest
 ```
+
+Use `--no-sync` only after `uv sync --locked` has provisioned the environment;
+this prevents a verification command from unexpectedly accessing PyPI. When
+package-index access is unavailable, do not add an ad hoc `--with pytest`
+dependency: use the wrapper with the already-provisioned environment instead.
 
 For Python changes, also run the relevant focused tests first and, when the
 scope warrants it:
