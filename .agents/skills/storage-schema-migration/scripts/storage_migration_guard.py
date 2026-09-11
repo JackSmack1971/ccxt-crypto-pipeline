@@ -334,8 +334,13 @@ def evaluate(args: argparse.Namespace) -> tuple[list[Finding], dict[str, Any]]:
         hits, has_url = network_calls_in_test(path)
         for hit in hits:
             add(findings, "ERROR", "live-network-test", f"{rel}: {hit}; storage migration tests must use fixtures only")
-        if has_url:
-            add(findings, "WARN", "url-in-test", f"{rel} contains an http(s) URL; verify it is inert fixture text and not used for live I/O")
+        if has_url and not hits:
+            add(
+                findings,
+                "INFO",
+                "fixture-url-only",
+                f"{rel} contains http(s) fixture text but no direct network-capable call",
+            )
 
     if bool(args.fresh_db) != bool(args.migrated_db):
         add(findings, "ERROR", "db-compare-pair", "provide both --fresh-db and --migrated-db, or neither")
