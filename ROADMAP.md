@@ -292,7 +292,7 @@ Evidence:
 
 ## Slice 4R.7 — Phase 2 metric/time-index hardening
 
-**Status:** ACTIVE
+**Status:** DONE
 
 Make portfolio metrics safe for broader multi-asset and intraday research.
 
@@ -310,9 +310,22 @@ Acceptance:
 - missing-gap execution behavior is explicit and tested;
 - existing single-asset deterministic behavior remains compatible unless an approved correction requires a versioned semantic change.
 
+Evidence:
+
+- `analysis/backtesting/simulator.py` groups bars by timestamp and emits one
+  portfolio state per timestamp. `BacktestConfig.stale_signal_policy` makes
+  missing-gap handling explicit while preserving next-available execution as
+  the default.
+- `analysis/metrics/core.py` derives annualization periods from the declared
+  observation frequency or timestamp intervals and reports interval spacing and
+  irregularity.
+- `tests/test_phase2.py` covers simultaneous multi-asset timestamps, 1h/1d
+  annualization, irregular spacing, and stale-signal handling. The locked full
+  suite passed with 84 tests and no network access.
+
 ## Slice 4R.8 — Canonical approved-research handoff
 
-**Status:** PLANNED
+**Status:** ACTIVE
 
 Eliminate hand-assembled Phase 4 manifests as the normal integration path.
 

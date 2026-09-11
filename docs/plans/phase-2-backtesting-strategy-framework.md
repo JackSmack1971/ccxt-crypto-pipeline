@@ -150,10 +150,17 @@ fixture twice and an inspection of the generated manifest and ledger.
   are not executable by the first simulator.
 - Returns and accounting are quote-currency only. The initial metric set is
   total return, maximum drawdown, annualized volatility, and annualized Sharpe,
-  using a 365-day convention over daily observations.
+  using a 365-day year convention and the declared observation frequency (or
+  timestamp deltas when no frequency is declared). Equity is normalized to one
+  state per timestamp; irregular intervals are retained and reported rather
+  than treated as extra observations.
 - The initial strategy is a deterministic buy-and-hold reference strategy; no
   leverage, shorting, intrabar modeling, optimization, or live/paper execution is
   supported.
+- Missing-bar signals default to execution at the next available bar, matching
+  the simulator's next-bar contract. Runs may explicitly skip stale signals or
+  reject them with an error; halted bars remain governed by the separate halted
+  bar policy.
 
 ## Phase boundary
 

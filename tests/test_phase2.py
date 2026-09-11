@@ -164,6 +164,57 @@ def test_non_positive_execution_price_is_rejected():
         simulate(dataset, BuyAndHoldStrategy(), BacktestConfig())
 
 
+def test_equity_is_one_state_per_timestamp_for_multiple_assets():
+    assets = (
+        Asset("kraken:AAA/USD", "cex", "kraken", "AAA/USD", datetime(2025, 1, 1), None),
+        Asset("kraken:BBB/USD", "cex", "kraken", "BBB/USD", datetime(2025, 1, 1), None),
+    )
+    bars = tuple(Bar(asset.canonical_id, timestamp, 10, 10, 10, close, 1, "1d", "kraken")
+                 for timestamp, close in ((datetime(2025, 1, 1), 10), (datetime(2025, 1, 2), 11))
+                 for asset in assets)
+    result = simulate(DatasetSnapshot(assets, bars, (), (), (), DatasetPolicy(), "fixture"), BuyAndHoldStrategy())
+    assert [row["timestamp"] for row in result.equity] == ["2025-01-01T00:00:00", "2025-01-02T00:00:00"]
+
+
+@pytest.mark.parametrize(("frequency", "periods"), [("1h", 8760), ("1d", 365)])
+def test_metrics_annualize_from_declared_frequency(frequency, periods):
+    equity = [{"timestamp": "2025-01-01T00:00:00", "equity": 100},
+              {"timestamp": "2025-01-01T01:00:00" if frequency == "1h" else "2025-01-02T00:00:00", "equity": 101},
+              {"timestamp": "2025-01-01T02:00:00" if frequency == "1h" else "2025-01-03T00:00:00", "equity": 100}]
+    assert compute_metrics(equity, observation_frequency=frequency)["annualization_periods"] == periods
+
+
+def test_metrics_report_irregular_timestamp_spacing():
+    equity = [{"timestamp": "2025-01-01T00:00:00", "equity": 100},
+              {"timestamp": "2025-01-01T01:00:00", "equity": 101},
+              {"timestamp": "2025-01-01T03:00:00", "equity": 100}]
+    metrics = compute_metrics(equity)
+    assert metrics["irregular_intervals"] is True
+    assert metrics["observation_interval_seconds"] == pytest.approx(5400)
+
+
+def test_stale_signal_policy_is_explicit_for_missing_gap(tmp_path):
+    db = _fixture(tmp_path / "stale")
+    conn = connect(db)
+    conn.execute("DELETE FROM ohlcv WHERE timestamp = '2025-01-02'")
+    conn.close()
+    dataset = DatasetSnapshot.from_duckdb(db)
+    result = simulate(dataset, BuyAndHoldStrategy(), BacktestConfig(stale_signal_policy="skip"))
+    assert any(order["status"] == "skipped_stale_signal" for order in result.orders)
+
+
+def test_halted_bar_does_not_make_signal_stale(tmp_path):
+    db = _fixture(tmp_path / "halted")
+    conn = connect(db)
+    conn.execute("DELETE FROM ohlcv WHERE timestamp = '2025-01-02'")
+    conn.execute("INSERT INTO ohlcv VALUES ('kraken:AAA/USD', '2025-01-02', 0, 0, 0, 0, 0, '1d', 'kraken')")
+    conn.close()
+    dataset = DatasetSnapshot.from_duckdb(db)
+    result = simulate(dataset, BuyAndHoldStrategy(), BacktestConfig(stale_signal_policy="skip"))
+    assert result.trades[0]["timestamp"] == "2025-01-03T00:00:00"
+    assert not any(order["status"] == "skipped_stale_signal" for order in result.orders)
+
+
 def test_parquet_failure_rolls_back_ohlcv_write(tmp_path):
     db = _fixture(tmp_path)
     bad_path = tmp_path / "not-a-directory"
