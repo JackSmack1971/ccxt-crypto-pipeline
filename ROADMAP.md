@@ -140,7 +140,7 @@ Evidence:
 
 ## Slice 4R.2 — Real purge/embargo split semantics
 
-**Status:** ACTIVE
+**Status:** DONE
 
 Make the Phase 3 chronological split enforce what the report says it enforces.
 
@@ -158,9 +158,15 @@ Acceptance:
 - sealed holdout membership cannot be altered by downstream ranking logic;
 - repeated split construction is byte/structurally deterministic.
 
+Evidence:
+
+- `analysis/alpha/evaluation.py` fixes the raw chronological boundaries before applying label-window purge, feature-window purge, and post-boundary embargo rules; its result retains boundary and row-removal evidence.
+- `analysis/alpha/report.py` describes the supplied split's actual window configuration and removal count instead of fixed prose.
+- `tests/test_phase3.py` covers boundary overlap, an effective embargo change, sealed holdout membership, removal reasons, and structurally deterministic replay.
+
 ## Slice 4R.3 — Candidate promotion state machine
 
-**Status:** PLANNED
+**Status:** ACTIVE
 
 Replace the current coverage-only `validated_alpha` shortcut with explicit research states.
 
@@ -551,4 +557,4 @@ For a fresh agent, the intended pickup sequence is:
 
 `AGENTS.md` → `ROADMAP.md` → active `docs/plans/phase-*.md` → relevant code/tests → Git history/status.
 
-The current frontier is **Phase 4R.2 — Real purge/embargo split semantics**. Phase 4R.1 established the mandatory CI gate; do not begin Phase 5 until every mandatory Phase 4R closure criterion is satisfied.
+The current frontier is **Phase 4R.3 — Candidate promotion state machine**. Phase 4R.1 established the mandatory CI gate; do not begin Phase 5 until every mandatory Phase 4R closure criterion is satisfied.
