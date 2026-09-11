@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import duckdb
 
-SCHEMA_VERSION = 6
+SCHEMA_VERSION = 7
 
 SCHEMA_SQL = """
 CREATE TABLE IF NOT EXISTS assets (
@@ -74,6 +74,20 @@ CREATE TABLE IF NOT EXISTS asset_relationships (
     source VARCHAR NOT NULL,
     evidence_json VARCHAR NOT NULL,
     PRIMARY KEY (market_canonical_id, asset_canonical_id, relationship_type, venue, observed_at, source)
+);
+
+CREATE TABLE IF NOT EXISTS price_observations (
+    asset_canonical_id VARCHAR NOT NULL,
+    market_canonical_id VARCHAR NOT NULL,
+    observed_at TIMESTAMP NOT NULL,
+    price DOUBLE NOT NULL CHECK (price > 0),
+    quote_asset VARCHAR NOT NULL,
+    liquidity_usd DOUBLE CHECK (liquidity_usd IS NULL OR liquidity_usd >= 0),
+    volume_usd DOUBLE CHECK (volume_usd IS NULL OR volume_usd >= 0),
+    cadence VARCHAR NOT NULL,
+    source VARCHAR NOT NULL,
+    evidence_json VARCHAR NOT NULL,
+    PRIMARY KEY (asset_canonical_id, market_canonical_id, observed_at, source)
 );
 
 CREATE TABLE IF NOT EXISTS schema_version (
@@ -165,7 +179,7 @@ def initialize(connection: duckdb.DuckDBPyConnection) -> None:
                 FROM ohlcv""")
             connection.execute("DROP TABLE ohlcv")
             connection.execute("ALTER TABLE ohlcv_v5 RENAME TO ohlcv")
-            connection.execute("UPDATE schema_version SET version = ?", [SCHEMA_VERSION])
+            connection.execute("UPDATE schema_version SET version = 5")
             connection.execute("COMMIT")
         except Exception:
             connection.execute("ROLLBACK")
@@ -183,6 +197,28 @@ def initialize(connection: duckdb.DuckDBPyConnection) -> None:
                 source VARCHAR NOT NULL,
                 evidence_json VARCHAR NOT NULL,
                 PRIMARY KEY (market_canonical_id, asset_canonical_id, relationship_type, venue, observed_at, source)
+            )""")
+            connection.execute("UPDATE schema_version SET version = 6")
+            connection.execute("COMMIT")
+        except Exception:
+            connection.execute("ROLLBACK")
+            raise
+        versions = (6,)
+    if versions[0] < 7:
+        connection.execute("BEGIN TRANSACTION")
+        try:
+            connection.execute("""CREATE TABLE IF NOT EXISTS price_observations (
+                asset_canonical_id VARCHAR NOT NULL,
+                market_canonical_id VARCHAR NOT NULL,
+                observed_at TIMESTAMP NOT NULL,
+                price DOUBLE NOT NULL CHECK (price > 0),
+                quote_asset VARCHAR NOT NULL,
+                liquidity_usd DOUBLE CHECK (liquidity_usd IS NULL OR liquidity_usd >= 0),
+                volume_usd DOUBLE CHECK (volume_usd IS NULL OR volume_usd >= 0),
+                cadence VARCHAR NOT NULL,
+                source VARCHAR NOT NULL,
+                evidence_json VARCHAR NOT NULL,
+                PRIMARY KEY (asset_canonical_id, market_canonical_id, observed_at, source)
             )""")
             connection.execute("UPDATE schema_version SET version = ?", [SCHEMA_VERSION])
             connection.execute("COMMIT")

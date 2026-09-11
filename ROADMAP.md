@@ -260,7 +260,7 @@ Evidence:
 
 ## Slice 4R.6 — Short-horizon DEX/on-chain price observation contract
 
-**Status:** ACTIVE
+**Status:** DONE
 
 Provide the persisted observations required by the declared 1h/6h/24h/7d label horizons for new-token research.
 
@@ -282,9 +282,17 @@ Acceptance:
 
 Live-provider acceptance, when credentials are available, MUST be reported separately from fixture evidence.
 
+Evidence:
+
+- Schema version 7 adds an idempotent `price_observations` table with address-scoped asset/market identity, observation time, positive price, quote asset, optional USD liquidity/volume, configured cadence, source, and raw evidence.
+- `storage/db.py` provides deterministic upsert/read accessors; v6-to-v7 and fresh/repeated initialization tests preserve existing rows and converge on the target contract.
+- Tier-0 normalizes GeckoTerminal base/quote USD prices, liquidity, volume, and the configured polling cadence. EVM-shaped and Solana-shaped offline fixtures each persist a launch event plus subsequent observations, and repeated polling updates the same observation identity rather than duplicating it.
+- `tests/test_storage.py` and `tests/test_tier0.py` cover migration, idempotency, deterministic reads, address-scoped identities, optional values, and both network shapes. The complete fixture suite ran with no network access and passed.
+- Live-provider acceptance remains unverified and separate from this fixture evidence.
+
 ## Slice 4R.7 — Phase 2 metric/time-index hardening
 
-**Status:** PLANNED
+**Status:** ACTIVE
 
 Make portfolio metrics safe for broader multi-asset and intraday research.
 
@@ -580,4 +588,4 @@ For a fresh agent, the intended pickup sequence is:
 
 `AGENTS.md` → `ROADMAP.md` → active `docs/plans/phase-*.md` → relevant code/tests → Git history/status.
 
-The current frontier is **Phase 4R.5 — Token / pool / market identity closure**. Phase 4R.1 established the mandatory CI gate; do not begin Phase 5 until every mandatory Phase 4R closure criterion is satisfied.
+The current frontier is **Phase 4R.7 — Phase 2 metric/time-index hardening**. Phase 4R.1 established the mandatory CI gate; do not begin Phase 5 until every mandatory Phase 4R closure criterion is satisfied.
