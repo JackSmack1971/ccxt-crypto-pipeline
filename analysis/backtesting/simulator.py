@@ -19,6 +19,7 @@ class BacktestConfig:
     execution: str = "next_bar_open"
     missing_bar_policy: str = "skip"
     halted_bar_policy: str = "skip"
+    stale_signal_policy: str = "execute_next_available"
     quote_currency: str = "USD"
     source_type: str = "cex"
     venue: str | None = None
@@ -30,6 +31,8 @@ class BacktestConfig:
             raise ValueError("initial_cash, fee_rate, and slippage_bps must be non-negative")
         if self.missing_bar_policy not in {"skip", "error"} or self.halted_bar_policy not in {"skip", "error"}:
             raise ValueError("bar policies must be 'skip' or 'error'")
+        if self.stale_signal_policy not in {"execute_next_available", "skip", "error"}:
+            raise ValueError("stale_signal_policy must be 'execute_next_available', 'skip', or 'error'")
         if self.source_type != "cex":
             raise ValueError("unsupported execution universe; only CEX assets are supported")
 
@@ -93,52 +96,70 @@ def simulate(dataset: DatasetSnapshot, strategy: Strategy, config: BacktestConfi
                     orders.append({"canonical_id": asset_id, "status": "skipped_missing",
                                    "from": previous.timestamp.isoformat(), "to": current.timestamp.isoformat()})
 
-    for bar in bars:
-        if bar.halted:
-            if config.halted_bar_policy == "error":
-                raise ValueError(f"halted bar encountered for {bar.canonical_id} at {bar.timestamp.isoformat()}")
-            orders.append({"canonical_id": bar.canonical_id, "status": "skipped_halted", "timestamp": bar.timestamp.isoformat()})
-            continue
-        if any(price <= 0 for price in (bar.open, bar.high, bar.low, bar.close)):
-            raise ValueError(f"bar contains a non-positive price: {bar.canonical_id} at {bar.timestamp.isoformat()}")
-        last_close[bar.canonical_id] = bar.close
-        if bar.canonical_id in pending:
-            signal_time, target, _ = pending.pop(bar.canonical_id)
-            current = positions.get(bar.canonical_id, 0.0)
-            delta = target - current
-            if delta != 0:
-                direction = 1 if delta > 0 else -1
-                price = bar.open * (1 + direction * config.slippage_bps / 10000)
-                notional = abs(delta) * price
-                fee = notional * config.fee_rate
-                slippage = abs(delta) * bar.open * config.slippage_bps / 10000
-                total_buy = notional + fee
-                if direction > 0 and total_buy > cash + 1e-12:
+    index = 0
+    while index < len(bars):
+        timestamp = bars[index].timestamp
+        end = index + 1
+        while end < len(bars) and bars[end].timestamp == timestamp:
+            end += 1
+        timestamp_bars = bars[index:end]
+        for bar in timestamp_bars:
+            previous = history.get(bar.canonical_id, ())
+            is_gap = bool(previous and bar.timestamp - previous[-1].timestamp > _bar_interval(previous[-1].timeframe))
+            if is_gap and bar.canonical_id in pending:
+                if config.stale_signal_policy == "error":
+                    signal_time = pending[bar.canonical_id][0]
+                    raise ValueError(f"stale signal for {bar.canonical_id}: missing bars after {signal_time.isoformat()}")
+                if config.stale_signal_policy == "skip":
+                    signal_time, _target, _ = pending.pop(bar.canonical_id)
                     orders.append({"canonical_id": bar.canonical_id, "signal_time": signal_time.isoformat(),
-                                   "execution_time": bar.timestamp.isoformat(), "status": "rejected_insufficient_cash",
-                                   "requested_quantity": delta})
-                else:
-                    cash += -direction * notional - fee
-                    positions[bar.canonical_id] = target
-                    trade = {"canonical_id": bar.canonical_id, "signal_time": signal_time.isoformat(),
-                             "timestamp": bar.timestamp.isoformat(), "side": "buy" if direction > 0 else "sell",
-                             "quantity": abs(delta), "price": price, "notional": notional, "fee": fee,
-                             "slippage": slippage,
-                             "cash_after": cash}
-                    trades.append(trade)
-                    orders.append({**trade, "status": "filled"})
-        frame = BarFrame(bar, history.get(bar.canonical_id, ()), dataset.metadata_at(bar.canonical_id, bar.timestamp))
-        intention = strategy.on_bar(frame)
-        if intention is not None:
-            if intention.canonical_id != bar.canonical_id:
-                raise ValueError("strategy returned an intention for a different canonical asset")
-            if not math.isfinite(intention.quantity) or intention.quantity < 0:
-                raise ValueError("short positions are unsupported; target quantity must be non-negative")
-            pending[bar.canonical_id] = (bar.timestamp, float(intention.quantity), bar.timestamp)
-        history[bar.canonical_id] = history.get(bar.canonical_id, ()) + (bar,)
+                                   "execution_time": bar.timestamp.isoformat(), "status": "skipped_stale_signal"})
+            if bar.halted:
+                if config.halted_bar_policy == "error":
+                    raise ValueError(f"halted bar encountered for {bar.canonical_id} at {bar.timestamp.isoformat()}")
+                orders.append({"canonical_id": bar.canonical_id, "status": "skipped_halted", "timestamp": bar.timestamp.isoformat()})
+                continue
+            if any(price <= 0 for price in (bar.open, bar.high, bar.low, bar.close)):
+                raise ValueError(f"bar contains a non-positive price: {bar.canonical_id} at {bar.timestamp.isoformat()}")
+            last_close[bar.canonical_id] = bar.close
+            if bar.canonical_id in pending:
+                signal_time, target, _ = pending.pop(bar.canonical_id)
+                current = positions.get(bar.canonical_id, 0.0)
+                delta = target - current
+                if delta != 0:
+                    direction = 1 if delta > 0 else -1
+                    price = bar.open * (1 + direction * config.slippage_bps / 10000)
+                    notional = abs(delta) * price
+                    fee = notional * config.fee_rate
+                    slippage = abs(delta) * bar.open * config.slippage_bps / 10000
+                    total_buy = notional + fee
+                    if direction > 0 and total_buy > cash + 1e-12:
+                        orders.append({"canonical_id": bar.canonical_id, "signal_time": signal_time.isoformat(),
+                                       "execution_time": bar.timestamp.isoformat(), "status": "rejected_insufficient_cash",
+                                       "requested_quantity": delta})
+                    else:
+                        cash += -direction * notional - fee
+                        positions[bar.canonical_id] = target
+                        trade = {"canonical_id": bar.canonical_id, "signal_time": signal_time.isoformat(),
+                                 "timestamp": bar.timestamp.isoformat(), "side": "buy" if direction > 0 else "sell",
+                                 "quantity": abs(delta), "price": price, "notional": notional, "fee": fee,
+                                 "slippage": slippage,
+                                 "cash_after": cash}
+                        trades.append(trade)
+                        orders.append({**trade, "status": "filled"})
+            frame = BarFrame(bar, previous, dataset.metadata_at(bar.canonical_id, bar.timestamp))
+            intention = strategy.on_bar(frame)
+            if intention is not None:
+                if intention.canonical_id != bar.canonical_id:
+                    raise ValueError("strategy returned an intention for a different canonical asset")
+                if not math.isfinite(intention.quantity) or intention.quantity < 0:
+                    raise ValueError("short positions are unsupported; target quantity must be non-negative")
+                pending[bar.canonical_id] = (bar.timestamp, float(intention.quantity), bar.timestamp)
+            history[bar.canonical_id] = previous + (bar,)
         marked = cash + sum(positions.get(asset, 0.0) * price for asset, price in last_close.items())
-        equity.append({"timestamp": bar.timestamp.isoformat(), "cash": cash, "equity": marked,
+        equity.append({"timestamp": timestamp.isoformat(), "cash": cash, "equity": marked,
                        "positions": dict(sorted(positions.items()))})
+        index = end
     if pending:
         for asset_id, (signal_time, _target, _bar_time) in sorted(pending.items()):
             orders.append({"canonical_id": asset_id, "signal_time": signal_time.isoformat(),
