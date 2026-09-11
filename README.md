@@ -79,18 +79,18 @@ The status command prints JSON derived from the `runs` table. A live cycle can s
 ## Architecture
 
 ```mermaid
-flowchart LR
-  CEX[ccxt CEX adapters] --> CEXJ[ingestion/cex]
-  AGG[Dexscreener / GeckoTerminal / DefiLlama] --> T0[ingestion/dex/tier0]
-  RPC[EVM RPC endpoints] --> EVM[shared ingestion/evm]
-  EXP[Etherscan V2 / Routescan / MegaNode] --> EVM
-  SOL[Helius Enhanced / DAS / RPC] --> SOLJ[ingestion/solana]
-  CEXJ --> STORE[(DuckDB + OHLCV Parquet)]
-  T0 --> STORE
-  EVM --> STORE
-  SOLJ --> STORE
-  STORE --> N[normalization]
-  STORE --> S[scheduler / status]
+graph LR
+  cex["ccxt CEX adapters"] --> cex_ingest["ingestion/cex"]
+  aggregators["Dexscreener, GeckoTerminal, DefiLlama"] --> tier0["ingestion/dex/tier0"]
+  rpc["EVM RPC endpoints"] --> evm["ingestion/evm"]
+  explorers["Etherscan V2, Routescan, MegaNode"] --> evm
+  solana_providers["Helius Enhanced, DAS, RPC"] --> solana["ingestion/solana"]
+  cex_ingest --> storage["DuckDB and OHLCV Parquet"]
+  tier0 --> storage
+  evm --> storage
+  solana --> storage
+  storage --> normalization
+  storage --> scheduler["scheduler and status"]
 ```
 
 The scheduler coordinates existing jobs and records each job in `runs`; it does not contain provider-specific request logic. `ingestion/evm/rpc.py` observes blocks and factory logs. `ingestion/evm/providers.py` implements the normalized enrichment interface. Unsupported capabilities remain explicit rather than being fabricated or silently routed to a paid fallback. See [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) for the final data flow, schema, and routing table.
