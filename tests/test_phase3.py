@@ -8,7 +8,8 @@ from analysis.alpha import (CohortConfig, FeatureDefinition, FeatureRegistry, HO
                             Hypothesis, LabelDefinition, apply_bh_fdr, apply_holm,
                             build_split, compute_features, extract_cohort, generate_labels, normalize_usd_price,
                             descriptive_baseline, phase2_strategy_spec, rank_candidates, score_candidate, write_research_run,
-                            validate_temporal_alignment, baseline_comparison)
+                            validate_temporal_alignment, baseline_comparison, HypothesisRegistry,
+                            PromotionEvidence, evaluate_candidate_promotion)
 from analysis.datasets import Asset, Bar, DatasetPolicy, DatasetSnapshot
 from storage.db import connect, insert_event, insert_ohlcv_batch, upsert_asset
 
@@ -108,6 +109,60 @@ def test_candidate_low_coverage_is_not_validated_alpha_and_handoff_is_phase2_com
     assert result.coverage == .5 and result.validated_alpha is False
     spec = phase2_strategy_spec({"name": "one"}, dataset_identity="fixture", feature_policy="fp", split={"sealed": True})
     assert spec["execution"] == "next_bar_open" and spec["live_execution"] is False and spec["validated_alpha"] is False
+
+
+def test_candidate_cannot_be_confirmed_from_coverage_alone():
+    class Label:
+        def __init__(self, i):
+            self.token_id = str(i); self.horizon = "1h"; self.status = "COMPLETE"; self.value = .1
+
+    candidate = score_candidate("coverage-only", tuple(Label(i) for i in range(20)), horizon="1h")
+    assert candidate.coverage == 1.0
+    assert candidate.promotion.state == "discovered"
+    assert candidate.validated_alpha is False
+
+    decision = evaluate_candidate_promotion(candidate, PromotionEvidence(target_stage="holdout"))
+    assert decision.state == "insufficient_evidence"
+    assert "MISSING_DISCOVERY_CORRECTION" in decision.reasons
+
+
+def test_candidate_promotion_requires_every_stage_gate_and_is_preserved_by_registry(tmp_path):
+    class Label:
+        def __init__(self, i):
+            self.token_id = str(i); self.horizon = "1h"; self.status = "COMPLETE"; self.value = .12
+
+    candidate = score_candidate("governed", tuple(Label(i) for i in range(20)), horizon="1h",
+                                baseline_mean=.02, turnover=1.0, costs=(.001, .005))
+    evidence = PromotionEvidence(
+        target_stage="holdout", discovery_adjusted_p_value=.01,
+        validation_replicated=True, validation_semantics_frozen=True,
+        holdout_adjusted_p_value=.02, baseline_superior=True,
+        uncertainty_supports_effect=True, cost_sensitivity_passed=True,
+    )
+    promoted = replace(candidate, promotion=evaluate_candidate_promotion(candidate, evidence))
+    assert promoted.promotion.state == "holdout_confirmed"
+    assert promoted.validated_alpha is True
+    assert evaluate_candidate_promotion(candidate, replace(evidence, target_stage="discovery")).state == "discovery_promoted"
+    assert evaluate_candidate_promotion(candidate, replace(evidence, target_stage="validation")).state == "validation_confirmed"
+
+    rejected = evaluate_candidate_promotion(candidate, replace(evidence, cost_sensitivity_passed=False))
+    assert rejected.state == "rejected" and rejected.reasons == ("COST_SENSITIVITY_FAILED",)
+
+    registry = HypothesisRegistry()
+    registry.add(Hypothesis("e", "f", (), None, "1h", None, "baseline", "2025-01-01", "d", .01))
+    registry.record_promotion(promoted, evidence, promoted.promotion)
+    artifact = registry.as_artifact()
+    assert artifact["promotions"][0]["inputs"]["target_stage"] == "holdout"
+    assert artifact["promotions"][0]["candidate_inputs"]["coverage"] == 1.0
+    assert artifact["promotions"][0]["decision"]["state"] == "holdout_confirmed"
+
+    run = write_research_run(tmp_path, dataset_identity="fixture", cohort_config={},
+                             candidates=(promoted,), hypotheses=registry)
+    candidate_artifact = json.loads((run / "candidates.json").read_text())
+    hypothesis_artifact = json.loads((run / "hypotheses.json").read_text())
+    assert candidate_artifact[0]["promotion"]["inputs"]["target_stage"] == "holdout"
+    assert hypothesis_artifact["promotions"][0]["inputs"] == artifact["promotions"][0]["inputs"]
+    assert hypothesis_artifact["promotions"][0]["decision"]["state"] == "holdout_confirmed"
 
 def test_temporal_alignment_rejects_permuted_labels_and_artifacts_replay_identically(tmp_path):
     data = snapshot()
