@@ -14,8 +14,9 @@ dependencies = [
     "pandas==2.3.3",
     "requests==2.32.5",
     "python-dotenv==1.1.1",
+    "PyYAML==6.0.2",
     "APScheduler==3.11.0",
 ]
 
 [tool.setuptools.packages.find]
-include = ["config*", "ingestion*", "normalization*", "scheduler*", "storage*"]
+include = ["analysis*", "config*", "ingestion*", "normalization*", "reporting*", "scheduler*", "storage*"]

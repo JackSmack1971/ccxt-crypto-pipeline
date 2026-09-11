@@ -1,6 +1,6 @@
 name = "provider_adapter_worker"
 description = "Implementation specialist for one external provider adapter after the shared interface/config contract is stable. Use for parallel, non-overlapping adapter work such as Dexscreener, GeckoTerminal, DefiLlama, Etherscan V2, Routescan, BSCTrace/MegaNode, Helius, or a risk-screen provider. Do not use to redesign shared interfaces, schemas, or cross-provider routing."
-model = "gpt-5.6"
+model = "gpt-5.6-sol"
 model_reasoning_effort = "high"
 sandbox_mode = "workspace-write"
 developer_instructions = """

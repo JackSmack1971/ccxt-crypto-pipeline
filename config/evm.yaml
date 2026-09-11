@@ -1,0 +1,31 @@
+providers:
+  ethereum: etherscan_v2
+  arbitrum: etherscan_v2
+  base: routescan
+  bsc: bsctrace_meganode
+
+etherscan_v2:
+  base_url: https://api.etherscan.io/v2/api
+  api_key_env: ETHERSCAN_API_KEY
+  timeout_seconds: 20
+  max_retries: 2
+routescan:
+  base_url: https://api.routescan.io/v2/network/mainnet/evm
+  api_key_env: ROUTESCAN_API_KEY
+  allow_keyless: true
+  keyless_requests_per_second: 2
+  keyed_requests_per_second: 5
+  timeout_seconds: 20
+  max_retries: 2
+bsctrace_meganode:
+  # Keep this endpoint deployment-specific; the adapter reports UNSUPPORTED
+  # until a documented free endpoint is configured.
+  base_url: ""
+  api_key_env: MEGANODE_API_KEY
+  timeout_seconds: 20
+  max_retries: 2
+risk:
+  provider: honeypot_is
+  base_url: https://api.honeypot.is/v2/IsHoneypot
+  timeout_seconds: 20
+  max_retries: 2

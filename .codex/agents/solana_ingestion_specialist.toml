@@ -1,6 +1,6 @@
 name = "solana_ingestion_specialist"
 description = "Implementation specialist for the architecturally separate Solana Tier 2 ingestion path. Use for Helius/equivalent integration, new mint/pool detection, Raydium/Orca/pump.fun event interpretation, holder distribution, token metadata, and normalization into the shared events/metadata contract. Do not use for EVM work."
-model = "gpt-5.6"
+model = "gpt-5.6-sol"
 model_reasoning_effort = "high"
 sandbox_mode = "workspace-write"
 developer_instructions = """

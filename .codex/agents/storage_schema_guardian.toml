@@ -1,6 +1,6 @@
 name = "storage_schema_guardian"
 description = "Read-only storage/schema integrity reviewer. Use whenever a goal adds or changes DuckDB/Parquet tables, columns, keys, accessors, event/risk-flag types, lineage, run logging, schema-version behavior, or ingestion writes. Especially valuable after Goals 1, 4, 6, and 7."
-model = "gpt-5.6"
+model = "gpt-5.6-sol"
 model_reasoning_effort = "high"
 sandbox_mode = "read-only"
 developer_instructions = """

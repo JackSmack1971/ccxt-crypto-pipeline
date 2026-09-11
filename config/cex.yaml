@@ -1,0 +1,13 @@
+exchanges:
+  - kraken
+
+timeframes:
+  - 1d
+
+lookback_days: 365
+minimum_24h_quote_volume: 0
+ohlcv_limit: 720
+max_retries: 3
+backoff_seconds: 1
+database_path: storage/pipeline.duckdb
+parquet_path: storage/parquet
