@@ -31,7 +31,8 @@ def _dump(value: Any) -> bytes:
 
 def write_research_run(output_dir: str | Path, *, dataset_identity: str, cohort_config: Any,
                        cohort=(), features=(), labels=(), candidates=(), hypotheses=(), split=None,
-                       report: str | None = None) -> Path:
+                       report: str | None = None,
+                       approved_chart_transformations: dict[str, Any] | None = None) -> Path:
     """Write immutable Phase 3 evidence files; reruns with identical inputs are byte-identical."""
     hypothesis_artifact = _plain(hypotheses)
     report_hypotheses = (hypothesis_artifact.get("hypotheses", [])
@@ -43,12 +44,15 @@ def write_research_run(output_dir: str | Path, *, dataset_identity: str, cohort_
                     dataset_identity=dataset_identity)}
     artifact_hashes = {name: hashlib.sha256(_dump(value)).hexdigest() for name, value in artifacts.items()}
     payload = {"dataset_identity": dataset_identity, "cohort_config": cohort_config, "split": split,
-               "artifacts": artifact_hashes}
+               "artifacts": artifact_hashes,
+               "approved_chart_transformations": approved_chart_transformations or {}}
     run_id = hashlib.sha256(_dump(payload)).hexdigest()[:24]
     target = Path(output_dir) / run_id; target.mkdir(parents=True, exist_ok=True)
     manifest = {"manifest_version": "phase3-v1", "run_id": run_id, "immutable": True,
                 "inputs": {"dataset_identity": dataset_identity, "cohort_config": cohort_config, "split": split},
                 "artifacts": artifact_hashes}
+    if approved_chart_transformations:
+        manifest["approved_chart_transformations"] = approved_chart_transformations
     for name, value in {**artifacts, "manifest.json": manifest}.items():
         path = target / name; content = _dump(value)
         if path.exists() and path.read_bytes() != content: raise FileExistsError(f"immutable artifact differs: {path}")

@@ -33,6 +33,7 @@ def test_ci_uses_locked_inputs_and_required_repository_checks():
     assert uv_setup["with"] == {"enable-cache": "true", "python-version": "3.12"}
     assert "uv sync --locked" in commands
     assert "uv pip install pytest==9.0.3" in commands
+    assert "pluggy==1.6.0" in commands
     assert "tests/test_storage.py::test_v1_store_migrates_in_place_and_preserves_rows" in commands
     assert "uv run --no-sync python -m pytest" in commands
     assert "python -m compileall" in commands

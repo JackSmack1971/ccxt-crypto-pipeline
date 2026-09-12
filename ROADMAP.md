@@ -358,7 +358,7 @@ Evidence:
 
 ## Slice 4R.9 — Evidence-bound claims and chart semantics
 
-**Status:** ACTIVE
+**Status:** DONE
 
 Upgrade Phase 4 from evidence *reference* validation to evidence *derivation* validation where factual numbers are emitted.
 
@@ -377,9 +377,27 @@ Acceptance:
 - declared transformations are deterministic and represented in package provenance;
 - missing/unsupported values cannot become zero or disappear without explicit representation.
 
+Evidence:
+
+- `reporting/claims/model.py` now requires numeric factual claims to declare a
+  source-field derivation, supported operation, unit, and decimal policy; it
+  recomputes the value from staged evidence and rejects prose whose rendered
+  number disagrees.
+- `reporting/charts/spec.py` and `reporting/render/static.py` whitelist and
+  execute `identity`/`sort_x` transformations and horizontal-line annotations;
+  unsupported or unexecutable declarations fail closed. Chart semantics are
+  retained in the package manifest, and the SVG validator checks parsed role,
+  non-empty title/description, units, attribution, and non-finite output.
+- `tests/test_phase4.py` covers derivation disagreement/missing declarations,
+  transformation rejection, annotation execution/rejection, missing-value
+  handling, deterministic replay, and the offline package path. The locked
+  suite passed with 103 tests; `git diff --check` and byte-compilation passed.
+- The CI workflow pins the pytest/pluggy test-runner pair so the locked fixture
+  verification does not depend on an ambient runner dependency.
+
 ## Slice 4R.10 — Phase 4 closure acceptance matrix
 
-**Status:** PLANNED
+**Status:** ACTIVE
 
 Freeze the repaired Phase 1–4 contract before starting Phase 5.
 
@@ -613,4 +631,4 @@ For a fresh agent, the intended pickup sequence is:
 
 `AGENTS.md` → `ROADMAP.md` → active `docs/plans/phase-*.md` → relevant code/tests → Git history/status.
 
-The current frontier is **Phase 4R.9 — Evidence-bound claims and chart semantics**. Phase 4R.1 established the mandatory CI gate; do not begin Phase 5 until every mandatory Phase 4R closure criterion is satisfied.
+The current frontier is **Phase 4R.10 — Phase 4 closure acceptance matrix**. Phase 4R.1 established the mandatory CI gate; do not begin Phase 5 until every mandatory Phase 4R closure criterion is satisfied.
