@@ -394,6 +394,9 @@ Evidence:
   suite passed with 103 tests; `git diff --check` and byte-compilation passed.
 - The CI workflow pins the pytest/pluggy test-runner pair so the locked fixture
   verification does not depend on an ambient runner dependency.
+- Final specification review remains unverified because the reviewer service
+  exhausted its usage quota; 4R.9 therefore remains ACTIVE pending a clean
+  two-brain disposition and hosted CI for the committed tree.
 
 ## Slice 4R.10 — Phase 4 closure acceptance matrix
 
