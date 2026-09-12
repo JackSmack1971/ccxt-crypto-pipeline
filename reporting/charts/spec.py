@@ -42,7 +42,9 @@ def validate_chart(value: ChartSpec | dict[str, Any], staged: dict[str, Any],
         raise ValueError(f"chart {spec.id!r} has invalid field types")
     if not all((spec.id, spec.data_artifact, spec.x_column, spec.y_column, spec.x_unit,
                 spec.y_unit, spec.missing_behavior, spec.source_attribution,
-                len(spec.alt_text.strip()) >= 10 and len(re.findall(r"[A-Za-z]{2,}", spec.alt_text)) >= 3)):
+                len(spec.alt_text.strip()) >= 10 and len(re.findall(r"[A-Za-z]{2,}", spec.alt_text)) >= 3 and
+                not set(re.findall(r"[A-Za-z]{2,}", spec.alt_text.lower())) &
+                {"foo", "bar", "baz", "lorem", "ipsum", "test", "xxx"})):
         raise ValueError(f"chart {spec.id!r} is missing required accessibility/provenance metadata")
     if spec.missing_behavior not in {"explicit_state", "fail"}:
         raise ValueError(f"chart {spec.id} has unsupported missing-data behavior")

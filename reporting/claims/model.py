@@ -9,6 +9,8 @@ _NUMBER = re.compile(r"(?<![A-Za-z])[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:%|[A-Za-z]{0,
 _NUMBER_WORD = re.compile(r"\b(?:zero|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty|thirty|forty|fifty|sixty|seventy|eighty|ninety|hundred|thousand|million|billion)\b", re.I)
 _COMPARE = re.compile(r"\b(?:more|less|higher|lower|greater|smaller|increase|decrease|outperform(?:ed|s)?|better|worse|versus|vs\.?|than|exceed(?:ed|s)?|surpass(?:ed|es)?|twice|half)\b", re.I)
 _DURATION = re.compile(r"\b(?:one|two|three|four|five|six|seven|eight|nine|ten)\s*-?\s*hour\b", re.I)
+_DURATION_VALUES = {"one": 1, "two": 2, "three": 3, "four": 4, "five": 5,
+                    "six": 6, "seven": 7, "eight": 8, "nine": 9, "ten": 10}
 
 
 @dataclass(frozen=True)
@@ -125,6 +127,8 @@ def _unit_matches(text: str, unit: str) -> bool:
         return False
     if unit.lower() in {"percent", "percentage"} and any(marker in nearby for marker in ("$", "usd", "dollar")):
         return False
+    if unit.lower() in {"ratio", "unitless"}:
+        return not any(marker in lowered for marker in ("$", "%", "usd", "dollar", "percent"))
     if unit.lower() not in {"usd", "dollars", "percent", "percentage"}:
         return any(marker in lowered for marker in expected)
     return any(marker in nearby for marker in expected)
@@ -205,6 +209,15 @@ def validate_claims(claims: Iterable[Claim | dict[str, Any]], manifest: dict[str
                 if not required[0] or not required[1] or not required[2] or evidence.uncertainty is None:
                     raise ValueError(f"claim {claim.id} has incomplete provenance")
             expected = _derived_value(claim, staged)
+            duration = _DURATION.search(claim.text)
+            if duration:
+                duration_hours = _DURATION_VALUES[duration.group(0).lower().replace("-", " ").split()[0]]
+                for evidence in claim.evidence:
+                    row = staged[evidence.artifact][evidence.row]
+                    if not any(str(value).lower().replace("-", "").replace(" ", "") in
+                               {f"{duration_hours}h", f"{duration_hours}hour"}
+                               for value in row.values() if isinstance(value, str)):
+                        raise ValueError(f"claim {claim.id} duration is not supported by its evidence")
             decimals = claim.derivation.decimals
             if (decimals < 0 or decimals > 12 or claim.derivation.unit == "" or
                     claim.derivation.source_unit == ""):
@@ -222,7 +235,10 @@ def validate_claims(claims: Iterable[Claim | dict[str, Any]], manifest: dict[str
             numbers = _claim_numbers(claim.text)
             if _NUMBER_WORD.search(_DURATION.sub("", claim.text)):
                 raise ValueError(f"claim {claim.id} contains an unsupported word-number representation")
-            if numbers and (len(numbers) != 1 or round(numbers[0], decimals) != round(expected, decimals)):
+            lowered = claim.text.lower()
+            displayed_expected = (abs(expected) if any(word in lowered for word in ("lower", "less", "decrease")) and
+                                  claim.derivation.operation == "percent_change" else expected)
+            if numbers and (len(numbers) != 1 or round(numbers[0], decimals) != round(displayed_expected, decimals)):
                 raise ValueError(f"claim {claim.id} rendered value disagrees with its derivation")
             if numbers:
                 match = next(_NUMBER.finditer(claim.text))
@@ -234,7 +250,6 @@ def validate_claims(claims: Iterable[Claim | dict[str, Any]], manifest: dict[str
                 raise ValueError(f"claim {claim.id} has invalid formatting policy")
             if not numbers and not _COMPARE.search(claim.text):
                 raise ValueError(f"claim {claim.id} rendered value disagrees with its derivation")
-            lowered = claim.text.lower()
             if (_COMPARE.search(claim.text) and
                     not (lowered.find(claim.derivation.left_label.lower()) >= 0 and
                          lowered.find(claim.derivation.left_label.lower()) <

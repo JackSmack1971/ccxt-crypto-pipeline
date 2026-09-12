@@ -278,7 +278,7 @@ def test_phase4_rejects_word_number_mismatch_after_duration_phrase(tmp_path):
     manifest["claims"][0]["text"] = "The one-hour return was five percent."
     rekey_handoff(manifest)
     (input_dir / "manifest.json").write_text(json.dumps(manifest))
-    with pytest.raises(ValueError, match="unsupported word-number representation"):
+    with pytest.raises(ValueError, match="duration is not supported"):
         generate_package(input_dir, tmp_path / "out")
 
 

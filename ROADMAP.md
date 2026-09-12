@@ -391,7 +391,7 @@ Evidence:
 - `tests/test_phase4.py` covers derivation disagreement/missing declarations,
   transformation rejection, annotation execution/rejection, missing-value
   handling, deterministic replay, and the offline package path. The locked
-  suite passed with 103 tests; `git diff --check` and byte-compilation passed.
+  suite passed with 104 tests; `git diff --check` and byte-compilation passed.
 - The CI workflow pins the pytest/pluggy test-runner pair so the locked fixture
   verification does not depend on an ambient runner dependency.
 - Final specification review remains unverified because the reviewer service
