@@ -118,7 +118,7 @@ def _unit_matches(text: str, unit: str) -> bool:
         return False
     number = _NUMBER.search(text)
     if number is None:
-        return False
+        return any(marker in lowered for marker in expected)
     nearby = lowered[max(0, number.start() - 12):number.end() + 12]
     if unit.lower() in {"usd", "dollars"} and "%" in nearby:
         return False
@@ -219,6 +219,8 @@ def validate_claims(claims: Iterable[Claim | dict[str, Any]], manifest: dict[str
                     claim.derivation.unit.lower() not in {"percent", "percentage"}):
                 raise ValueError(f"claim {claim.id} has incompatible source/output units")
             numbers = _claim_numbers(claim.text)
+            if _NUMBER_WORD.search(claim.text) and not re.search(r"\b(?:one|two|three|four|five|six|seven|eight|nine|ten)-hour\b", claim.text, re.I):
+                raise ValueError(f"claim {claim.id} contains an unsupported word-number representation")
             if numbers and (len(numbers) != 1 or round(numbers[0], decimals) != round(expected, decimals)):
                 raise ValueError(f"claim {claim.id} rendered value disagrees with its derivation")
             if numbers:
@@ -227,7 +229,7 @@ def validate_claims(claims: Iterable[Claim | dict[str, Any]], manifest: dict[str
                 if ((decimals > 0 and "." not in numeric_text) or
                         ("." in numeric_text and len(numeric_text.split(".", 1)[1]) != decimals)):
                     raise ValueError(f"claim {claim.id} rendered value disagrees with its formatting policy")
-            if numbers and not _unit_matches(claim.text, claim.derivation.unit):
+            if (numbers or _COMPARE.search(claim.text)) and not _unit_matches(claim.text, claim.derivation.unit):
                 raise ValueError(f"claim {claim.id} has invalid formatting policy")
             if not numbers and not _COMPARE.search(claim.text):
                 raise ValueError(f"claim {claim.id} rendered value disagrees with its derivation")
