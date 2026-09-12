@@ -358,7 +358,7 @@ Evidence:
 
 ## Slice 4R.9 — Evidence-bound claims and chart semantics
 
-**Status:** DONE
+**Status:** ACTIVE
 
 Upgrade Phase 4 from evidence *reference* validation to evidence *derivation* validation where factual numbers are emitted.
 
@@ -397,7 +397,7 @@ Evidence:
 
 ## Slice 4R.10 — Phase 4 closure acceptance matrix
 
-**Status:** ACTIVE
+**Status:** PLANNED
 
 Freeze the repaired Phase 1–4 contract before starting Phase 5.
 
@@ -631,4 +631,4 @@ For a fresh agent, the intended pickup sequence is:
 
 `AGENTS.md` → `ROADMAP.md` → active `docs/plans/phase-*.md` → relevant code/tests → Git history/status.
 
-The current frontier is **Phase 4R.10 — Phase 4 closure acceptance matrix**. Phase 4R.1 established the mandatory CI gate; do not begin Phase 5 until every mandatory Phase 4R closure criterion is satisfied.
+The current frontier is **Phase 4R.9 — Evidence-bound claims and chart semantics**. Phase 4R.1 established the mandatory CI gate; do not begin Phase 5 until every mandatory Phase 4R closure criterion is satisfied.
