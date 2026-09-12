@@ -144,8 +144,9 @@ def test_phase4_rejects_claim_with_mismatched_dataset_identity(tmp_path):
     input_dir = approved_input(tmp_path)
     manifest = json.loads((input_dir / "manifest.json").read_text())
     manifest["claims"][0]["evidence"][0]["dataset_identity"] = "other-dataset"
+    rekey_handoff(manifest)
     (input_dir / "manifest.json").write_text(json.dumps(manifest))
-    with pytest.raises(ValueError, match="approved handoff identity"):
+    with pytest.raises(ValueError, match="mismatched dataset identity"):
         generate_package(input_dir, tmp_path / "out")
 
 
@@ -153,8 +154,9 @@ def test_phase4_rejects_claim_when_rendered_number_disagrees_with_evidence(tmp_p
     input_dir = approved_input(tmp_path)
     manifest = json.loads((input_dir / "manifest.json").read_text())
     manifest["claims"][0]["text"] = "The observed return was 9.9%."
+    rekey_handoff(manifest)
     (input_dir / "manifest.json").write_text(json.dumps(manifest))
-    with pytest.raises(ValueError, match="approved handoff identity"):
+    with pytest.raises(ValueError, match="rendered value disagrees"):
         generate_package(input_dir, tmp_path / "out")
 
 
@@ -162,8 +164,9 @@ def test_phase4_requires_derivation_for_numeric_claim(tmp_path):
     input_dir = approved_input(tmp_path)
     manifest = json.loads((input_dir / "manifest.json").read_text())
     manifest["claims"][0].pop("derivation")
+    rekey_handoff(manifest)
     (input_dir / "manifest.json").write_text(json.dumps(manifest))
-    with pytest.raises(ValueError, match="approved handoff identity"):
+    with pytest.raises(ValueError, match="lacks a derivation"):
         generate_package(input_dir, tmp_path / "out")
 
 
@@ -171,8 +174,9 @@ def test_phase4_requires_evidence_for_factual_claim(tmp_path):
     input_dir = approved_input(tmp_path)
     manifest = json.loads((input_dir / "manifest.json").read_text())
     manifest["claims"][0] = {"id": "fact", "text": "The cohort was sealed.", "kind": "fact"}
+    rekey_handoff(manifest)
     (input_dir / "manifest.json").write_text(json.dumps(manifest))
-    with pytest.raises(ValueError, match="approved handoff identity"):
+    with pytest.raises(ValueError, match="factual claim has no evidence"):
         generate_package(input_dir, tmp_path / "out")
 
 
@@ -180,8 +184,9 @@ def test_phase4_rejects_unsupported_chart_transformation(tmp_path):
     input_dir = approved_input(tmp_path)
     manifest = json.loads((input_dir / "manifest.json").read_text())
     manifest["charts"][0]["transformations"] = ["interpolate"]
+    rekey_handoff(manifest)
     (input_dir / "manifest.json").write_text(json.dumps(manifest))
-    with pytest.raises(ValueError, match="approved handoff identity"):
+    with pytest.raises(ValueError, match="unsupported transformation"):
         generate_package(input_dir, tmp_path / "out")
 
 
@@ -209,8 +214,9 @@ def test_phase4_requires_result_approval_for_supported_chart_transformation(tmp_
     input_dir = approved_input(tmp_path)
     manifest = json.loads((input_dir / "manifest.json").read_text())
     manifest["charts"][0]["transformations"] = ["sort_x"]
+    rekey_handoff(manifest)
     (input_dir / "manifest.json").write_text(json.dumps(manifest))
-    with pytest.raises(ValueError, match="approved handoff identity"):
+    with pytest.raises(ValueError, match="not approved"):
         generate_package(input_dir, tmp_path / "out")
 
 
@@ -229,8 +235,9 @@ def test_phase4_rejects_extra_number_in_claim(tmp_path):
     input_dir = approved_input(tmp_path)
     manifest = json.loads((input_dir / "manifest.json").read_text())
     manifest["claims"][0]["text"] = "The observed return was 1.5% versus 0.5%."
+    rekey_handoff(manifest)
     (input_dir / "manifest.json").write_text(json.dumps(manifest))
-    with pytest.raises(ValueError, match="approved handoff identity"):
+    with pytest.raises(ValueError, match="comparative derivation requires two evidence rows"):
         generate_package(input_dir, tmp_path / "out")
 
 
@@ -238,8 +245,9 @@ def test_phase4_rejects_claim_with_wrong_unit_text(tmp_path):
     input_dir = approved_input(tmp_path)
     manifest = json.loads((input_dir / "manifest.json").read_text())
     manifest["claims"][0]["text"] = "The observed return was 1.5 dollars."
+    rekey_handoff(manifest)
     (input_dir / "manifest.json").write_text(json.dumps(manifest))
-    with pytest.raises(ValueError, match="approved handoff identity"):
+    with pytest.raises(ValueError, match="invalid formatting policy"):
         generate_package(input_dir, tmp_path / "out")
 
 
@@ -247,9 +255,10 @@ def test_phase4_rejects_reversed_comparative_claim(tmp_path):
     input_dir = approved_input(tmp_path)
     manifest = json.loads((input_dir / "manifest.json").read_text())
     manifest["claims"][0]["text"] = "The observed return was 1.5% lower."
-    manifest["claims"][0]["derivation"] = {"source_field": "return", "operation": "identity", "unit": "percent", "decimals": 1}
+    manifest["claims"][0]["derivation"] = {"source_field": "return", "operation": "identity", "unit": "percent", "source_unit": "percent", "decimals": 1}
+    rekey_handoff(manifest)
     (input_dir / "manifest.json").write_text(json.dumps(manifest))
-    with pytest.raises(ValueError, match="approved handoff identity"):
+    with pytest.raises(ValueError, match="comparative derivation requires two evidence rows"):
         generate_package(input_dir, tmp_path / "out")
 
 
@@ -260,6 +269,16 @@ def test_phase4_rejects_untyped_exceeded_comparison(tmp_path):
     rekey_handoff(manifest)
     (input_dir / "manifest.json").write_text(json.dumps(manifest))
     with pytest.raises(ValueError, match="comparative derivation requires two evidence rows"):
+        generate_package(input_dir, tmp_path / "out")
+
+
+def test_phase4_rejects_word_number_mismatch_after_duration_phrase(tmp_path):
+    input_dir = approved_input(tmp_path)
+    manifest = json.loads((input_dir / "manifest.json").read_text())
+    manifest["claims"][0]["text"] = "The one-hour return was five percent."
+    rekey_handoff(manifest)
+    (input_dir / "manifest.json").write_text(json.dumps(manifest))
+    with pytest.raises(ValueError, match="unsupported word-number representation"):
         generate_package(input_dir, tmp_path / "out")
 
 
@@ -281,8 +300,9 @@ def test_phase4_rejects_unsupported_chart_annotation(tmp_path):
     input_dir = approved_input(tmp_path)
     manifest = json.loads((input_dir / "manifest.json").read_text())
     manifest["charts"][0]["annotations"] = [{"type": "fake", "value": 1, "label": "ignored"}]
+    rekey_handoff(manifest)
     (input_dir / "manifest.json").write_text(json.dumps(manifest))
-    with pytest.raises(ValueError, match="approved handoff identity"):
+    with pytest.raises(ValueError, match="unsupported annotation"):
         generate_package(input_dir, tmp_path / "out")
 
 

@@ -8,6 +8,7 @@ from typing import Any, Iterable
 _NUMBER = re.compile(r"(?<![A-Za-z])[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:%|[A-Za-z]{0,4})?(?![A-Za-z])")
 _NUMBER_WORD = re.compile(r"\b(?:zero|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty|thirty|forty|fifty|sixty|seventy|eighty|ninety|hundred|thousand|million|billion)\b", re.I)
 _COMPARE = re.compile(r"\b(?:more|less|higher|lower|greater|smaller|increase|decrease|outperform(?:ed|s)?|better|worse|versus|vs\.?|than|exceed(?:ed|s)?|surpass(?:ed|es)?|twice|half)\b", re.I)
+_DURATION = re.compile(r"\b(?:one|two|three|four|five|six|seven|eight|nine|ten)\s*-?\s*hour\b", re.I)
 
 
 @dataclass(frozen=True)
@@ -219,7 +220,7 @@ def validate_claims(claims: Iterable[Claim | dict[str, Any]], manifest: dict[str
                     claim.derivation.unit.lower() not in {"percent", "percentage"}):
                 raise ValueError(f"claim {claim.id} has incompatible source/output units")
             numbers = _claim_numbers(claim.text)
-            if _NUMBER_WORD.search(claim.text) and not re.search(r"\b(?:one|two|three|four|five|six|seven|eight|nine|ten)-hour\b", claim.text, re.I):
+            if _NUMBER_WORD.search(_DURATION.sub("", claim.text)):
                 raise ValueError(f"claim {claim.id} contains an unsupported word-number representation")
             if numbers and (len(numbers) != 1 or round(numbers[0], decimals) != round(expected, decimals)):
                 raise ValueError(f"claim {claim.id} rendered value disagrees with its derivation")
