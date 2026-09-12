@@ -358,7 +358,7 @@ def test_phase3_artifact_is_accepted_only_through_explicit_approved_handoff(tmp_
             "uncertainty": "fixture"}], "derivation": {"source_field": "value", "operation": "identity", "unit": "log-return", "source_unit": "log-return", "decimals": 1}}],
         "charts": [{"id": "returns", "data_artifact": "results", "x_column": "horizon", "y_column": "value",
                      "x_unit": "label", "y_unit": "log-return", "missing_behavior": "explicit_state",
-                     "source_attribution": "approved Phase 3 result", "alt_text": "Observed return label."}],
+                     "source_attribution": "approved Phase 3 result", "alt_text": "Observed log-return label."}],
         "methodology": {"cohort_split": "sealed", "costs": "0 bps", "missingness": "reported",
                          "uncertainty": "fixture", "limitations": "not predictive"},
     }
@@ -419,7 +419,7 @@ def test_offline_phase1_to_phase4_chain_is_content_addressed_and_review_gated(tm
             "uncertainty": "fixture"}], "derivation": {"source_field": "value", "operation": "identity", "unit": "log-return", "source_unit": "log-return", "decimals": 6}}],
         "charts": [{"id": "label", "data_artifact": "labels", "x_column": "value", "y_column": "value",
                      "x_unit": "log-return", "y_unit": "log-return", "missing_behavior": "explicit_state",
-                     "source_attribution": "approved Phase 3 result", "alt_text": "Observed one-hour return."}],
+                     "source_attribution": "approved Phase 3 result", "alt_text": "Observed one-hour log-return."}],
         "methodology": {"cohort_split": "sealed fixture", "costs": "0 bps", "missingness": "reported",
                          "uncertainty": "fixture", "limitations": "not predictive"},
     }

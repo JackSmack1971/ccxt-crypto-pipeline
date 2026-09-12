@@ -6,7 +6,7 @@ from dataclasses import dataclass, asdict
 from typing import Any, Iterable
 
 _NUMBER = re.compile(r"(?<![A-Za-z])[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:%|[A-Za-z]{0,4})?(?![A-Za-z])")
-_NUMBER_WORD = re.compile(r"\b(?:zero|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty|thirty|forty|fifty|sixty|seventy|eighty|ninety|hundred|thousand|million|billion)\b", re.I)
+_NUMBER_WORD = re.compile(r"\b(?:zero|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty|thirty|forty|fifty|sixty|seventy|eighty|ninety|hundred|thousand|million|billion|dozen|couple|score)\b", re.I)
 _COMPARE = re.compile(r"\b(?:more|less|higher|lower|greater|smaller|increase|decrease|outperform(?:ed|s)?|better|worse|versus|vs\.?|than|exceed(?:ed|s)?|surpass(?:ed|es)?|twice|half)\b", re.I)
 _DURATION = re.compile(r"\b(?:one|two|three|four|five|six|seven|eight|nine|ten)\s*-?\s*hour\b", re.I)
 _DURATION_VALUES = {"one": 1, "two": 2, "three": 3, "four": 4, "five": 5,
@@ -123,9 +123,9 @@ def _unit_matches(text: str, unit: str) -> bool:
     if number is None:
         return any(marker in lowered for marker in expected)
     nearby = lowered[max(0, number.start() - 12):number.end() + 12]
-    if unit.lower() in {"usd", "dollars"} and "%" in nearby:
+    if unit.lower() in {"usd", "dollars"} and ("%" in lowered or "percent" in lowered):
         return False
-    if unit.lower() in {"percent", "percentage"} and any(marker in nearby for marker in ("$", "usd", "dollar")):
+    if unit.lower() in {"percent", "percentage"} and any(marker in lowered for marker in ("$", "usd", "dollar")):
         return False
     if unit.lower() in {"ratio", "unitless"}:
         return not any(marker in lowered for marker in ("$", "%", "usd", "dollar", "percent"))
@@ -214,9 +214,10 @@ def validate_claims(claims: Iterable[Claim | dict[str, Any]], manifest: dict[str
                 duration_hours = _DURATION_VALUES[duration.group(0).lower().replace("-", " ").split()[0]]
                 for evidence in claim.evidence:
                     row = staged[evidence.artifact][evidence.row]
-                    if not any(str(value).lower().replace("-", "").replace(" ", "") in
-                               {f"{duration_hours}h", f"{duration_hours}hour"}
-                               for value in row.values() if isinstance(value, str)):
+                    declared_horizon = row.get("horizon", row.get("timeframe"))
+                    normalized_horizon = (declared_horizon.lower().replace("-", "").replace(" ", "")
+                                          if isinstance(declared_horizon, str) else "")
+                    if normalized_horizon not in {f"{duration_hours}h", f"{duration_hours}hour", f"{duration_hours}hours"}:
                         raise ValueError(f"claim {claim.id} duration is not supported by its evidence")
             decimals = claim.derivation.decimals
             if (decimals < 0 or decimals > 12 or claim.derivation.unit == "" or
@@ -237,7 +238,7 @@ def validate_claims(claims: Iterable[Claim | dict[str, Any]], manifest: dict[str
                 raise ValueError(f"claim {claim.id} contains an unsupported word-number representation")
             lowered = claim.text.lower()
             displayed_expected = (abs(expected) if any(word in lowered for word in ("lower", "less", "decrease")) and
-                                  claim.derivation.operation == "percent_change" else expected)
+                                  claim.derivation.operation in {"percent_change", "difference"} else expected)
             if numbers and (len(numbers) != 1 or round(numbers[0], decimals) != round(displayed_expected, decimals)):
                 raise ValueError(f"claim {claim.id} rendered value disagrees with its derivation")
             if numbers:

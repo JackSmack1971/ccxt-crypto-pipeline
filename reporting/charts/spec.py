@@ -46,6 +46,8 @@ def validate_chart(value: ChartSpec | dict[str, Any], staged: dict[str, Any],
                 not set(re.findall(r"[A-Za-z]{2,}", spec.alt_text.lower())) &
                 {"foo", "bar", "baz", "lorem", "ipsum", "test", "xxx"})):
         raise ValueError(f"chart {spec.id!r} is missing required accessibility/provenance metadata")
+    if spec.y_column.lower() not in spec.alt_text.lower() and spec.y_unit.lower() not in spec.alt_text.lower():
+        raise ValueError(f"chart {spec.id!r} alt text does not describe its data")
     if spec.missing_behavior not in {"explicit_state", "fail"}:
         raise ValueError(f"chart {spec.id} has unsupported missing-data behavior")
     if spec.width < 320 or spec.width > 4096 or spec.height < 180 or spec.height > 4096:
