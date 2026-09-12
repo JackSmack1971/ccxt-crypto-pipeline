@@ -7,7 +7,7 @@ from typing import Any, Iterable
 
 _NUMBER = re.compile(r"(?<![A-Za-z])[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:%|[A-Za-z]{0,4})?(?![A-Za-z])")
 _NUMBER_WORD = re.compile(r"\b(?:zero|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty|thirty|forty|fifty|sixty|seventy|eighty|ninety|hundred|thousand|million|billion|dozen|couple|score)\b", re.I)
-_COMPARE = re.compile(r"\b(?:more|less|higher|lower|greater|smaller|increase|decrease|outperform(?:ed|s)?|better|worse|versus|vs\.?|than|exceed(?:ed|s)?|surpass(?:ed|es)?|twice|half)\b", re.I)
+_COMPARE = re.compile(r"\b(?:more|less|higher|lower|greater|smaller|increase|decrease|outperform(?:ed|s)?|better|worse|versus|vs\.?|than|exceed(?:ed|s)?|surpass(?:ed|es)?|twice|double|doubled|doubles|half|halve|halved|halves)\b", re.I)
 _DURATION = re.compile(r"\b(?:one|two|three|four|five|six|seven|eight|nine|ten)\s*-?\s*hour\b", re.I)
 _DURATION_VALUES = {"one": 1, "two": 2, "three": 3, "four": 4, "five": 5,
                     "six": 6, "seven": 7, "eight": 8, "nine": 9, "ten": 10}
@@ -123,6 +123,8 @@ def _unit_matches(text: str, unit: str) -> bool:
     if number is None:
         return any(marker in lowered for marker in expected)
     nearby = lowered[max(0, number.start() - 12):number.end() + 12]
+    has_percent = "%" in lowered or "percent" in lowered or "percentage" in lowered
+    has_currency = any(marker in lowered for marker in ("$", "usd", "dollar"))
     if unit.lower() in {"usd", "dollars"} and ("%" in lowered or "percent" in lowered):
         return False
     if unit.lower() in {"percent", "percentage"} and any(marker in lowered for marker in ("$", "usd", "dollar")):
@@ -130,6 +132,8 @@ def _unit_matches(text: str, unit: str) -> bool:
     if unit.lower() in {"ratio", "unitless"}:
         return not any(marker in lowered for marker in ("$", "%", "usd", "dollar", "percent"))
     if unit.lower() not in {"usd", "dollars", "percent", "percentage"}:
+        if has_percent or has_currency:
+            return False
         return any(marker in lowered for marker in expected)
     return any(marker in nearby for marker in expected)
 
@@ -185,9 +189,13 @@ def validate_claims(claims: Iterable[Claim | dict[str, Any]], manifest: dict[str
             if (_COMPARE.search(claim.text) and tuple(item.side for item in claim.evidence) !=
                     (claim.derivation.left_label, claim.derivation.right_label)):
                 raise ValueError(f"claim {claim.id} comparative evidence sides do not match its derivation")
-            if _COMPARE.search(claim.text) and "twice" in claim.text.lower() and (claim.derivation.operation != "ratio" or round(_derived_value(claim, staged), 12) != 2):
+            if (_COMPARE.search(claim.text) and
+                    re.search(r"\b(?:twice|double|doubled|doubles)\b", claim.text, re.I) and
+                    (claim.derivation.operation != "ratio" or round(_derived_value(claim, staged), 12) != 2)):
                 raise ValueError(f"claim {claim.id} twice comparison disagrees with its derivation")
-            if _COMPARE.search(claim.text) and "half" in claim.text.lower() and (claim.derivation.operation != "ratio" or round(_derived_value(claim, staged), 12) != 0.5):
+            if (_COMPARE.search(claim.text) and
+                    re.search(r"\b(?:half|halve|halved|halves)\b", claim.text, re.I) and
+                    (claim.derivation.operation != "ratio" or round(_derived_value(claim, staged), 12) != 0.5)):
                 raise ValueError(f"claim {claim.id} half comparison disagrees with its derivation")
             for evidence in claim.evidence:
                 if evidence.artifact not in staged:
@@ -251,10 +259,13 @@ def validate_claims(claims: Iterable[Claim | dict[str, Any]], manifest: dict[str
                 raise ValueError(f"claim {claim.id} has invalid formatting policy")
             if not numbers and not _COMPARE.search(claim.text):
                 raise ValueError(f"claim {claim.id} rendered value disagrees with its derivation")
+            comparison_clause = lowered.rsplit(":", 1)[-1]
+            comparison = _COMPARE.search(comparison_clause)
+            left_position = comparison_clause.find(claim.derivation.left_label.lower())
+            right_position = comparison_clause.find(claim.derivation.right_label.lower())
             if (_COMPARE.search(claim.text) and
-                    not (lowered.find(claim.derivation.left_label.lower()) >= 0 and
-                         lowered.find(claim.derivation.left_label.lower()) <
-                         lowered.find(claim.derivation.right_label.lower()))):
+                    (comparison is None or left_position < 0 or right_position < 0 or
+                     left_position >= comparison.start() or right_position <= comparison.start())):
                 raise ValueError(f"claim {claim.id} comparative labels disagree with its derivation")
             if any(word in lowered for word in ("higher", "greater", "more", "outperform", "better", "increase", "increased", "exceed", "surpass")) and ((claim.derivation.operation == "ratio" and expected <= 1) or (claim.derivation.operation != "ratio" and expected <= 0)):
                 raise ValueError(f"claim {claim.id} comparative direction disagrees with its derivation")
