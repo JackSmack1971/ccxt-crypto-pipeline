@@ -59,6 +59,8 @@ def _security_scan(values: Any) -> None:
     text = json.dumps(values, default=str, sort_keys=True)
     patterns = (r"(?i)sk-[A-Za-z0-9_-]{10,}", r"(?i)(api[_-]?key|secret|password|token|private[_-]?key)\s*[:=]\s*[^\s,;]+",
                 r"(?i)://[^/\s:@]+:[^/\s@]+@", r"(?i)https?://[^\s]+(?:api[_-]?key|token|secret)=",
+                r"(?i)\bauthorization\s*:\s*bearer\s+[A-Za-z0-9._~+/=-]+",
+                r"(?i)https?://(?:[^/\s]+\.)?(?:alchemy\.com|infura\.io|quicknode\.com|helius-rpc\.com)(?:/[^\s\"']+)?",
                 r"(?:[A-Za-z]:\\|/(?:Users|home|tmp|var)/)[^\s\"']+")
     if any(re.search(pattern, text) for pattern in patterns):
         raise ValueError("generated artifact contains a secret or secret-bearing URL")

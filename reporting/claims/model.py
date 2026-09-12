@@ -55,6 +55,10 @@ class Claim:
 def _claim(value: Claim | dict[str, Any]) -> Claim:
     if isinstance(value, Claim):
         return value
+    allowed = {"id", "text", "kind", "evidence", "derivation"}
+    unknown = set(value) - allowed
+    if unknown:
+        raise ValueError(f"claim has unknown fields: {sorted(unknown)}")
     evidence = tuple(Evidence(**item) for item in value.get("evidence", ()))
     raw_derivation = value.get("derivation")
     derivation = Derivation(**raw_derivation) if raw_derivation is not None else None
@@ -107,8 +111,12 @@ def _derived_value(claim: Claim, staged: dict[str, Any]) -> float:
 
 
 def _claim_numbers(text: str) -> list[float]:
-    return [float(match.group(0).rstrip("%")) for match in _NUMBER.finditer(text)
-            if match.group(0).rstrip("%").replace(".", "", 1).lstrip("+-").isdigit()]
+    values = []
+    for match in _NUMBER.finditer(text):
+        numeric = re.match(r"[+-]?(?:\d+(?:\.\d*)?|\.\d+)", match.group(0))
+        if numeric:
+            values.append(float(numeric.group(0)))
+    return values
 
 
 def _unit_matches(text: str, unit: str) -> bool:
@@ -259,6 +267,8 @@ def validate_claims(claims: Iterable[Claim | dict[str, Any]], manifest: dict[str
                 raise ValueError(f"claim {claim.id} has invalid formatting policy")
             if not numbers and not _COMPARE.search(claim.text):
                 raise ValueError(f"claim {claim.id} rendered value disagrees with its derivation")
+            if _COMPARE.search(claim.text) and re.search(r"\b(?:not|never|isn't|wasn't|didn't)\b", lowered):
+                raise ValueError(f"claim {claim.id} contains a negated comparison")
             comparison_clause = lowered.rsplit(":", 1)[-1]
             comparison = _COMPARE.search(comparison_clause)
             left_position = comparison_clause.find(claim.derivation.left_label.lower())

@@ -391,12 +391,11 @@ Evidence:
 - `tests/test_phase4.py` covers derivation disagreement/missing declarations,
   transformation rejection, annotation execution/rejection, missing-value
   handling, deterministic replay, and the offline package path. The locked
-  suite passed with 104 tests; `git diff --check` and byte-compilation passed.
+  suite passed with 106 tests; `git diff --check` and byte-compilation passed.
 - The CI workflow pins the pytest/pluggy test-runner pair so the locked fixture
   verification does not depend on an ambient runner dependency.
-- Final specification review remains unverified because the reviewer service
-  exhausted its usage quota; 4R.9 therefore remains ACTIVE pending a clean
-  two-brain disposition and hosted CI for the committed tree.
+- Final two-brain review and hosted CI must pass for the corrected committed
+  tree before 4R.9 can close; the slice remains ACTIVE until then.
 
 ## Slice 4R.10 — Phase 4 closure acceptance matrix
 

@@ -170,6 +170,26 @@ def test_phase4_requires_derivation_for_numeric_claim(tmp_path):
         generate_package(input_dir, tmp_path / "out")
 
 
+def test_phase4_rejects_unknown_claim_fields(tmp_path):
+    input_dir = approved_input(tmp_path)
+    manifest = json.loads((input_dir / "manifest.json").read_text())
+    manifest["claims"][0]["unexpected"] = "not allowed"
+    rekey_handoff(manifest)
+    (input_dir / "manifest.json").write_text(json.dumps(manifest))
+    with pytest.raises(ValueError, match="unknown fields"):
+        generate_package(input_dir, tmp_path / "out")
+
+
+def test_phase4_rejects_attached_number_unit_mismatch(tmp_path):
+    input_dir = approved_input(tmp_path)
+    manifest = json.loads((input_dir / "manifest.json").read_text())
+    manifest["claims"][0]["text"] = "The observed return was 999.9USD."
+    rekey_handoff(manifest)
+    (input_dir / "manifest.json").write_text(json.dumps(manifest))
+    with pytest.raises(ValueError, match="rendered value disagrees"):
+        generate_package(input_dir, tmp_path / "out")
+
+
 def test_phase4_requires_evidence_for_factual_claim(tmp_path):
     input_dir = approved_input(tmp_path)
     manifest = json.loads((input_dir / "manifest.json").read_text())
@@ -440,7 +460,8 @@ def test_phase4_requires_approval_and_scans_secrets(tmp_path):
 
     manifest = json.loads((input_dir / "manifest.json").read_text())
     manifest["approved"] = True
-    manifest["claims"][0]["text"] = "The api_key=sk-1234567890abcdef must not be emitted."
+    manifest["claims"][0]["text"] = "The authorization: Bearer fixture-token must not be emitted."
+    rekey_handoff(manifest)
     (input_dir / "manifest.json").write_text(json.dumps(manifest))
-    with pytest.raises(ValueError, match="approved handoff identity"):
+    with pytest.raises(ValueError, match="secret or secret-bearing URL"):
         generate_package(input_dir, tmp_path / "out")
