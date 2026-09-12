@@ -42,6 +42,14 @@ def _safe_chart_id(value: str) -> str:
     return value
 
 
+def _safe_output_path(root: Path, relative: str) -> Path:
+    path = root / relative
+    resolved_root = root.resolve()
+    if not path.resolve().is_relative_to(resolved_root):
+        raise ValueError("output artifact escapes package")
+    return path
+
+
 def _verified_digest(path: Path, expected: str, label: str) -> None:
     if hashlib.sha256(path.read_bytes()).hexdigest() != expected:
         raise ValueError(f"{label} content hash mismatch")
@@ -145,7 +153,8 @@ def generate_package(input_dir: str | Path, output_dir: str | Path) -> Path:
     article = "\n".join([f"# {manifest.get('title', 'Research results')}", "", *[f"{c['text']}" for c in claims], "", *method_lines, ""])
     _security_scan({"article": article, "claims": claims, "methodology": methodology})
     package_key = hashlib.sha256(_json({"manifest": manifest, "claims": claims, "charts": [{k:v for k,v in c.items() if k != "_svg"} for c in charts]})).hexdigest()[:24]
-    target = Path(output_dir) / package_key
+    output_root = Path(output_dir).resolve()
+    target = _safe_output_path(output_root, package_key)
     target.mkdir(parents=True, exist_ok=True)
     files: dict[str, bytes] = {"article.md": article.encode(), "claim-ledger.json": _json(claims),
                                "chart-specs.json": _json([{k:v for k,v in c.items() if k != "_svg"} for c in charts]),
@@ -155,7 +164,7 @@ def generate_package(input_dir: str | Path, output_dir: str | Path) -> Path:
         files[f"charts/{_safe_chart_id(chart['id'])}.svg"] = chart.pop("_svg").encode()
     checksums = {}
     for name, content in sorted(files.items()):
-        path = target / name; path.parent.mkdir(parents=True, exist_ok=True)
+        path = _safe_output_path(target, name); path.parent.mkdir(parents=True, exist_ok=True)
         if path.exists() and path.read_bytes() != content:
             raise FileExistsError(f"immutable package artifact differs: {path}")
         if not path.exists(): path.write_bytes(content)

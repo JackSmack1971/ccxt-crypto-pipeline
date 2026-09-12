@@ -50,6 +50,13 @@ def _validate_artifact_entry(entry: Any, label: str, extra_fields: set[str] | No
     _safe_relative_name(entry["path"], label)
 
 
+def _safe_output_path(root: Path, relative: str) -> Path:
+    path = root / relative
+    if not path.resolve().is_relative_to(root.resolve()):
+        raise ValueError("output artifact escapes handoff")
+    return path
+
+
 def validate_approved_handoff(manifest: Mapping[str, Any]) -> None:
     """Validate the structural approval contract before Phase 4 reads inputs."""
     _strict_fields(manifest, _ROOT_FIELDS, "approved handoff")
@@ -138,7 +145,7 @@ def build_approved_handoff(
                    "staged_artifacts": {k: v for k, v in sorted(staged_artifacts.items())},
                    "presentation": presentation}
     handoff_id = hashlib.sha256(_dump(target_data)).hexdigest()[:24]
-    target = Path(output_dir).resolve() / handoff_id
+    target = _safe_output_path(Path(output_dir).resolve(), handoff_id)
     target.mkdir(parents=True, exist_ok=True)
     linked_manifest = target / "research-manifest.json"
     research_bytes = research_path.read_bytes()
@@ -156,7 +163,7 @@ def build_approved_handoff(
         source_artifact = source / artifact_path
         if not source_artifact.is_file() or _sha256(source_artifact) != research["artifacts"][artifact_name]:
             raise ValueError(f"Phase 3 artifact is missing or changed: {artifact_name}")
-        destination = target / artifact_path
+        destination = _safe_output_path(target, artifact_path.as_posix())
         destination.parent.mkdir(parents=True, exist_ok=True)
         if destination.exists() and destination.read_bytes() != source_artifact.read_bytes():
             raise FileExistsError(f"immutable handoff artifact differs: {destination}")
