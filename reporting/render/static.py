@@ -53,13 +53,16 @@ def render_svg(spec: dict[str, Any], rows: list[dict[str, Any]]) -> str:
     title = html.escape(spec["id"])
     desc = html.escape(spec["alt_text"] + f" Source: {spec['source_attribution']}")
     if not points:
-        body = '<text x="400" y="240" text-anchor="middle">No supported observations</text>'
+        body = (f'<text x="{w / 2:.3f}" y="{h / 2:.3f}" text-anchor="middle">'
+                'No supported observations</text>')
     else:
         lo_x, hi_x = min(p[0] for p in points), max(p[0] for p in points)
         lo_y, hi_y = min(p[1] for p in points), max(p[1] for p in points)
         dx, dy = hi_x - lo_x or 1.0, hi_y - lo_y or 1.0
         coords = [(60 + (x - lo_x) / dx * (w - 100), h - 50 - (y - lo_y) / dy * (h - 100)) for x, y in points]
-        body = f'<polyline fill="none" stroke="#1464a0" stroke-width="2" points="{" ".join(f"{x:.3f},{y:.3f}" for x,y in coords)}" />'
+        body = (f'<polyline fill="none" stroke="#1464a0" stroke-width="2" points="{" ".join(f"{x:.3f},{y:.3f}" for x,y in coords)}" />'
+                f'<text x="10" y="55">{hi_y:.6g}</text><text x="10" y="{h - 55}">{lo_y:.6g}</text>'
+                f'<text x="60" y="{h - 32}">{lo_x:.6g}</text><text x="{w - 40}" y="{h - 32}">{hi_x:.6g}</text>')
         for annotation in spec.get("annotations", ()):
             if annotation.get("type") != "horizontal_line":
                 raise ValueError(f"chart {spec['id']} has unsupported annotation")

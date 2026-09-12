@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, asdict
 import math
+import re
 from typing import Any
 
 
@@ -40,7 +41,8 @@ def validate_chart(value: ChartSpec | dict[str, Any], staged: dict[str, Any],
             isinstance(spec.height, bool) or not isinstance(spec.height, int)):
         raise ValueError(f"chart {spec.id!r} has invalid field types")
     if not all((spec.id, spec.data_artifact, spec.x_column, spec.y_column, spec.x_unit,
-                spec.y_unit, spec.missing_behavior, spec.source_attribution, len(spec.alt_text.strip()) >= 10)):
+                spec.y_unit, spec.missing_behavior, spec.source_attribution,
+                len(spec.alt_text.strip()) >= 10 and len(re.findall(r"[A-Za-z]{2,}", spec.alt_text)) >= 3)):
         raise ValueError(f"chart {spec.id!r} is missing required accessibility/provenance metadata")
     if spec.missing_behavior not in {"explicit_state", "fail"}:
         raise ValueError(f"chart {spec.id} has unsupported missing-data behavior")
