@@ -1,0 +1,4 @@
+interface:
+  display_name: "Evidence-Bound Reporting"
+  short_description: "Keep Phase 4 claims and charts provably tied to approved research"
+  default_prompt: "Use $evidence-bound-reporting for Phase 4 claim derivations, chart semantics, deterministic rendering, or approved review-package changes without changing upstream research."
