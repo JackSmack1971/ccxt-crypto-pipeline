@@ -55,9 +55,13 @@ class HeliusClient:
                     break
         raise SolanaProviderError("Helius request failed") from last
 
-    def recent_transactions(self, address: str, *, limit: int = 20) -> list[dict[str, Any]]:
+    def recent_transactions(self, address: str, *, limit: int = 20,
+                            before: str | None = None) -> list[dict[str, Any]]:
         url = f"{self.config['enhanced_base_url'].rstrip('/')}/addresses/{address}/transactions"
-        data = self._request("GET", url, params={"api-key": self.api_key, "limit": limit})
+        params = {"api-key": self.api_key, "limit": limit}
+        if before is not None:
+            params["before"] = before
+        data = self._request("GET", url, params=params)
         return data if isinstance(data, list) else []
 
     def get_asset(self, mint: str) -> dict[str, Any]:

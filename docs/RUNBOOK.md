@@ -110,6 +110,7 @@ That report covers nulls, logical duplicates, future timestamps, pre-launch time
 4. Retry the smallest one-pass command for the failing boundary.
 5. Check provider rate limits, HTTP authentication, and transient availability. Adapters retry transient failures and preserve explicit unsupported states.
 6. If storage looks inconsistent, run the normalization report and inspect the relevant DuckDB rows plus the affected `storage/parquet/source=.../date=...` partition.
+7. If OHLCV Parquet looks stale or missing relative to DuckDB (for example after a disk-full or permission error during ingestion), run `python -m storage storage/pipeline.duckdb --verify-parquet` and then `--repair-parquet` (see [Verification boundaries](#verification-boundaries) below) instead of re-running ingestion.
 
 | Error/symptom | Action |
 | --- | --- |
@@ -118,6 +119,7 @@ That report covers nulls, logical duplicates, future timestamps, pre-launch time
 | BSC capabilities unsupported | Configure the documented free MegaNode endpoint; no paid fallback is used. |
 | `healthy: false` | Read the latest `runs.error_message`, correct the boundary configuration, and rerun the isolated job. |
 | No CEX assets | Check exchange IDs, spot-market availability, ticker volume, and `minimum_24h_quote_volume` in `config/cex.yaml`. |
+| OHLCV Parquet partition missing/stale after a publication failure | Run `python -m storage <db> --verify-parquet` then `--repair-parquet`; DuckDB already holds the authoritative rows. |
 
 ## Verification boundaries
 
@@ -131,10 +133,26 @@ These tests do not establish live-provider acceptance. A real acceptance check m
 
 DuckDB is the canonical OHLCV store; Parquet is a reproducible read cache for
 analysis snapshots. OHLCV writes stage Parquet files and commit the DuckDB
-transaction before publishing the staged files. If filesystem publication fails,
-rerun the same ingestion write for the affected source/date partitions before
-using an explicitly Parquet-backed snapshot. This local two-store boundary
-cannot provide a cross-filesystem atomic commit.
+transaction before publishing the staged files. This local two-store boundary
+cannot provide a cross-filesystem atomic commit, so a filesystem publication
+failure after the DuckDB commit can leave a partition's Parquet file missing
+or stale relative to DuckDB.
+
+DuckDB remains authoritative in that state; recover mechanically instead of
+re-running ingestion:
+
+```powershell
+python -m storage storage/pipeline.duckdb --verify-parquet
+python -m storage storage/pipeline.duckdb --repair-parquet
+```
+
+`--verify-parquet` reports every `(source, date)` OHLCV partition whose
+Parquet file is missing, unreadable, or does not match DuckDB, without
+changing anything. `--repair-parquet` deterministically rebuilds only the
+diverging partitions from DuckDB using the same stage-then-atomic-replace
+sequence normal ingestion uses, and is idempotent: running it again against
+an already-repaired store reports nothing to repair. Pass `--parquet-dir` if
+the store does not use the default `<database directory>/parquet` layout.
 
 ## Data safety and phase boundaries
 

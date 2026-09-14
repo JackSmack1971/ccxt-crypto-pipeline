@@ -42,5 +42,7 @@ networks:
 
 poll_interval_minutes: 20
 evm_lookback_blocks: 1900
+confirmation_depth: 12
+reorg_lookback_blocks: 20
 request_timeout_seconds: 20
 max_pools_per_network: 20

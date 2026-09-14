@@ -6,7 +6,8 @@ import json
 from datetime import datetime, timezone
 from typing import Any
 
-from storage.db import (insert_event, log_run_end, log_run_start, safe_error_message, upsert_asset,
+from storage.db import (advance_ingestion_cursor, get_ingestion_cursor, insert_event, log_run_end,
+                        log_run_start, record_evm_block_observation, safe_error_message, upsert_asset,
                         upsert_asset_relationship, upsert_metadata)
 
 from .config import ROOT, load_chain, load_evm_config
@@ -42,10 +43,41 @@ def enrich_asset(chain: str, chain_id: int, address: str, provider, risk_provide
 
 
 def observe_once(chain_config: dict[str, Any], rpc: EVMRPCClient, provider, risk_provider, *,
-                 db_path: str, from_block: int, to_block: int, run_id: str | None = None) -> int:
+                 db_path: str, from_block: int, to_block: int, run_id: str | None = None,
+                 cursor_source: str | None = None) -> int:
     run_id = run_id or log_run_start(f"evm_listener:{chain_config['name']}", db_path)
     written = 0
     try:
+        cursor = (get_ingestion_cursor(cursor_source, chain_config["name"], db_path)
+                  if cursor_source is not None else None)
+        previous = cursor["position"] if cursor else None
+        if previous is not None and from_block > previous + 1:
+            raise ValueError(
+                f"skipped block range for {cursor_source}/{chain_config['name']}: "
+                f"expected at most {previous + 1}, got {from_block}"
+            )
+        if from_block > to_block:
+            raise ValueError(f"invalid block range: {from_block} > {to_block}")
+        for block_number in range(from_block, to_block + 1):
+            block = rpc.get_block(block_number)
+            replaced = record_evm_block_observation(
+                chain_config["name"], block_number, block["hash"], block["parentHash"], db_path,
+                run_id=run_id,
+            )
+            for old in replaced:
+                block_timestamp = block.get("timestamp")
+                detected_at = (datetime.fromtimestamp(int(block_timestamp, 16), timezone.utc)
+                               if isinstance(block_timestamp, str) else
+                               block_timestamp or datetime.now(timezone.utc))
+                insert_event({
+                    "canonical_id": f"{chain_config['name']}:block:{block_number}",
+                    "event_type": "chain_reorg_detected",
+                    "timestamp": detected_at,
+                    "payload_json": {"block_number": block_number,
+                                     "orphaned_block_hash": old["block_hash"],
+                                     "canonical_block_hash": block["hash"]},
+                    "source": "evm_rpc",
+                }, db_path)
         logs = rpc.get_factory_logs(chain_config.get("factories", []), from_block, to_block)
         for log in logs:
             decoded = decode_created_market(log)
@@ -70,8 +102,16 @@ def observe_once(chain_config: dict[str, Any], rpc: EVMRPCClient, provider, risk
                     insert_event({"canonical_id": f"{chain_config['name']}:{address}",
                                   "event_type": "new_pool_detected", "timestamp": log["timestamp"],
                                   "payload_json": {"protocol": log.get("protocol"), "log": log},
-                                  "source": "evm_rpc"}, db_path)
+                                  "source": "evm_rpc",
+                                  "block_number": (int(log["blockNumber"], 16)
+                                                   if isinstance(log.get("blockNumber"), str)
+                                                   else log.get("blockNumber")),
+                                  "block_hash": log.get("blockHash")}, db_path)
                 written += 1
+        if cursor_source is not None:
+            advance_ingestion_cursor(cursor_source, chain_config["name"],
+                                     max(to_block, previous if previous is not None else to_block), db_path,
+                                     run_id=run_id, expected_previous=previous)
         log_run_end(run_id, "success", db_path, rows_written=written)
         return written
     except Exception as exc:
@@ -80,7 +120,9 @@ def observe_once(chain_config: dict[str, Any], rpc: EVMRPCClient, provider, risk
 
 
 def run_once(chain: str, *, db_path: str, from_block: int | None = None,
-             to_block: int | None = None, lookback_blocks: int = 1000, root=ROOT) -> int:
+             to_block: int | None = None, lookback_blocks: int = 1000,
+             confirmation_depth: int | None = None, reorg_lookback_blocks: int | None = None,
+             root=ROOT) -> int:
     """Run one configured chain observation without coupling RPC and explorers."""
     chain_config = load_chain(chain, root)
     run_id = log_run_start(f"evm_listener:{chain}", db_path)
@@ -88,13 +130,27 @@ def run_once(chain: str, *, db_path: str, from_block: int | None = None,
     try:
         provider_config = load_evm_config(root)
         rpc = EVMRPCClient(rpc_url_from_env(chain_config["rpc_env"]))
-        end = to_block if to_block is not None else rpc.latest_block()
-        start = from_block if from_block is not None else max(0, end - lookback_blocks)
+        confirmation_depth = (int(chain_config.get("confirmation_depth", 12))
+                              if confirmation_depth is None else confirmation_depth)
+        reorg_lookback_blocks = (int(chain_config.get("reorg_lookback_blocks", 20))
+                                 if reorg_lookback_blocks is None else reorg_lookback_blocks)
+        if confirmation_depth < 0 or reorg_lookback_blocks < 1:
+            raise ValueError("confirmation depth must be non-negative and reorg lookback must be positive")
+        end = to_block if to_block is not None else max(0, rpc.latest_block() - confirmation_depth)
+        cursor = get_ingestion_cursor("evm_rpc", chain, db_path)
+        start = from_block if from_block is not None else (
+            max(0, cursor["position"] - reorg_lookback_blocks + 1)
+            if cursor is not None else max(0, end - lookback_blocks)
+        )
+        if from_block is None and cursor is not None and start > end:
+            log_run_end(run_id, "success", db_path, rows_written=0)
+            return 0
         provider = build_provider(chain, int(chain_config["chain_id"]), provider_config)
         risk = HoneypotRiskProvider(provider_config["risk"])
         observation_started = True
         return observe_once(chain_config, rpc, provider, risk, db_path=db_path,
-                            from_block=start, to_block=end, run_id=run_id)
+                            from_block=start, to_block=end, run_id=run_id,
+                            cursor_source="evm_rpc")
     except Exception as exc:
         if not observation_started:
             log_run_end(run_id, "failed", db_path, error_message=safe_error_message(exc))

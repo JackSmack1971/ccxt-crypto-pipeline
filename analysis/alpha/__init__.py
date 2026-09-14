@@ -1,6 +1,7 @@
 """Offline, provenance-rich Phase 3 new-token research primitives."""
 
 from .cohort import CohortConfig, CohortRow, extract_cohort
+from .eligibility import ChainEligibility, EligibilityPolicy, evaluate_chain_eligibility
 from .features import FeatureDefinition, FeatureRegistry, compute_features
 from .labels import (HORIZONS, ConversionObservation, ConversionPolicy, LabelDefinition,
                      LabelRow, generate_labels, normalize_usd_price)
@@ -14,7 +15,9 @@ from .report import research_report
 from .artifacts import write_research_run
 
 __all__ = [
-    "CohortConfig", "CohortRow", "extract_cohort", "FeatureDefinition", "FeatureRegistry",
+    "CohortConfig", "CohortRow", "extract_cohort",
+    "ChainEligibility", "EligibilityPolicy", "evaluate_chain_eligibility",
+    "FeatureDefinition", "FeatureRegistry",
     "compute_features", "HORIZONS", "ConversionObservation", "ConversionPolicy", "LabelDefinition",
     "LabelRow", "generate_labels", "normalize_usd_price",
     "CandidateResult", "Hypothesis", "HypothesisRegistry", "PromotionDecision", "PromotionEvidence",

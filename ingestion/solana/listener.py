@@ -3,10 +3,13 @@
 from __future__ import annotations
 
 import argparse
+import time
 from datetime import datetime, timezone
 from typing import Any, Iterable
 
-from storage.db import (insert_event, log_run_end, log_run_start, safe_error_message, upsert_asset,
+from storage.db import (advance_ingestion_continuation, classify_provider_failure,
+                        get_ingestion_continuation, insert_event, log_run_end, log_run_start,
+                        record_provider_observation, safe_error_message, upsert_asset,
                         upsert_asset_relationship, upsert_metadata)
 
 from .config import ROOT, load_config
@@ -56,6 +59,38 @@ def _event_type(transaction: dict[str, Any], configured_types: list[str]) -> str
     return None
 
 
+def _transactions_since(client: HeliusClient, address: str, *, checkpoint: str | None,
+                        page_size: int, max_pages: int) -> tuple[list[dict[str, Any]], str | None]:
+    """Page newest-to-oldest until the prior durable signature is reached."""
+    before = None
+    collected: list[dict[str, Any]] = []
+    newest_signature = None
+    for _ in range(max_pages):
+        page = client.recent_transactions(address, limit=page_size, before=before)
+        if not page:
+            if checkpoint is not None:
+                raise RuntimeError(f"Solana continuation {checkpoint!r} was not found for {address}")
+            break
+        signatures = [tx.get("signature") for tx in page]
+        if any(not isinstance(signature, str) or not signature for signature in signatures):
+            raise ValueError(f"Helius transaction page for {address} contains a missing signature")
+        if newest_signature is None:
+            newest_signature = signatures[0]
+        if checkpoint in signatures:
+            collected.extend(page[:signatures.index(checkpoint)])
+            return list(reversed(collected)), newest_signature
+        collected.extend(page)
+        before = signatures[-1]
+        if checkpoint is None:
+            # The initial observation boundary is explicitly the newest provider page.
+            return list(reversed(collected)), newest_signature
+    if checkpoint is not None:
+        raise RuntimeError(
+            f"Solana continuation {checkpoint!r} was not reached within {max_pages} pages for {address}"
+        )
+    return list(reversed(collected)), newest_signature
+
+
 def persist_launch(mint: str, transaction: dict[str, Any], client: HeliusClient, *, db_path: str,
                    now: datetime | None = None) -> int:
     now = now or datetime.now(timezone.utc)
@@ -75,48 +110,93 @@ def persist_launch(mint: str, transaction: dict[str, Any], client: HeliusClient,
     return 1
 
 
+def _run_program(program_name: str, address: str, client: HeliusClient, *, types: list[str], limit: int,
+                 max_pages: int, db_path: str, run_id: str, now: datetime | None) -> int:
+    """Discover and persist one configured program's launches; returns rows written."""
+    written = 0
+    cursor = get_ingestion_continuation("helius_enhanced", address, db_path)
+    checkpoint = cursor["token"] if cursor else None
+    transactions, newest_signature = _transactions_since(
+        client, address, checkpoint=checkpoint, page_size=limit, max_pages=max_pages
+    )
+    for tx in transactions:
+        event_type = _event_type(tx, types)
+        mints = extract_mints(tx)
+        if not event_type or not mints:
+            continue
+        if not tx.get("timestamp") and now is None:
+            continue
+        timestamp = datetime.fromtimestamp(tx["timestamp"], timezone.utc) if tx.get("timestamp") else now
+        pool_addresses = extract_pool_addresses(tx) if event_type == "new_pool_detected" else []
+        # A pool relationship is persisted only when its two-sided
+        # identity can be represented without guessing from symbols or
+        # unrelated transaction accounts.
+        if event_type == "new_pool_detected" and (len(pool_addresses) != 1 or len(mints) != 2):
+            continue
+        for mint in mints:
+            canonical_id = f"solana:{mint}"
+            event_identity = f"solana:{pool_addresses[0]}" if len(pool_addresses) == 1 else canonical_id
+            if len(pool_addresses) == 1:
+                upsert_asset({"canonical_id": event_identity, "source_type": "dex",
+                              "chain_or_exchange": "solana", "symbol_or_contract": pool_addresses[0],
+                              "first_seen": timestamp}, db_path)
+            insert_event({"canonical_id": event_identity, "event_type": event_type,
+                          "timestamp": timestamp, "payload_json": {"program": program_name, "transaction": tx},
+                          "source": "helius"}, db_path)
+            written += persist_launch(mint, tx, client, db_path=db_path, now=timestamp)
+            if len(pool_addresses) == 1:
+                upsert_asset_relationship({"market_canonical_id": event_identity,
+                                           "asset_canonical_id": canonical_id,
+                                           "relationship_type": f"constituent_{mints.index(mint)}",
+                                           "venue": program_name, "observed_at": timestamp,
+                                           "source": "helius", "evidence_json": {"transaction": tx}}, db_path)
+    if newest_signature is not None and newest_signature != checkpoint:
+        advance_ingestion_continuation(
+            "helius_enhanced", address, newest_signature, db_path,
+            updated_at=now, run_id=run_id, expected_previous=checkpoint,
+        )
+    return written
+
+
 def run_once(*, db_path: str, config: dict[str, Any] | None = None, client: HeliusClient | None = None,
-             now: datetime | None = None) -> int:
+             now: datetime | None = None, expected_interval_seconds: float | None = None) -> int:
     config = config or load_config()
     client = client or HeliusClient(config)
     run_id = log_run_start("solana_listener", db_path)
     written = 0
     try:
         programs = config.get("programs", {})
-        limit = int(config.get("discovery", {}).get("limit", 20))
-        types = config.get("discovery", {}).get("transaction_types", ["TOKEN_MINT", "CREATE_POOL"])
+        discovery = config.get("discovery", {})
+        limit = int(discovery.get("limit", 20))
+        max_pages = int(discovery.get("max_pages", 25))
+        if limit <= 0 or max_pages <= 0:
+            raise ValueError("Solana discovery limit and max_pages must be positive")
+        types = discovery.get("transaction_types", ["TOKEN_MINT", "CREATE_POOL"])
         for program_name, address in programs.items():
-            for tx in client.recent_transactions(address, limit=limit):
-                event_type = _event_type(tx, types)
-                mints = extract_mints(tx)
-                if not event_type or not mints:
-                    continue
-                if not tx.get("timestamp") and now is None:
-                    continue
-                timestamp = datetime.fromtimestamp(tx["timestamp"], timezone.utc) if tx.get("timestamp") else now
-                pool_addresses = extract_pool_addresses(tx) if event_type == "new_pool_detected" else []
-                # A pool relationship is persisted only when its two-sided
-                # identity can be represented without guessing from symbols or
-                # unrelated transaction accounts.
-                if event_type == "new_pool_detected" and (len(pool_addresses) != 1 or len(mints) != 2):
-                    continue
-                for mint in mints:
-                    canonical_id = f"solana:{mint}"
-                    event_identity = f"solana:{pool_addresses[0]}" if len(pool_addresses) == 1 else canonical_id
-                    if len(pool_addresses) == 1:
-                        upsert_asset({"canonical_id": event_identity, "source_type": "dex",
-                                      "chain_or_exchange": "solana", "symbol_or_contract": pool_addresses[0],
-                                      "first_seen": timestamp}, db_path)
-                    insert_event({"canonical_id": event_identity, "event_type": event_type,
-                                  "timestamp": timestamp, "payload_json": {"program": program_name, "transaction": tx},
-                                  "source": "helius"}, db_path)
-                    written += persist_launch(mint, tx, client, db_path=db_path, now=timestamp)
-                    if len(pool_addresses) == 1:
-                        upsert_asset_relationship({"market_canonical_id": event_identity,
-                                                   "asset_canonical_id": canonical_id,
-                                                   "relationship_type": f"constituent_{mints.index(mint)}",
-                                                   "venue": program_name, "observed_at": timestamp,
-                                                   "source": "helius", "evidence_json": {"transaction": tx}}, db_path)
+            # Each program is recorded under its own `helius_enhanced`/address
+            # scope -- the same identity already used for its durable
+            # continuation -- so quality facts are visible per program even
+            # though a failure still fails the whole run closed (see below).
+            started = time.monotonic()
+            try:
+                program_written = _run_program(program_name, address, client, types=types, limit=limit,
+                                               max_pages=max_pages, db_path=db_path, run_id=run_id, now=now)
+            except Exception as exc:
+                message = safe_error_message(exc)
+                record_provider_observation(
+                    "helius_enhanced", address, classify_provider_failure(message), db_path,
+                    latency_ms=(time.monotonic() - started) * 1000,
+                    expected_interval_seconds=expected_interval_seconds,
+                    error_message=message, run_id=run_id,
+                )
+                raise
+            record_provider_observation(
+                "helius_enhanced", address, "success", db_path,
+                latency_ms=(time.monotonic() - started) * 1000,
+                expected_interval_seconds=expected_interval_seconds,
+                rows_observed=program_written, run_id=run_id,
+            )
+            written += program_written
         log_run_end(run_id, "success", db_path, rows_written=written)
         return written
     except Exception as exc:

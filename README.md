@@ -111,6 +111,8 @@ docs/                   Architecture and local operations documentation
 | Command | Purpose |
 | --- | --- |
 | `python -m storage PATH_TO_DATABASE` | Initialize canonical storage |
+| `python -m storage PATH_TO_DATABASE --verify-parquet` | Report OHLCV Parquet partitions that diverge from DuckDB |
+| `python -m storage PATH_TO_DATABASE --repair-parquet` | Deterministically rebuild diverging OHLCV Parquet partitions from DuckDB |
 | `python -m ingestion.cex.backfill ...` | Backfill one CEX symbol/timeframe |
 | `python -m ingestion.cex.refresh` | Refresh configured CEX assets |
 | `python -m ingestion.dex.tier0.poller` | Run one Tier 0 poll |
@@ -184,7 +186,9 @@ Read [`CONTRIBUTING.md`](CONTRIBUTING.md) before opening an issue or pull reques
 
 The canonical forward execution roadmap is [`ROADMAP.md`](ROADMAP.md). It records the current phase frontier, dependency-ordered implementation slices, per-slice acceptance gates, phase exit criteria, deferred boundaries, and the maintenance contract agents must follow as work lands.
 
-The current frontier is Phase 4 completion and integrity reconciliation. Phase 1–4 kernels are implemented, but the roadmap intentionally keeps Phase 4 open until the remaining statistical-governance, real-data observation, quote-currency, identity, metrics, claim-derivation, and continuous-verification gaps are closed with executable evidence.
+The current frontier is Phase 5 research-grade data reliability. Phase 4R closed
+the local Phase 1–4 trust chain with acceptance matrices and a canonical offline
+end-to-end fixture; live-provider evidence remains explicitly separate.
 
 ## License
 

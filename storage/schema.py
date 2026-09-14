@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import duckdb
 
-SCHEMA_VERSION = 7
+SCHEMA_VERSION = 12
 
 SCHEMA_SQL = """
 CREATE TABLE IF NOT EXISTS assets (
@@ -34,7 +34,10 @@ CREATE TABLE IF NOT EXISTS events (
     event_type VARCHAR NOT NULL,
     timestamp TIMESTAMP NOT NULL,
     payload_json VARCHAR NOT NULL,
-    source VARCHAR NOT NULL
+    source VARCHAR NOT NULL,
+    block_number BIGINT,
+    block_hash VARCHAR,
+    canonical BOOLEAN NOT NULL DEFAULT true
 );
 
 CREATE TABLE IF NOT EXISTS metadata (
@@ -88,6 +91,58 @@ CREATE TABLE IF NOT EXISTS price_observations (
     source VARCHAR NOT NULL,
     evidence_json VARCHAR NOT NULL,
     PRIMARY KEY (asset_canonical_id, market_canonical_id, observed_at, source)
+);
+
+CREATE TABLE IF NOT EXISTS ingestion_cursors (
+    source VARCHAR NOT NULL,
+    scope VARCHAR NOT NULL,
+    position BIGINT NOT NULL CHECK (position >= 0),
+    updated_at TIMESTAMP NOT NULL,
+    run_id VARCHAR,
+    PRIMARY KEY (source, scope)
+);
+
+CREATE TABLE IF NOT EXISTS ingestion_continuations (
+    source VARCHAR NOT NULL,
+    scope VARCHAR NOT NULL,
+    token VARCHAR NOT NULL,
+    updated_at TIMESTAMP NOT NULL,
+    run_id VARCHAR,
+    PRIMARY KEY (source, scope)
+);
+
+CREATE TABLE IF NOT EXISTS evm_block_observations (
+    chain VARCHAR NOT NULL,
+    block_number BIGINT NOT NULL CHECK (block_number >= 0),
+    block_hash VARCHAR NOT NULL,
+    parent_hash VARCHAR NOT NULL,
+    observed_at TIMESTAMP NOT NULL,
+    canonical BOOLEAN NOT NULL,
+    run_id VARCHAR,
+    PRIMARY KEY (chain, block_number, block_hash)
+);
+
+CREATE TABLE IF NOT EXISTS provider_observation_log (
+    source VARCHAR NOT NULL,
+    scope VARCHAR NOT NULL,
+    observed_at TIMESTAMP NOT NULL,
+    status VARCHAR NOT NULL CHECK (status IN ('success', 'failure', 'rate_limited')),
+    latency_ms DOUBLE CHECK (latency_ms IS NULL OR latency_ms >= 0),
+    expected_interval_seconds DOUBLE CHECK (expected_interval_seconds IS NULL OR expected_interval_seconds > 0),
+    observed_interval_seconds DOUBLE CHECK (observed_interval_seconds IS NULL OR observed_interval_seconds >= 0),
+    rows_observed BIGINT NOT NULL DEFAULT 0,
+    error_message VARCHAR,
+    run_id VARCHAR,
+    PRIMARY KEY (source, scope, observed_at)
+);
+
+CREATE TABLE IF NOT EXISTS reference_series (
+    series_id VARCHAR NOT NULL,
+    observed_at TIMESTAMP NOT NULL,
+    value DOUBLE NOT NULL CHECK (value > 0),
+    source VARCHAR NOT NULL,
+    evidence_json VARCHAR NOT NULL,
+    PRIMARY KEY (series_id, observed_at, source)
 );
 
 CREATE TABLE IF NOT EXISTS schema_version (
@@ -219,6 +274,103 @@ def initialize(connection: duckdb.DuckDBPyConnection) -> None:
                 source VARCHAR NOT NULL,
                 evidence_json VARCHAR NOT NULL,
                 PRIMARY KEY (asset_canonical_id, market_canonical_id, observed_at, source)
+            )""")
+            connection.execute("UPDATE schema_version SET version = ?", [SCHEMA_VERSION])
+            connection.execute("COMMIT")
+        except Exception:
+            connection.execute("ROLLBACK")
+            raise
+        versions = (7,)
+    if versions[0] < 8:
+        connection.execute("BEGIN TRANSACTION")
+        try:
+            connection.execute("""CREATE TABLE IF NOT EXISTS ingestion_cursors (
+                source VARCHAR NOT NULL,
+                scope VARCHAR NOT NULL,
+                position BIGINT NOT NULL CHECK (position >= 0),
+                updated_at TIMESTAMP NOT NULL,
+                run_id VARCHAR,
+                PRIMARY KEY (source, scope)
+            )""")
+            connection.execute("UPDATE schema_version SET version = ?", [SCHEMA_VERSION])
+            connection.execute("COMMIT")
+        except Exception:
+            connection.execute("ROLLBACK")
+            raise
+        versions = (8,)
+    if versions[0] < 9:
+        connection.execute("BEGIN TRANSACTION")
+        try:
+            connection.execute("ALTER TABLE events ADD COLUMN IF NOT EXISTS block_number BIGINT")
+            connection.execute("ALTER TABLE events ADD COLUMN IF NOT EXISTS block_hash VARCHAR")
+            connection.execute("ALTER TABLE events ADD COLUMN IF NOT EXISTS canonical BOOLEAN DEFAULT true")
+            connection.execute("UPDATE events SET canonical = true WHERE canonical IS NULL")
+            connection.execute("ALTER TABLE events ALTER COLUMN canonical SET NOT NULL")
+            connection.execute("""CREATE TABLE IF NOT EXISTS evm_block_observations (
+                chain VARCHAR NOT NULL,
+                block_number BIGINT NOT NULL CHECK (block_number >= 0),
+                block_hash VARCHAR NOT NULL,
+                parent_hash VARCHAR NOT NULL,
+                observed_at TIMESTAMP NOT NULL,
+                canonical BOOLEAN NOT NULL,
+                run_id VARCHAR,
+                PRIMARY KEY (chain, block_number, block_hash)
+            )""")
+            connection.execute("UPDATE schema_version SET version = ?", [SCHEMA_VERSION])
+            connection.execute("COMMIT")
+        except Exception:
+            connection.execute("ROLLBACK")
+            raise
+        versions = (9,)
+    if versions[0] < 10:
+        connection.execute("BEGIN TRANSACTION")
+        try:
+            connection.execute("""CREATE TABLE IF NOT EXISTS ingestion_continuations (
+                source VARCHAR NOT NULL,
+                scope VARCHAR NOT NULL,
+                token VARCHAR NOT NULL,
+                updated_at TIMESTAMP NOT NULL,
+                run_id VARCHAR,
+                PRIMARY KEY (source, scope)
+            )""")
+            connection.execute("UPDATE schema_version SET version = ?", [SCHEMA_VERSION])
+            connection.execute("COMMIT")
+        except Exception:
+            connection.execute("ROLLBACK")
+            raise
+        versions = (10,)
+    if versions[0] < 11:
+        connection.execute("BEGIN TRANSACTION")
+        try:
+            connection.execute("""CREATE TABLE IF NOT EXISTS provider_observation_log (
+                source VARCHAR NOT NULL,
+                scope VARCHAR NOT NULL,
+                observed_at TIMESTAMP NOT NULL,
+                status VARCHAR NOT NULL CHECK (status IN ('success', 'failure', 'rate_limited')),
+                latency_ms DOUBLE CHECK (latency_ms IS NULL OR latency_ms >= 0),
+                expected_interval_seconds DOUBLE CHECK (expected_interval_seconds IS NULL OR expected_interval_seconds > 0),
+                observed_interval_seconds DOUBLE CHECK (observed_interval_seconds IS NULL OR observed_interval_seconds >= 0),
+                rows_observed BIGINT NOT NULL DEFAULT 0,
+                error_message VARCHAR,
+                run_id VARCHAR,
+                PRIMARY KEY (source, scope, observed_at)
+            )""")
+            connection.execute("UPDATE schema_version SET version = ?", [SCHEMA_VERSION])
+            connection.execute("COMMIT")
+        except Exception:
+            connection.execute("ROLLBACK")
+            raise
+        versions = (11,)
+    if versions[0] < 12:
+        connection.execute("BEGIN TRANSACTION")
+        try:
+            connection.execute("""CREATE TABLE IF NOT EXISTS reference_series (
+                series_id VARCHAR NOT NULL,
+                observed_at TIMESTAMP NOT NULL,
+                value DOUBLE NOT NULL CHECK (value > 0),
+                source VARCHAR NOT NULL,
+                evidence_json VARCHAR NOT NULL,
+                PRIMARY KEY (series_id, observed_at, source)
             )""")
             connection.execute("UPDATE schema_version SET version = ?", [SCHEMA_VERSION])
             connection.execute("COMMIT")
