@@ -358,7 +358,7 @@ Evidence:
 
 ## Slice 4R.9 — Evidence-bound claims and chart semantics
 
-**Status:** ACTIVE
+**Status:** DONE
 
 Upgrade Phase 4 from evidence *reference* validation to evidence *derivation* validation where factual numbers are emitted.
 
@@ -377,9 +377,25 @@ Acceptance:
 - declared transformations are deterministic and represented in package provenance;
 - missing/unsupported values cannot become zero or disappear without explicit representation.
 
+Evidence:
+
+- `reporting/claims/model.py` evaluates typed identity and comparison
+  derivations from an approved evidence row/field, enforces compatible units
+  and explicit formatting, and rejects prose or declared values that disagree
+  with the derived result.
+- `reporting/charts/spec.py` permits only the explicit deterministic identity
+  transform and rejects unknown transformations and all currently unsupported
+  annotations; normalized chart specs retain the transform for package replay.
+- `reporting/render/static.py` executes the transform whitelist defensively and
+  parses SVG output to validate structural accessibility metadata.
+- `tests/test_phase4.py` covers evidence/value disagreement, comparative
+  direction, retained identity-transform provenance, unsupported transform and
+  annotation rejection, missing-value representation, and offline deterministic
+  package generation. The locked full suite passed with 91 tests.
+
 ## Slice 4R.10 — Phase 4 closure acceptance matrix
 
-**Status:** PLANNED
+**Status:** ACTIVE
 
 Freeze the repaired Phase 1–4 contract before starting Phase 5.
 
