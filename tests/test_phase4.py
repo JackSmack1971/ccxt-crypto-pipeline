@@ -1,12 +1,15 @@
 import json
 import hashlib
+from dataclasses import replace
 from datetime import datetime, timedelta
 
 import pytest
 
 from reporting.package import build_approved_handoff, generate_package
-from analysis.alpha import (CohortConfig, LabelDefinition, build_split, extract_cohort,
-                            generate_labels, score_candidate, write_research_run)
+from analysis.alpha import (CohortConfig, FeatureDefinition, FeatureRegistry, LabelDefinition,
+                            PromotionEvidence, build_split, compute_features,
+                            evaluate_candidate_promotion, extract_cohort, generate_labels,
+                            score_candidate, write_research_run)
 from analysis.datasets import DatasetPolicy, DatasetSnapshot
 from storage.db import connect, insert_event, insert_ohlcv_batch, upsert_asset
 
@@ -250,27 +253,30 @@ def test_offline_phase1_to_phase4_chain_is_content_addressed_and_review_gated(tm
     dataset = DatasetSnapshot.from_duckdb(db_path, DatasetPolicy(timeframe="1h", start=t0, end=t0 + timedelta(hours=1)))
     cohort_config = CohortConfig(t0, t0 + timedelta(days=1), chains=("ethereum",))
     cohort = extract_cohort(dataset, cohort_config)
+    registry = FeatureRegistry()
+    registry.register(FeatureDefinition(
+        "launch_liquidity_usd", ("event.reserve_usd",), "t0", timedelta(0),
+        compute=lambda row, _bars: row.liquidity_usd,
+    ))
+    features = compute_features(dataset, cohort, registry)
     labels = generate_labels(dataset, cohort, LabelDefinition("return_1h", "1h"))
     candidate = score_candidate("baseline", labels, horizon="1h")
+    candidate = replace(candidate, promotion=evaluate_candidate_promotion(
+        candidate, PromotionEvidence(target_stage="holdout")))
+    assert candidate.promotion.state == "insufficient_coverage"
     research_dir = write_research_run(tmp_path / "research", dataset_identity=dataset.dataset_identity,
-                                      cohort_config=cohort_config, cohort=cohort, labels=labels,
+                                      cohort_config=cohort_config, cohort=cohort, features=features, labels=labels,
                                       candidates=(candidate,), split=build_split(cohort).as_dict())
-    research_manifest_path = research_dir / "manifest.json"
-    research_manifest = json.loads(research_manifest_path.read_text(encoding="utf-8"))
-    labels_path = research_dir / "labels.json"
-    labels_hash = research_manifest["artifacts"]["labels.json"]
-    relative_manifest = research_manifest_path.relative_to(tmp_path).as_posix()
-    relative_labels = labels_path.relative_to(tmp_path).as_posix()
+    research_manifest = json.loads((research_dir / "manifest.json").read_text(encoding="utf-8"))
     time_range = {"start": t0.isoformat(), "end": (t0 + timedelta(hours=1)).isoformat()}
-    manifest = {
-        "manifest_identity": "phase1-to-phase4-fixture", "approved": True, "immutable": True,
-        "approval": {"status": "approved", "reviewer": "fixture-reviewer"},
+    handoff = build_approved_handoff(research_dir, tmp_path / "handoffs", approval={
+        "status": "approved", "identity": "phase1-to-phase4-fixture",
+        "reviewer": "fixture-reviewer", "approved_at": "2026-09-11T00:00:00Z",
+        "scope": "offline closure fixture",
+    }, staged_artifacts={"labels": "labels.json"}, presentation={
         "title": "Offline approved research", "dataset_identity": dataset.dataset_identity,
         "query_config_identity": "fixture-phase4-config", "code_version": "fixture-code",
         "time_range": time_range,
-        "research_run": {"path": relative_manifest, "sha256": hashlib.sha256(research_manifest_path.read_bytes()).hexdigest()},
-        "research_artifacts": {"labels.json": {"path": relative_labels, "sha256": labels_hash}},
-        "staged_tables": {"labels": {"path": relative_labels, "sha256": labels_hash}},
         "claims": [{"id": "label", "text": f"The observed return was {labels[0].value:.12f}.", "evidence": [{
             "artifact": "labels", "row": 0, "dataset_identity": dataset.dataset_identity,
             "query_config_identity": "fixture-phase4-config", "time_range": time_range,
@@ -283,11 +289,12 @@ def test_offline_phase1_to_phase4_chain_is_content_addressed_and_review_gated(tm
                      "source_attribution": "approved Phase 3 result", "alt_text": "Observed one-hour return."}],
         "methodology": {"cohort_split": "sealed fixture", "costs": "0 bps", "missingness": "reported",
                          "uncertainty": "fixture", "limitations": "not predictive"},
-    }
-    (tmp_path / "manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
-    package = generate_package(tmp_path, tmp_path / "out")
+    })
+    package = generate_package(handoff, tmp_path / "out")
     assert json.loads((package / "review.json").read_text(encoding="utf-8"))["status"] == "pending"
     assert json.loads((package / "package-manifest.json").read_text(encoding="utf-8"))["inputs"]["research_run_id"] == research_manifest["run_id"]
+    assert json.loads((research_dir / "features.json").read_text(encoding="utf-8"))[0]["launch_liquidity_usd"] == 12_000
+    assert json.loads((research_dir / "candidates.json").read_text(encoding="utf-8"))[0]["promotion"]["state"] == "insufficient_coverage"
 
 
 def test_phase4_requires_approval_and_scans_secrets(tmp_path):

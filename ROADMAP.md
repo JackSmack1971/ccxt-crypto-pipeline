@@ -1,9 +1,9 @@
 # Engineering Roadmap
 
 **Status:** Active execution authority for forward work  
-**Current phase:** Phase 4 completion and integrity reconciliation  
+**Current phase:** Phase 5 research-grade data reliability
 **Baseline:** `main` at `d5041339688e25a81d2c0344754f1a2a58bd60a1`  
-**Last reconciled:** 2026-09-11
+**Last reconciled:** 2026-09-14
 
 This file is the durable forward roadmap for `ccxt-crypto-pipeline`. It exists so a new agent can determine the repository's actual execution frontier without reconstructing intent from chat history, stale phase prose, or commit messages.
 
@@ -100,7 +100,7 @@ These gaps are why the project is considered **in Phase 4, but not yet Phase 4-c
 
 # Phase 4R — Completion & Integrity Reconciliation
 
-**Status:** ACTIVE  
+**Status:** DONE
 **Goal:** Close the trust chain across Phases 1–4 before expanding product surface.  
 **Exit condition:** A production-shaped local dataset can move through point-in-time research, statistically governed candidate evaluation, explicit approval, and deterministic reporting with every identity, timestamp, derivation, input, and decision traceable and replayable.
 
@@ -395,7 +395,7 @@ Evidence:
 
 ## Slice 4R.10 — Phase 4 closure acceptance matrix
 
-**Status:** ACTIVE
+**Status:** DONE
 
 Freeze the repaired Phase 1–4 contract before starting Phase 5.
 
@@ -415,11 +415,25 @@ Phase 4R is DONE only when:
 - all local gates and CI pass;
 - `ROADMAP.md` is updated to make Phase 5 ACTIVE.
 
+Evidence:
+
+- `docs/plans/phase-3-acceptance-matrix.md` and
+  `docs/plans/phase-4-acceptance-matrix.md` freeze the mandatory local criteria,
+  executable evidence, and separately blocked live/external checks.
+- `tests/test_phase4.py::test_offline_phase1_to_phase4_chain_is_content_addressed_and_review_gated`
+  denies network access and spans persisted launch observation, point-in-time
+  dataset loading, cohort/feature/label construction, an explicit governed
+  candidate decision, immutable research artifacts, the canonical approval
+  handoff, and a deterministic pending-review report package.
+- The locked full suite passed with 91 tests; byte compilation, the reporting
+  guard, and whitespace validation also passed. Hosted CI remains the required
+  merge-time confirmation.
+
 ---
 
 # Phase 5 — Research-Grade Data Reliability
 
-**Status:** PLANNED  
+**Status:** ACTIVE
 **Depends on:** Phase 4R complete.  
 **Goal:** Move from a correct local research chain to a measurable, recoverable observation system suitable for longitudinal studies.
 
@@ -629,4 +643,7 @@ For a fresh agent, the intended pickup sequence is:
 
 `AGENTS.md` → `ROADMAP.md` → active `docs/plans/phase-*.md` → relevant code/tests → Git history/status.
 
-The current frontier is **Phase 4R.9 — Evidence-bound claims and chart semantics**. Phase 4R.1 established the mandatory CI gate; do not begin Phase 5 until every mandatory Phase 4R closure criterion is satisfied.
+The current frontier is **Phase 5.1 — Durable ingestion cursors**. Phase 4R is
+closed by the Phase 3 and Phase 4 acceptance matrices plus the canonical offline
+end-to-end fixture; live-provider evidence remains separate and does not turn
+fixture methodology into a claim of profitability or production readiness.
