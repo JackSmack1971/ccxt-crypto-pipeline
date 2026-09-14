@@ -439,11 +439,31 @@ Evidence:
 
 ## Slice 5.1 — Durable ingestion cursors
 
+**Status:** DONE
+
 Persist per-source/per-chain progress so polling completeness is measurable and restarts do not depend solely on rolling lookbacks.
 
 Acceptance includes restart replay, monotonic cursor rules, and explicit skipped-range detection.
 
+Evidence:
+
+- Schema version 8 adds the canonical `ingestion_cursors` table and a
+  provider-agnostic storage API with source/scope identity, monotonic updates,
+  compare-and-set continuity checks, run lineage, and deterministic reads.
+- The EVM listener resumes each chain at the block after its durable `evm_rpc`
+  cursor, advances only after a successful observation, permits idempotent
+  overlap replay, and rejects a requested range that would silently skip
+  blocks. The first observation retains the configured rolling lookback as an
+  explicit bootstrap boundary.
+- Fixture-only storage migration and listener restart tests cover v7-to-v8
+  preservation, repeated initialization, per-chain isolation, regression and
+  stale-writer rejection, restart continuation, and skipped-range failure.
+  Solana's non-numeric signature continuation remains intentionally owned by
+  Slice 5.3 rather than being coerced into this block-position contract.
+
 ## Slice 5.2 — EVM confirmation and reorg handling
+
+**Status:** ACTIVE
 
 Introduce confirmation depth, canonical block identity, and reorg reconciliation for event observations.
 

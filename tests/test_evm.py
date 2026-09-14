@@ -6,7 +6,7 @@ from ingestion.evm.models import Capability, CapabilityStatus, EnrichmentResult
 from ingestion.evm.providers import EtherscanV2Provider, MegaNodeProvider, RoutescanProvider, build_provider
 from ingestion.evm.risk import HoneypotRiskProvider
 from ingestion.evm.rpc import PAIR_CREATED_TOPIC, decode_created_asset
-from storage.db import read_events, read_metadata, read_runs
+from storage.db import get_ingestion_cursor, read_events, read_metadata, read_runs
 
 
 class Response:
@@ -105,6 +105,37 @@ def test_listener_persists_enrichment_and_run(tmp_path):
     from storage.db import read_asset_relationships
     assert {row["asset_canonical_id"] for row in read_asset_relationships(db)} == {
         f"ethereum:{token0}", f"ethereum:{token1}"}
+
+
+def test_listener_cursor_survives_restart_and_rejects_skipped_range(tmp_path):
+    calls = []
+
+    class RPC:
+        def get_factory_logs(self, factories, from_block, to_block):
+            calls.append((from_block, to_block))
+            return []
+
+    class Provider:
+        pass
+
+    db = str(tmp_path / "cursor.duckdb")
+    chain = {"name": "ethereum", "chain_id": 1, "factories": []}
+    assert observe_once(chain, RPC(), Provider(), Provider(), db_path=db,
+                        from_block=10, to_block=20, cursor_source="evm_rpc") == 0
+    assert get_ingestion_cursor("evm_rpc", "ethereum", db)["position"] == 20
+    assert observe_once(chain, RPC(), Provider(), Provider(), db_path=db,
+                        from_block=21, to_block=25, cursor_source="evm_rpc") == 0
+    assert get_ingestion_cursor("evm_rpc", "ethereum", db)["position"] == 25
+
+    try:
+        observe_once(chain, RPC(), Provider(), Provider(), db_path=db,
+                     from_block=27, to_block=30, cursor_source="evm_rpc")
+    except ValueError as exc:
+        assert "skipped block range" in str(exc)
+    else:
+        raise AssertionError("a skipped block range should fail closed")
+    assert calls == [(10, 20), (21, 25)]
+    assert get_ingestion_cursor("evm_rpc", "ethereum", db)["position"] == 25
 
 
 def test_chain_configuration_contains_all_required_evm_networks():

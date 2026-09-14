@@ -252,6 +252,64 @@ def log_run_end(run_id: str, status: str, db_path: str | Path | None = None, *,
         _finish(conn, owned)
 
 
+def get_ingestion_cursor(source: str, scope: str, db_path: str | Path | None = None, *,
+                         connection=None) -> dict[str, Any] | None:
+    """Return one durable provider progress marker."""
+    conn, owned = _connection(db_path, connection)
+    try:
+        cursor = conn.execute(
+            """SELECT source, scope, position, updated_at, run_id
+               FROM ingestion_cursors WHERE source = ? AND scope = ?""",
+            [source, scope],
+        )
+        row = cursor.fetchone()
+        return dict(zip([column[0] for column in cursor.description], row)) if row else None
+    finally:
+        _finish(conn, owned)
+
+
+def advance_ingestion_cursor(source: str, scope: str, position: int,
+                             db_path: str | Path | None = None, *,
+                             updated_at: datetime | None = None, run_id: str | None = None,
+                             expected_previous: int | None = None, connection=None) -> None:
+    """Advance a cursor monotonically, optionally proving that no range was skipped."""
+    if not source or not scope:
+        raise ValueError("cursor source and scope are required")
+    if isinstance(position, bool) or not isinstance(position, int) or position < 0:
+        raise ValueError("cursor position must be a non-negative integer")
+    conn, owned = _connection(db_path, connection)
+    try:
+        conn.execute("BEGIN TRANSACTION")
+        current = conn.execute(
+            "SELECT position FROM ingestion_cursors WHERE source = ? AND scope = ?",
+            [source, scope],
+        ).fetchone()
+        current_position = current[0] if current else None
+        if expected_previous is not None and current_position != expected_previous:
+            raise ValueError(
+                f"cursor continuity failure for {source}/{scope}: "
+                f"expected {expected_previous}, found {current_position}"
+            )
+        if current_position is not None and position < current_position:
+            raise ValueError(
+                f"cursor regression for {source}/{scope}: {position} < {current_position}"
+            )
+        conn.execute(
+            """INSERT INTO ingestion_cursors VALUES (?, ?, ?, ?, ?)
+               ON CONFLICT (source, scope) DO UPDATE SET
+                   position = excluded.position,
+                   updated_at = excluded.updated_at,
+                   run_id = excluded.run_id""",
+            [source, scope, position, updated_at or datetime.now(), run_id],
+        )
+        conn.execute("COMMIT")
+    except Exception:
+        conn.execute("ROLLBACK")
+        raise
+    finally:
+        _finish(conn, owned)
+
+
 def _read(table: str, db_path: str | Path | None = None, *, connection=None) -> list[dict[str, Any]]:
     conn, owned = _connection(db_path, connection)
     try:
@@ -272,6 +330,14 @@ def read_metadata(db_path=None, *, connection=None):
     finally:
         _finish(conn, owned)
 def read_runs(db_path=None, *, connection=None): return _read("runs", db_path, connection=connection)
+def read_ingestion_cursors(db_path=None, *, connection=None):
+    conn, owned = _connection(db_path, connection)
+    try:
+        cursor = conn.execute("""SELECT * FROM ingestion_cursors
+                               ORDER BY source, scope""")
+        return [dict(zip([column[0] for column in cursor.description], row)) for row in cursor.fetchall()]
+    finally:
+        _finish(conn, owned)
 def read_lineage(db_path=None, *, connection=None):
     conn, owned = _connection(db_path, connection)
     try:
