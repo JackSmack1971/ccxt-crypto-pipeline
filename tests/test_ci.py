@@ -4,6 +4,7 @@ import yaml
 
 
 WORKFLOW_PATH = Path(__file__).parents[1] / ".github" / "workflows" / "ci.yml"
+PYPROJECT_PATH = Path(__file__).parents[1] / "pyproject.toml"
 TEST_RUNNER_PATH = Path(__file__).parents[1] / "scripts" / "run-tests"
 
 
@@ -32,7 +33,10 @@ def test_ci_uses_locked_inputs_and_required_repository_checks():
     assert actions == ["actions/checkout@v4", "astral-sh/setup-uv@v6"]
     assert uv_setup["with"] == {"enable-cache": "true", "python-version": "3.12"}
     assert "uv sync --locked" in commands
-    assert "uv pip install pytest==9.0.3" in commands
+    assert "uv sync --locked --extra test" in commands
+    project_text = PYPROJECT_PATH.read_text(encoding="utf-8")
+    assert "pytest==9.0.3" in project_text
+    assert "pluggy==1.6.0" in project_text
     assert "tests/test_storage.py::test_v1_store_migrates_in_place_and_preserves_rows" in commands
     assert "uv run --no-sync python -m pytest" in commands
     assert "python -m compileall" in commands

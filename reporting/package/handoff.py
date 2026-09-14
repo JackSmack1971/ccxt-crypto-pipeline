@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 import shutil
+import re
 from pathlib import Path
 from typing import Any, Mapping
 
@@ -13,6 +14,7 @@ _ROOT_FIELDS = {
     "research_run", "research_artifacts", "staged_tables", "title",
     "dataset_identity", "query_config_identity", "config_identity",
     "code_version", "time_range", "claims", "charts", "methodology",
+    "approved_chart_transformations",
 }
 _APPROVAL_FIELDS = {"status", "identity", "reviewer", "approved_at", "scope"}
 
@@ -31,10 +33,35 @@ def _strict_fields(value: Mapping[str, Any], allowed: set[str], label: str) -> N
         raise ValueError(f"{label} has unknown fields: {', '.join(unknown)}")
 
 
+def _safe_relative_name(value: str, label: str) -> Path:
+    path = Path(value)
+    if not isinstance(value, str) or not value or path.is_absolute() or "." in path.parts or ".." in path.parts:
+        raise ValueError(f"{label} must be a safe relative path")
+    return path
+
+
+def _validate_artifact_entry(entry: Any, label: str, extra_fields: set[str] | None = None) -> None:
+    if isinstance(entry, dict) and set(entry) - ({"path", "sha256"} | (extra_fields or set())):
+        raise ValueError(f"approved handoff has malformed {label}")
+    if (not isinstance(entry, dict) or not isinstance(entry.get("path"), str) or
+            not entry.get("path") or not isinstance(entry.get("sha256"), str) or
+            not re.fullmatch(r"[0-9a-f]{64}", entry["sha256"])):
+        raise ValueError(f"approved handoff has malformed {label}")
+    _safe_relative_name(entry["path"], label)
+
+
+def _safe_output_path(root: Path, relative: str) -> Path:
+    path = root / relative
+    if not path.resolve().is_relative_to(root.resolve()):
+        raise ValueError("output artifact escapes handoff")
+    return path
+
+
 def validate_approved_handoff(manifest: Mapping[str, Any]) -> None:
     """Validate the structural approval contract before Phase 4 reads inputs."""
     _strict_fields(manifest, _ROOT_FIELDS, "approved handoff")
-    if manifest.get("handoff_version") != VERSION or manifest.get("immutable") is not True:
+    if (manifest.get("handoff_version") != VERSION or manifest.get("immutable") is not True or
+            manifest.get("approved") is not True):
         raise ValueError("unsupported or mutable approved handoff")
     approval = manifest.get("approval")
     if not isinstance(approval, dict):
@@ -46,8 +73,34 @@ def validate_approved_handoff(manifest: Mapping[str, Any]) -> None:
     research = manifest.get("research_run")
     if not isinstance(research, dict) or not research.get("run_id") or not research.get("path") or not research.get("sha256"):
         raise ValueError("approved handoff lacks research-run identity")
+    if set(research) - {"run_id", "path", "sha256"}:
+        raise ValueError("approved handoff has malformed research manifest")
+    _validate_artifact_entry(research, "research manifest", {"run_id"})
     if not isinstance(manifest.get("research_artifacts"), dict) or not manifest["research_artifacts"]:
         raise ValueError("approved handoff lacks staged research artifacts")
+    if not isinstance(manifest.get("staged_tables"), dict) or not manifest["staged_tables"]:
+        raise ValueError("approved handoff lacks staged tables")
+    for label, entries in (("staged table", manifest["staged_tables"]),
+                           ("research artifact", manifest["research_artifacts"])):
+        for name, entry in entries.items():
+            _validate_artifact_entry(entry, f"{label}: {name}")
+    for field in ("code_version", "query_config_identity"):
+        if not isinstance(manifest.get(field), str) or not manifest[field]:
+            raise ValueError(f"approved handoff lacks {field} provenance")
+    if not isinstance(manifest.get("time_range"), dict) or not manifest["time_range"]:
+        raise ValueError("approved handoff lacks time_range provenance")
+    presentation = {key: manifest[key] for key in {
+        "title", "dataset_identity", "query_config_identity", "config_identity", "code_version",
+        "time_range", "claims", "charts", "methodology", "approved_chart_transformations"
+    } if key in manifest}
+    expected = {"research_run_id": research["run_id"],
+                "research_manifest_sha256": research["sha256"],
+                "approval": approval,
+                "staged_artifacts": {key: manifest["staged_tables"][key]["path"]
+                                     for key in sorted(manifest["staged_tables"])},
+                "presentation": presentation}
+    if hashlib.sha256(_dump(expected)).hexdigest()[:24] != manifest.get("handoff_id"):
+        raise ValueError("approved handoff identity does not match its content")
 
 
 def build_approved_handoff(
@@ -76,18 +129,23 @@ def build_approved_handoff(
         raise ValueError("handoff approval status must be approved")
     presentation = dict(presentation or {})
     allowed_presentation = {"title", "dataset_identity", "query_config_identity", "config_identity",
-                            "code_version", "time_range", "claims", "charts", "methodology"}
+                            "code_version", "time_range", "claims", "charts", "methodology",
+                            "approved_chart_transformations"}
     _strict_fields(presentation, allowed_presentation, "presentation")
     dataset = presentation.get("dataset_identity", research.get("inputs", {}).get("dataset_identity"))
     if not dataset:
         raise ValueError("handoff requires dataset identity")
+    requested_transforms = presentation.get("approved_chart_transformations", {})
+    source_transforms = research.get("approved_chart_transformations", {})
+    if requested_transforms != source_transforms:
+        raise ValueError("chart transformations are not authorized by the Phase 3 result")
 
     target_data = {"research_run_id": research["run_id"], "research_manifest_sha256": _sha256(research_path),
                    "approval": dict(approval),
                    "staged_artifacts": {k: v for k, v in sorted(staged_artifacts.items())},
                    "presentation": presentation}
     handoff_id = hashlib.sha256(_dump(target_data)).hexdigest()[:24]
-    target = Path(output_dir).resolve() / handoff_id
+    target = _safe_output_path(Path(output_dir).resolve(), handoff_id)
     target.mkdir(parents=True, exist_ok=True)
     linked_manifest = target / "research-manifest.json"
     research_bytes = research_path.read_bytes()
@@ -99,12 +157,13 @@ def build_approved_handoff(
     research_artifacts = {}
     staged_tables = {}
     for alias, artifact_name in sorted(staged_artifacts.items()):
+        artifact_path = _safe_relative_name(artifact_name, "staged artifact")
         if artifact_name not in research["artifacts"]:
             raise ValueError(f"staged artifact is not declared by Phase 3: {artifact_name}")
-        source_artifact = source / artifact_name
+        source_artifact = source / artifact_path
         if not source_artifact.is_file() or _sha256(source_artifact) != research["artifacts"][artifact_name]:
             raise ValueError(f"Phase 3 artifact is missing or changed: {artifact_name}")
-        destination = target / artifact_name
+        destination = _safe_output_path(target, artifact_path.as_posix())
         destination.parent.mkdir(parents=True, exist_ok=True)
         if destination.exists() and destination.read_bytes() != source_artifact.read_bytes():
             raise FileExistsError(f"immutable handoff artifact differs: {destination}")

@@ -379,19 +379,20 @@ Acceptance:
 
 Evidence:
 
-- `reporting/claims/model.py` evaluates typed identity and comparison
-  derivations from an approved evidence row/field, enforces compatible units
-  and explicit formatting, and rejects prose or declared values that disagree
-  with the derived result.
-- `reporting/charts/spec.py` permits only the explicit deterministic identity
-  transform and rejects unknown transformations and all currently unsupported
-  annotations; normalized chart specs retain the transform for package replay.
-- `reporting/render/static.py` executes the transform whitelist defensively and
-  parses SVG output to validate structural accessibility metadata.
-- `tests/test_phase4.py` covers evidence/value disagreement, comparative
-  direction, retained identity-transform provenance, unsupported transform and
-  annotation rejection, missing-value representation, and offline deterministic
-  package generation. The locked full suite passed with 91 tests.
+- `reporting/claims/model.py` now requires numeric factual claims to declare a
+  source-field derivation, supported operation, unit, and decimal policy; it
+  recomputes the value from staged evidence and rejects prose whose rendered
+  number disagrees.
+- `reporting/charts/spec.py` and `reporting/render/static.py` whitelist and
+  execute `identity`/`sort_x` transformations and horizontal-line annotations;
+  unsupported or unexecutable declarations fail closed. Chart semantics are
+  retained in the package manifest, and the SVG validator checks parsed role,
+  non-empty title/description, units, attribution, and non-finite output.
+- `tests/test_phase4.py` covers derivation disagreement/missing declarations,
+  transformation rejection, annotation execution/rejection, missing-value
+  handling, deterministic replay, and the offline package path.
+- The CI workflow pins the pytest/pluggy test-runner pair so the locked fixture
+  verification does not depend on an ambient runner dependency.
 
 ## Slice 4R.10 — Phase 4 closure acceptance matrix
 

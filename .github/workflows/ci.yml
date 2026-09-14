@@ -25,8 +25,7 @@ jobs:
 
       - name: Install locked project dependencies
         run: |
-          uv sync --locked
-          uv pip install pytest==9.0.3
+          uv sync --locked --extra test
 
       - name: Run storage migration guard
         run: uv run --no-sync python -m pytest tests/test_storage.py::test_v1_store_migrates_in_place_and_preserves_rows

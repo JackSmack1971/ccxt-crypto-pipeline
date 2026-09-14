@@ -18,5 +18,11 @@ dependencies = [
     "APScheduler==3.11.0",
 ]
 
+[project.optional-dependencies]
+test = [
+    "pytest==9.0.3",
+    "pluggy==1.6.0",
+]
+
 [tool.setuptools.packages.find]
 include = ["analysis*", "config*", "ingestion*", "normalization*", "reporting*", "scheduler*", "storage*"]
