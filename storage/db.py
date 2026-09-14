@@ -327,6 +327,55 @@ def upsert_price_observation(observation: Mapping[str, Any], db_path: str | Path
         _finish(conn, owned)
 
 
+def upsert_reference_series_observation(observation: Mapping[str, Any], db_path: str | Path | None = None, *,
+                                        connection=None) -> None:
+    """Persist one point-in-time reference series value (e.g. a quote/USD rate) with provenance."""
+    conn, owned = _connection(db_path, connection)
+    try:
+        evidence = observation.get("evidence_json", {})
+        if not isinstance(evidence, str):
+            evidence = json.dumps(evidence, default=str, sort_keys=True)
+        conn.execute(
+            """INSERT INTO reference_series VALUES (?, ?, ?, ?, ?)
+            ON CONFLICT (series_id, observed_at, source)
+            DO UPDATE SET value = excluded.value, evidence_json = excluded.evidence_json""",
+            [observation["series_id"], observation["observed_at"], observation["value"],
+             observation["source"], evidence],
+        )
+    finally:
+        _finish(conn, owned)
+
+
+def reference_series_coverage_summary(db_path: str | Path | None = None, *, connection=None) -> list[dict[str, Any]]:
+    """Aggregate offline coverage/provenance facts per reference series for downstream eligibility checks."""
+    conn, owned = _connection(db_path, connection)
+    try:
+        cursor = conn.execute(
+            """SELECT series_id,
+                      COUNT(*) AS total_observations,
+                      COUNT(DISTINCT source) AS source_count,
+                      MIN(observed_at) AS first_observed_at,
+                      MAX(observed_at) AS last_observed_at,
+                      arg_max(source, observed_at) AS last_source
+               FROM reference_series
+               GROUP BY series_id
+               ORDER BY series_id"""
+        )
+        rows = [dict(zip([column[0] for column in cursor.description], row)) for row in cursor.fetchall()]
+        for row in rows:
+            gaps = conn.execute(
+                """SELECT MAX(gap) FROM (
+                       SELECT observed_at - LAG(observed_at) OVER (ORDER BY observed_at) AS gap
+                       FROM reference_series WHERE series_id = ?
+                   )""",
+                [row["series_id"]],
+            ).fetchone()[0]
+            row["max_observed_gap_seconds"] = gaps.total_seconds() if gaps is not None else None
+        return rows
+    finally:
+        _finish(conn, owned)
+
+
 def upsert_metadata(metadata: Mapping[str, Any], db_path: str | Path | None = None, *, connection=None) -> None:
     conn, owned = _connection(db_path, connection)
     try:
@@ -691,6 +740,16 @@ def read_provider_observation_log(db_path=None, *, connection=None):
     try:
         cursor = conn.execute("""SELECT * FROM provider_observation_log
                                ORDER BY source, scope, observed_at""")
+        return [dict(zip([column[0] for column in cursor.description], row)) for row in cursor.fetchall()]
+    finally:
+        _finish(conn, owned)
+
+
+def read_reference_series(db_path=None, *, connection=None):
+    conn, owned = _connection(db_path, connection)
+    try:
+        cursor = conn.execute("""SELECT * FROM reference_series
+                               ORDER BY series_id, observed_at, source""")
         return [dict(zip([column[0] for column in cursor.description], row)) for row in cursor.fetchall()]
     finally:
         _finish(conn, owned)

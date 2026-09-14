@@ -27,14 +27,17 @@ from storage.db import (
     read_price_observations,
     read_lineage,
     read_provider_observation_log,
+    read_reference_series,
     read_runs,
     record_provider_observation,
+    reference_series_coverage_summary,
     repair_parquet_publication,
     safe_error_message,
     upsert_asset,
     upsert_asset_relationship,
     upsert_metadata,
     upsert_price_observation,
+    upsert_reference_series_observation,
     verify_parquet_publication,
 )
 import duckdb
@@ -68,7 +71,7 @@ def test_storage_round_trip_and_idempotent_init(tmp_path):
     run_id = log_run_start("fixture_job", db_path, started_at=timestamp, run_id="run-1")
     log_run_end(run_id, "success", db_path, finished_at=timestamp, rows_written=1)
 
-    assert SCHEMA_VERSION == 11
+    assert SCHEMA_VERSION == 12
     asset = read_assets(db_path)[0]
     assert (asset["canonical_id"], asset["source_type"], asset["chain_or_exchange"],
             asset["symbol_or_contract"]) == ("kraken:BTC/USDT", "cex", "kraken", "BTC/USDT")
@@ -318,6 +321,35 @@ def test_v10_store_adds_provider_observation_log_without_losing_cursors(tmp_path
     assert read_provider_observation_log(db_path) == []
 
 
+def test_v11_store_adds_reference_series_without_losing_provider_log(tmp_path):
+    db_path = tmp_path / "v11.duckdb"
+    connection = duckdb.connect(str(db_path))
+    connection.execute("CREATE TABLE schema_version (version INTEGER NOT NULL)")
+    connection.execute("INSERT INTO schema_version VALUES (11)")
+    from storage.schema import SCHEMA_SQL
+    for statement in SCHEMA_SQL.split(";"):
+        if statement.strip() and "reference_series" not in statement:
+            connection.execute(statement)
+    connection.execute(
+        "INSERT INTO provider_observation_log VALUES ('evm_listeners', 'evm_listeners', ?, 'success', "
+        "NULL, NULL, NULL, 0, NULL, NULL)",
+        [datetime(2025, 1, 1)],
+    )
+    connection.close()
+
+    init_db(db_path)
+    connection = duckdb.connect(str(db_path))
+    assert connection.execute("SELECT version FROM schema_version").fetchone() == (SCHEMA_VERSION,)
+    assert connection.execute(
+        "SELECT source, scope, status FROM provider_observation_log"
+    ).fetchone() == ("evm_listeners", "evm_listeners", "success")
+    assert connection.execute("SELECT COUNT(*) FROM reference_series").fetchone() == (0,)
+    connection.close()
+
+    init_db(db_path)
+    assert read_reference_series(db_path) == []
+
+
 def test_ingestion_cursor_is_scoped_monotonic_and_continuity_checked(tmp_path):
     db_path = tmp_path / "cursors.duckdb"
     observed = datetime(2025, 1, 1, tzinfo=timezone.utc)
@@ -428,6 +460,45 @@ def test_provider_observation_log_tracks_gaps_and_offline_quality_summary(tmp_pa
             assert "unsupported provider observation status" in str(exc)
         else:
             raise AssertionError("unsupported status should fail")
+
+
+def test_reference_series_round_trip_is_idempotent_and_offline_coverage_summary(tmp_path):
+    db_path = tmp_path / "reference-series.duckdb"
+    first = datetime(2025, 1, 1, tzinfo=timezone.utc)
+    second = datetime(2025, 1, 1, 1, tzinfo=timezone.utc)
+
+    upsert_reference_series_observation(
+        {"series_id": "ETH/USD", "observed_at": first, "value": 2_000.0,
+         "source": "local-reference", "evidence_json": {"fixture": True}},
+        db_path,
+    )
+    # Re-upserting the same identity updates the value in place rather than duplicating it.
+    upsert_reference_series_observation(
+        {"series_id": "ETH/USD", "observed_at": first, "value": 2_050.0,
+         "source": "local-reference", "evidence_json": {"fixture": True}},
+        db_path,
+    )
+    upsert_reference_series_observation(
+        {"series_id": "ETH/USD", "observed_at": second, "value": 2_200.0,
+         "source": "local-reference", "evidence_json": {"fixture": True}},
+        db_path,
+    )
+
+    rows = read_reference_series(db_path)
+    assert len(rows) == 2
+    assert (rows[0]["series_id"], rows[0]["observed_at"], rows[0]["value"], rows[0]["source"]) == (
+        "ETH/USD", first.replace(tzinfo=None), 2_050.0, "local-reference")
+
+    summary = reference_series_coverage_summary(db_path)
+    assert len(summary) == 1
+    entry = summary[0]
+    assert entry["series_id"] == "ETH/USD"
+    assert entry["total_observations"] == 2
+    assert entry["source_count"] == 1
+    assert entry["first_observed_at"] == first.replace(tzinfo=None)
+    assert entry["last_observed_at"] == second.replace(tzinfo=None)
+    assert entry["last_source"] == "local-reference"
+    assert entry["max_observed_gap_seconds"] == 3_600.0
 
 
 def test_classify_provider_failure_distinguishes_rate_limits_from_other_failures():

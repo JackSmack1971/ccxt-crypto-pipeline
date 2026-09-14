@@ -2,8 +2,8 @@
 
 **Status:** Active execution authority for forward work  
 **Current phase:** Phase 5 research-grade data reliability
-**Baseline:** `main` at `d5041339688e25a81d2c0344754f1a2a58bd60a1`  
-**Last reconciled:** 2026-09-14 (Slice 5.5 closed)
+**Baseline:** `main` at `2948a28520ed6e05d9ecfd78d110690a9c50a2cc`
+**Last reconciled:** 2026-09-14 (Slice 5.6 closed)
 
 This file is the durable forward roadmap for `ccxt-crypto-pipeline`. It exists so a new agent can determine the repository's actual execution frontier without reconstructing intent from chat history, stale phase prose, or commit messages.
 
@@ -617,11 +617,53 @@ Evidence:
 
 ## Slice 5.6 — Historical conversion/reference series
 
-**Status:** ACTIVE
+**Status:** DONE
 
 Generalize the Phase 4R quote-currency policy into reusable point-in-time reference series with provenance and coverage metrics.
 
+Evidence:
+
+- Schema version 12 adds a canonical `reference_series` table keyed by
+  `(series_id, observed_at, source)` holding a positive value plus
+  evidence, generalizing the Phase 4R quote-conversion overlay into a
+  persisted, provider-agnostic point-in-time series contract that is not
+  limited to label-boundary USD conversion.
+- `storage/db.py` adds `upsert_reference_series_observation` (idempotent
+  upsert), `read_reference_series` (deterministic ordered read), and
+  `reference_series_coverage_summary` (an offline, network-free aggregate
+  of per-series observation count, distinct-source count, first/last
+  observed time, last source, and worst observed gap), mirroring the
+  Slice 5.4 provider-quality-summary pattern for coverage/provenance
+  evidence.
+- `analysis/datasets/snapshot.py` exposes the persisted series through
+  `DatasetSnapshot`: a `reference_series` field (deduplicated and ordered
+  by `series_id`/`observed_at`/`source`, rejecting duplicate identity) and
+  a `reference_series_at(series_id, decision_time)` point-in-time accessor
+  consistent with the existing `metadata_at`/`relationships_at` boundary.
+  `from_duckdb` loads it as a required table and folds it into the
+  dataset's content-addressed identity hash.
+- `analysis/alpha/labels.py` sources quote/USD conversion evidence from
+  `snapshot.reference_series_at(f"{quote}/USD", point)` in addition to any
+  explicitly supplied `ConversionObservation` tuple, so a persisted
+  reference series can back label conversion without every caller having
+  to hand-assemble observations; explicit observations, stablecoin parity,
+  fail-closed unavailability, and existing provenance fields are
+  unchanged.
+- `tests/test_storage.py` covers the v11-to-v12 migration preserving the
+  provider observation log, idempotent upsert, deterministic read, and the
+  offline coverage summary (count, source count, first/last observed time,
+  last source, max gap). `tests/test_phase3.py` covers
+  `DatasetSnapshot.reference_series_at` point-in-time visibility and
+  duplicate-identity rejection, and a label generated purely from a
+  persisted reference series (no explicit `conversion_observations`)
+  proving temporally valid selection and unchanged provenance shape. The
+  locked full suite passed with 127 tests; the storage migration guard
+  reported the fresh and migrated schemas as converged; byte-compilation
+  and whitespace validation also passed.
+
 ## Slice 5.7 — Data-plane closure matrix
+
+**Status:** ACTIVE
 
 Demonstrate restart, gap detection, reorg/recovery, multi-source selection, historical metadata/lineage, and price/conversion replay across representative chains.
 
@@ -793,11 +835,18 @@ For a fresh agent, the intended pickup sequence is:
 
 `AGENTS.md` → `ROADMAP.md` → active `docs/plans/phase-*.md` → relevant code/tests → Git history/status.
 
-The current frontier is **Phase 5.6 — Historical conversion/reference series**.
-Phase 5.5 is DONE: `storage/db.py` can detect and deterministically repair
-OHLCV Parquet partitions that diverge from the authoritative DuckDB `ohlcv`
-table after a committed write whose publication failed, exposed operator-side
-through `python -m storage <db> --verify-parquet`/`--repair-parquet` (see the
+The current frontier is **Phase 5.7 — Data-plane closure matrix**.
+Slice 5.6 is DONE: schema version 12's `reference_series` table gives the
+Phase 4R quote-currency conversion policy a reusable, persisted, point-in-time
+contract with its own provenance (`upsert_reference_series_observation`) and
+offline coverage metrics (`reference_series_coverage_summary`), exposed to
+analysis through `DatasetSnapshot.reference_series_at` and wired into
+`analysis/alpha/labels.py` conversion lookups alongside the pre-existing
+explicit-observation path (see the Slice 5.6 evidence above). Phase 5.5 is
+DONE: `storage/db.py` can detect and deterministically repair OHLCV Parquet
+partitions that diverge from the authoritative DuckDB `ohlcv` table after a
+committed write whose publication failed, exposed operator-side through
+`python -m storage <db> --verify-parquet`/`--repair-parquet` (see the
 Slice 5.5 evidence above). Phase 5.4 is DONE: the provider observation ledger
 records quality facts at both the scheduled-job boundary and per-chain/
 per-program below it, and `analysis/alpha/eligibility.py` gives Phase 3 cohort
@@ -806,7 +855,11 @@ establishes durable signature-based Solana replay after an explicit bounded
 bootstrap; credentialed live Helius compatibility remains unverified runtime
 evidence and is separate from the fixture-proven local contract.
 
-Slice 5.6 has not started. It needs to generalize the Phase 4R quote-currency
-conversion policy (`analysis/alpha/labels.py`) into a reusable, point-in-time
-reference series contract with its own provenance and coverage metrics,
-usable beyond the label-boundary USD conversion it was originally scoped for.
+Slice 5.7 has not started. It needs to demonstrate, across representative
+chains and with fixture-only evidence, the composed data-plane guarantees
+Phase 5 has now built: durable-cursor restart replay (5.1), EVM reorg
+detection/recovery (5.2), Solana resumable/complete discovery (5.3), provider
+quality/eligibility gating (5.4), DuckDB/Parquet recovery (5.5), and
+historical/reference-series-backed conversion replay (5.6) -- one closure
+matrix in the style of the Phase 3/Phase 4 acceptance matrices under
+`docs/plans/`, rather than new behavioral surface.

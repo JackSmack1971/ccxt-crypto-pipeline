@@ -343,6 +343,51 @@ def test_non_usd_quote_without_conversion_fails_closed_and_stablecoin_parity_is_
     assert stable.provenance["start_conversion"]["conversion_rate"] == 1.0
 
 
+def test_dataset_snapshot_exposes_point_in_time_reference_series():
+    t = datetime(2025, 1, 1)
+    asset = (Asset("ethereum:0xaaa", "dex", "ethereum", "0xaaa", t, "0xaaa"),)
+    reference_series = (
+        {"series_id": "ETH/USD", "observed_at": t, "value": 2_000.0, "source": "local-reference"},
+        {"series_id": "ETH/USD", "observed_at": t + timedelta(hours=1), "value": 2_200.0, "source": "local-reference"},
+        {"series_id": "SOL/USD", "observed_at": t, "value": 100.0, "source": "local-reference"},
+    )
+    data = DatasetSnapshot(asset, (), (), (), (), DatasetPolicy(timeframe="1h"), "fixture",
+                           reference_series=reference_series)
+    assert [row["value"] for row in data.reference_series_at("ETH/USD", t)] == [2_000.0]
+    assert {row["value"] for row in data.reference_series_at("ETH/USD", t + timedelta(hours=1))} == {2_000.0, 2_200.0}
+    assert data.reference_series_at("SOL/USD", t - timedelta(seconds=1)) == ()
+    assert data.reference_series_at("BTC/USD", t) == ()
+
+    duplicate = reference_series + (reference_series[0],)
+    with pytest.raises(ValueError, match="duplicate reference series observation"):
+        DatasetSnapshot(asset, (), (), (), (), DatasetPolicy(timeframe="1h"), "fixture", reference_series=duplicate)
+
+
+def test_generate_labels_sources_conversion_from_persisted_reference_series_without_explicit_observations():
+    data = snapshot()
+    cohort = extract_cohort(data, CohortConfig(datetime(2025, 1, 1), datetime(2025, 1, 2), chains=("ethereum",)))
+    reference_series = (
+        {"series_id": "ETH/USD", "observed_at": datetime(2025, 1, 1), "value": 2_000.0, "source": "persisted-reference"},
+        {"series_id": "ETH/USD", "observed_at": datetime(2025, 1, 1, 1), "value": 2_200.0, "source": "persisted-reference"},
+        # A later-observed point must never be selected for either endpoint.
+        {"series_id": "ETH/USD", "observed_at": datetime(2025, 1, 1, 2), "value": 9_999.0, "source": "future-reference"},
+    )
+    data = DatasetSnapshot(data.assets, data.bars, data.metadata, data.events, data.lineage, data.policy,
+                           data.dataset_identity, data.asset_relationships, reference_series)
+
+    label = generate_labels(data, cohort, LabelDefinition("return", "1h"),
+                            quote_assets={"ethereum:0xaaa": "ETH"})[0]
+
+    assert label.status == "COMPLETE"
+    assert label.value == pytest.approx(__import__("math").log((11 * 2_200) / (10 * 2_000)))
+    assert label.provenance["start_conversion"] == {
+        "quote_asset": "ETH", "conversion_rate": 2_000.0,
+        "conversion_source": "persisted-reference", "conversion_time": "2025-01-01T00:00:00",
+        "conversion_policy": "phase3-quote-usd-v1",
+    }
+    assert label.provenance["end_conversion"]["conversion_time"] == "2025-01-01T01:00:00"
+
+
 def test_phase1_to_phase3_replay_uses_persisted_snapshot_and_is_deterministic(tmp_path, monkeypatch):
     """Exercise the real Phase 1 storage boundary, not only in-memory snapshots."""
     import socket

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import duckdb
 
-SCHEMA_VERSION = 11
+SCHEMA_VERSION = 12
 
 SCHEMA_SQL = """
 CREATE TABLE IF NOT EXISTS assets (
@@ -134,6 +134,15 @@ CREATE TABLE IF NOT EXISTS provider_observation_log (
     error_message VARCHAR,
     run_id VARCHAR,
     PRIMARY KEY (source, scope, observed_at)
+);
+
+CREATE TABLE IF NOT EXISTS reference_series (
+    series_id VARCHAR NOT NULL,
+    observed_at TIMESTAMP NOT NULL,
+    value DOUBLE NOT NULL CHECK (value > 0),
+    source VARCHAR NOT NULL,
+    evidence_json VARCHAR NOT NULL,
+    PRIMARY KEY (series_id, observed_at, source)
 );
 
 CREATE TABLE IF NOT EXISTS schema_version (
@@ -345,6 +354,23 @@ def initialize(connection: duckdb.DuckDBPyConnection) -> None:
                 error_message VARCHAR,
                 run_id VARCHAR,
                 PRIMARY KEY (source, scope, observed_at)
+            )""")
+            connection.execute("UPDATE schema_version SET version = ?", [SCHEMA_VERSION])
+            connection.execute("COMMIT")
+        except Exception:
+            connection.execute("ROLLBACK")
+            raise
+        versions = (11,)
+    if versions[0] < 12:
+        connection.execute("BEGIN TRANSACTION")
+        try:
+            connection.execute("""CREATE TABLE IF NOT EXISTS reference_series (
+                series_id VARCHAR NOT NULL,
+                observed_at TIMESTAMP NOT NULL,
+                value DOUBLE NOT NULL CHECK (value > 0),
+                source VARCHAR NOT NULL,
+                evidence_json VARCHAR NOT NULL,
+                PRIMARY KEY (series_id, observed_at, source)
             )""")
             connection.execute("UPDATE schema_version SET version = ?", [SCHEMA_VERSION])
             connection.execute("COMMIT")
