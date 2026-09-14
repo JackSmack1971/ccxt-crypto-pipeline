@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import duckdb
 
-SCHEMA_VERSION = 10
+SCHEMA_VERSION = 11
 
 SCHEMA_SQL = """
 CREATE TABLE IF NOT EXISTS assets (
@@ -120,6 +120,20 @@ CREATE TABLE IF NOT EXISTS evm_block_observations (
     canonical BOOLEAN NOT NULL,
     run_id VARCHAR,
     PRIMARY KEY (chain, block_number, block_hash)
+);
+
+CREATE TABLE IF NOT EXISTS provider_observation_log (
+    source VARCHAR NOT NULL,
+    scope VARCHAR NOT NULL,
+    observed_at TIMESTAMP NOT NULL,
+    status VARCHAR NOT NULL CHECK (status IN ('success', 'failure', 'rate_limited')),
+    latency_ms DOUBLE CHECK (latency_ms IS NULL OR latency_ms >= 0),
+    expected_interval_seconds DOUBLE CHECK (expected_interval_seconds IS NULL OR expected_interval_seconds > 0),
+    observed_interval_seconds DOUBLE CHECK (observed_interval_seconds IS NULL OR observed_interval_seconds >= 0),
+    rows_observed BIGINT NOT NULL DEFAULT 0,
+    error_message VARCHAR,
+    run_id VARCHAR,
+    PRIMARY KEY (source, scope, observed_at)
 );
 
 CREATE TABLE IF NOT EXISTS schema_version (
@@ -309,6 +323,28 @@ def initialize(connection: duckdb.DuckDBPyConnection) -> None:
                 updated_at TIMESTAMP NOT NULL,
                 run_id VARCHAR,
                 PRIMARY KEY (source, scope)
+            )""")
+            connection.execute("UPDATE schema_version SET version = ?", [SCHEMA_VERSION])
+            connection.execute("COMMIT")
+        except Exception:
+            connection.execute("ROLLBACK")
+            raise
+        versions = (10,)
+    if versions[0] < 11:
+        connection.execute("BEGIN TRANSACTION")
+        try:
+            connection.execute("""CREATE TABLE IF NOT EXISTS provider_observation_log (
+                source VARCHAR NOT NULL,
+                scope VARCHAR NOT NULL,
+                observed_at TIMESTAMP NOT NULL,
+                status VARCHAR NOT NULL CHECK (status IN ('success', 'failure', 'rate_limited')),
+                latency_ms DOUBLE CHECK (latency_ms IS NULL OR latency_ms >= 0),
+                expected_interval_seconds DOUBLE CHECK (expected_interval_seconds IS NULL OR expected_interval_seconds > 0),
+                observed_interval_seconds DOUBLE CHECK (observed_interval_seconds IS NULL OR observed_interval_seconds >= 0),
+                rows_observed BIGINT NOT NULL DEFAULT 0,
+                error_message VARCHAR,
+                run_id VARCHAR,
+                PRIMARY KEY (source, scope, observed_at)
             )""")
             connection.execute("UPDATE schema_version SET version = ?", [SCHEMA_VERSION])
             connection.execute("COMMIT")

@@ -1,7 +1,7 @@
 from scheduler.pipeline import Pipeline, build_scheduler
 from datetime import datetime
 
-from storage.db import log_run_end, log_run_start, read_runs
+from storage.db import log_run_end, log_run_start, provider_quality_summary, read_provider_observation_log, read_runs
 from scheduler.status import health_report
 
 
@@ -22,6 +22,48 @@ def test_cycle_runs_all_stages_and_records_structured_results(tmp_path):
         "scheduler:solana_listener", "scheduler:normalization",
     }
     assert all(run["finished_at"] is not None for run in runs)
+
+
+def test_cycle_records_provider_observation_log_with_expected_intervals(tmp_path):
+    pipeline = Pipeline(db_path=str(tmp_path / "pipeline.duckdb"))
+    for name in ("cex_refresh", "tier0_poll", "evm_listeners", "solana_listener", "normalize"):
+        setattr(pipeline, name, lambda: 1)
+
+    pipeline.run_cycle()
+
+    log = {row["source"]: row for row in read_provider_observation_log(pipeline.db_path)}
+    assert set(log) == {"cex_refresh", "tier0_poll", "evm_listeners", "solana_listener", "normalization"}
+    assert all(row["status"] == "success" for row in log.values())
+    assert all(row["scope"] == row["source"] for row in log.values())
+    assert log["evm_listeners"]["expected_interval_seconds"] == 60.0
+    assert log["solana_listener"]["expected_interval_seconds"] == 60.0
+    assert log["cex_refresh"]["expected_interval_seconds"] == 86400.0
+    assert log["normalization"]["expected_interval_seconds"] == 86400.0
+    assert log["tier0_poll"]["expected_interval_seconds"] == 20 * 60.0
+    assert all(row["latency_ms"] is not None and row["latency_ms"] >= 0 for row in log.values())
+
+    summary = {row["source"]: row for row in provider_quality_summary(pipeline.db_path)}
+    assert summary["evm_listeners"]["completeness_ratio"] == 1.0
+    assert summary["evm_listeners"]["total_observations"] == 1
+
+
+def test_cycle_classifies_rate_limited_failures_in_provider_observation_log(tmp_path):
+    pipeline = Pipeline(db_path=str(tmp_path / "pipeline.duckdb"))
+
+    def rate_limited():
+        raise RuntimeError("HTTP 429 too many requests")
+
+    pipeline.cex_refresh = rate_limited
+    pipeline.tier0_poll = lambda: 0
+    pipeline.evm_listeners = lambda: 0
+    pipeline.solana_listener = lambda: 0
+    pipeline.normalize = lambda: 0
+
+    pipeline.run_cycle()
+
+    log = {row["source"]: row for row in read_provider_observation_log(pipeline.db_path)}
+    assert log["cex_refresh"]["status"] == "rate_limited"
+    assert log["cex_refresh"]["error_message"] == "HTTP 429 too many requests"
 
 
 def test_cycle_isolates_job_failure_and_continues(tmp_path):
