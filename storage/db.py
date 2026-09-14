@@ -313,6 +313,56 @@ def advance_ingestion_cursor(source: str, scope: str, position: int,
         _finish(conn, owned)
 
 
+def get_ingestion_continuation(source: str, scope: str, db_path: str | Path | None = None, *,
+                               connection=None) -> dict[str, Any] | None:
+    """Return an opaque durable provider continuation token."""
+    conn, owned = _connection(db_path, connection)
+    try:
+        cursor = conn.execute(
+            """SELECT source, scope, token, updated_at, run_id
+               FROM ingestion_continuations WHERE source = ? AND scope = ?""",
+            [source, scope],
+        )
+        row = cursor.fetchone()
+        return dict(zip([column[0] for column in cursor.description], row)) if row else None
+    finally:
+        _finish(conn, owned)
+
+
+def advance_ingestion_continuation(source: str, scope: str, token: str,
+                                   db_path: str | Path | None = None, *,
+                                   updated_at: datetime | None = None, run_id: str | None = None,
+                                   expected_previous: str | None = None, connection=None) -> None:
+    """Replace an opaque token while compare-and-set protects concurrent pollers."""
+    if not source or not scope or not isinstance(token, str) or not token:
+        raise ValueError("continuation source, scope, and token are required")
+    conn, owned = _connection(db_path, connection)
+    try:
+        conn.execute("BEGIN TRANSACTION")
+        current = conn.execute(
+            "SELECT token FROM ingestion_continuations WHERE source = ? AND scope = ?",
+            [source, scope],
+        ).fetchone()
+        current_token = current[0] if current else None
+        if current_token != expected_previous:
+            raise ValueError(
+                f"continuation continuity failure for {source}/{scope}: "
+                f"expected {expected_previous!r}, found {current_token!r}"
+            )
+        conn.execute(
+            """INSERT INTO ingestion_continuations VALUES (?, ?, ?, ?, ?)
+               ON CONFLICT (source, scope) DO UPDATE SET token = excluded.token,
+                   updated_at = excluded.updated_at, run_id = excluded.run_id""",
+            [source, scope, token, updated_at or datetime.now(), run_id],
+        )
+        conn.execute("COMMIT")
+    except Exception:
+        conn.execute("ROLLBACK")
+        raise
+    finally:
+        _finish(conn, owned)
+
+
 def record_evm_block_observation(chain: str, block_number: int, block_hash: str,
                                  parent_hash: str, db_path: str | Path | None = None, *,
                                  observed_at: datetime | None = None, run_id: str | None = None,
@@ -403,6 +453,14 @@ def read_ingestion_cursors(db_path=None, *, connection=None):
     conn, owned = _connection(db_path, connection)
     try:
         cursor = conn.execute("""SELECT * FROM ingestion_cursors
+                               ORDER BY source, scope""")
+        return [dict(zip([column[0] for column in cursor.description], row)) for row in cursor.fetchall()]
+    finally:
+        _finish(conn, owned)
+def read_ingestion_continuations(db_path=None, *, connection=None):
+    conn, owned = _connection(db_path, connection)
+    try:
+        cursor = conn.execute("""SELECT * FROM ingestion_continuations
                                ORDER BY source, scope""")
         return [dict(zip([column[0] for column in cursor.description], row)) for row in cursor.fetchall()]
     finally:

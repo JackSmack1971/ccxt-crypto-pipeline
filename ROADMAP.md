@@ -483,13 +483,30 @@ Evidence:
 
 ## Slice 5.3 — Solana resumability and completeness
 
-**Status:** ACTIVE
+**Status:** DONE
 
 Replace bounded recent-window assumptions with a durable resumable discovery contract where provider capabilities allow it.
 
 Acceptance includes high-activity fixtures proving no silent window loss.
 
+Evidence:
+
+- Schema version 10 adds provider-agnostic opaque ingestion continuations with
+  compare-and-set updates while preserving the numeric EVM cursor contract.
+- The Helius enhanced-transaction client supports signature pagination. Each
+  configured program resumes from its last durable signature, processes every
+  intervening page oldest-to-newest, and advances only after persistence.
+- Missing signatures, invalid paging limits, an unreachable prior signature,
+  or exhaustion of the configured page budget fail closed without advancing
+  progress. Initial observation remains an explicit one-page bootstrap boundary.
+- Fixture-only migration and Solana listener tests cover v9-to-v10 row
+  preservation, idempotent initialization, stale continuation writers,
+  multi-page high-activity restart replay, and explicit gap failure. The locked
+  full suite passed with 100 tests.
+
 ## Slice 5.4 — Provider observation ledger and quality SLOs
+
+**Status:** ACTIVE
 
 Track expected/observed intervals, provider failures, rate-limit gaps, source latency, and completeness by source/chain.
 
@@ -677,7 +694,8 @@ For a fresh agent, the intended pickup sequence is:
 
 `AGENTS.md` → `ROADMAP.md` → active `docs/plans/phase-*.md` → relevant code/tests → Git history/status.
 
-The current frontier is **Phase 5.3 — Solana resumability and completeness**. Phase 4R is
-closed by the Phase 3 and Phase 4 acceptance matrices plus the canonical offline
-end-to-end fixture; live-provider evidence remains separate and does not turn
-fixture methodology into a claim of profitability or production readiness.
+The current frontier is **Phase 5.4 — Provider observation ledger and quality
+SLOs**. Phase 5.3 establishes durable signature-based Solana replay after an
+explicit bounded bootstrap; credentialed live Helius compatibility remains
+unverified runtime evidence and is separate from the fixture-proven local
+contract.

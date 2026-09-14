@@ -17,6 +17,7 @@ programs:
   pump_swap: pAMMBay6oceH9fJKBRHGP5D4bD4sWpmSwMn52FMfXEA
 discovery:
   limit: 20
+  max_pages: 25
   transaction_types:
     - TOKEN_MINT
     - CREATE_POOL
