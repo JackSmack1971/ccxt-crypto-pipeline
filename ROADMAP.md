@@ -3,7 +3,7 @@
 **Status:** Active execution authority for forward work  
 **Current phase:** Phase 6 governed experiment control plane
 **Baseline:** `main` at `23dbd389af88cade4584cb5fdc10b60dc17fcc3b`
-**Last reconciled:** 2026-09-14 (Slice 5.7 closed; Phase 5 complete)
+**Last reconciled:** 2026-09-14 (Slice 6.1 closed; Slice 6.2 active)
 
 This file is the durable forward roadmap for `ccxt-crypto-pipeline`. It exists so a new agent can determine the repository's actual execution frontier without reconstructing intent from chat history, stale phase prose, or commit messages.
 
@@ -727,11 +727,51 @@ explicitly out of scope and separately blocked, per the closure matrix doc.
 
 ## Slice 6.1 — Experiment specification schema
 
-**Status:** ACTIVE
+**Status:** DONE
 
 Version cohort, feature, label, split, hypothesis family, correction policy, candidate definition, costs, baselines, and code/config identities in one declarative experiment spec.
 
+Evidence:
+
+- `analysis/experiments/spec.py` adds the versioned, frozen `ExperimentSpec`
+  (`phase6-experiment-v1`) composing the existing governed Phase 3 objects
+  (`CohortConfig`, `LabelDefinition`, `PromotionPolicy`) with new versioned
+  declarative components: `SplitPolicy` (chronological split window
+  configuration), `HypothesisFamily` (the frozen feature/threshold/horizon/
+  subgroup grid plus its discovery/confirmation correction identity),
+  `CandidateDefinition` (a selection-rule identity string rather than an
+  executable callable), `CostPolicy` (turnover/cost scenarios), and
+  `BaselinePolicy` (required baseline families). `code_version` and
+  `config_identity` are required scalar identities on the spec itself.
+- The spec never executes cohort extraction, feature computation, labeling,
+  splitting, or candidate evaluation; it only versions, cross-validates, and
+  content-identifies configuration those already-governed Phase 3 helpers
+  consume, preserving the "compose, don't duplicate" boundary for Phase 6.
+- Cross-component validation fails closed rather than silently drifting:
+  hypothesis-family/candidate horizons must be declared by the spec's own
+  labels, the split's label-horizon window must cover the longest declared
+  label horizon, and the promotion policy's correction method/thresholds
+  must match the hypothesis family's declared correction identity. Only the
+  currently implemented `benjamini-hochberg`/`holm-bonferroni` corrections
+  and the existing `baseline_families` names are accepted.
+- `experiment_spec_id` produces a deterministic sha256-derived content
+  identity (mirroring the existing run/handoff id pattern in
+  `analysis/alpha/artifacts.py` and `reporting/package/handoff.py`); the same
+  spec fields always hash identically, and changing any versioned component
+  (split embargo, hypothesis threshold, cost scenario, etc.) changes the
+  identity.
+- `tests/test_phase6.py` covers deterministic identity replay, an identity
+  change from each versioned component, feature-set normalization/dedup,
+  and fail-closed rejection of unsupported spec/correction versions,
+  undeclared horizons, a split window shorter than the longest label
+  horizon, a promotion-policy/hypothesis-family correction mismatch, and
+  invalid baseline/cost/candidate/split configuration. The locked full suite
+  passed with 154 tests (130 prior + 24 new); the storage migration guard,
+  byte-compilation, and whitespace validation also passed.
+
 ## Slice 6.2 — Deterministic experiment runner
+
+**Status:** ACTIVE
 
 Execute the spec from local persisted inputs only and produce one immutable run directory/manifest.
 
@@ -902,13 +942,22 @@ evidence above). Live-provider acceptance (credentialed EVM RPC and Helius)
 and production-scale longitudinal sample adequacy remain explicitly
 out of scope and separately blocked, per the closure matrix doc.
 
-Slice 6.1 has not started. It needs a versioned, declarative experiment
-specification schema covering cohort, feature, label, split, hypothesis
-family, correction policy, candidate definition, costs, baselines, and
-code/config identities in one object, per `AGENTS.md`'s Phase 3 architecture
-and the Phase 4R/5 provenance invariants this repository already enforces.
-Read the Phase 3 (`analysis/alpha/`) module boundaries and existing
-`write_research_run`/handoff manifests before designing the schema, since
-Phase 6 must not duplicate or bypass those already-governed contracts --
-it makes the composition of manually invoked Phase 3 helpers into a single
-first-class reproducible object, not a second research engine.
+Slice 6.1 is DONE. `analysis/experiments/spec.py` defines the versioned,
+declarative `ExperimentSpec` (`phase6-experiment-v1`) covering cohort,
+feature, label, split, hypothesis family, correction policy, candidate
+definition, costs, baselines, and code/config identities in one
+cross-validated, content-addressed object, composing the existing governed
+`analysis/alpha/` types (`CohortConfig`, `LabelDefinition`,
+`PromotionPolicy`) rather than duplicating them.
+
+Slice 6.2 has not started. It needs a deterministic experiment runner that
+takes an `ExperimentSpec` plus a local `DatasetSnapshot` and executes the
+already-governed Phase 3 helpers (`extract_cohort`, `compute_features`,
+`generate_labels`, `build_split`, `score_candidate`,
+`evaluate_candidate_promotion`, `baseline_families`) in the sequence the
+spec declares, producing one immutable run directory/manifest analogous to
+`analysis/alpha/artifacts.py::write_research_run` and
+`analysis/runs/artifacts.py::write_run` -- keyed by `experiment_spec_id` plus
+dataset identity, with no recomputation or redefinition of Phase 3 research
+semantics. The runner is the first slice that actually executes a spec;
+6.1 intentionally stops at the versioned, validated declaration.
