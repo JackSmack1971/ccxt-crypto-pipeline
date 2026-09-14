@@ -22,6 +22,17 @@ slice:
 - Approved input also carries explicit `approval.status: approved` metadata,
   a hash-verified Phase 3 `research_run`, and linked Phase 3 artifact hashes.
   Generation rejects missing or mismatched research lineage before rendering.
+- Numeric and comparative factual claims carry a typed derivation selecting an
+  evidence row and source field, an `identity` or `compare` operation, compatible
+  source/result units, and an explicit formatting expectation. The validator
+  derives the presented value or direction and rejects disagreement with either
+  the declaration or prose before article rendering.
+- Chart transformations are fail-closed. The first whitelist contains only the
+  deterministic `identity` presentation transform; annotations remain
+  unsupported and are rejected rather than silently omitted.
+- SVG accessibility validation parses the rendered XML and verifies its SVG
+  root, image role, declared dimensions, title, description, units, and source
+  attribution structurally.
 
 The implementation intentionally has no ingestion/provider imports and uses no
 generative-model or charting dependency.

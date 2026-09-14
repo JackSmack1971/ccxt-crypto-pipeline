@@ -22,6 +22,15 @@ def approved_input(tmp_path, *, value=1.5, missing=False):
                          "artifacts": {"results.json": result_hash}}
     research_bytes = json.dumps(research_manifest, sort_keys=True, separators=(",", ":")).encode()
     (research_dir / "manifest.json").write_bytes(research_bytes)
+    claim = {"id": "return", "text": "Return unavailable." if missing else "The observed return was 1.5%.",
+             "evidence": [{"artifact": "results", "row": 0, "dataset_identity": "fixture-dataset",
+                           "query_config_identity": "fixture-config",
+                           "time_range": {"start": "2025-01-01", "end": "2025-01-02"},
+                           "uncertainty": "fixture"}]}
+    if not missing:
+        claim["derivation"] = {"evidence_index": 0, "source_field": "return", "operation": "identity",
+                               "source_unit": "percent", "result_unit": "percent", "decimals": 1,
+                               "suffix": "%", "expected": "1.5%"}
     return build_approved_handoff(research_dir, tmp_path / "handoffs", approval={
         "status": "approved", "identity": "fixture-approval", "reviewer": "fixture-reviewer",
         "approved_at": "2026-09-11T00:00:00Z", "scope": "fixture reporting"
@@ -29,11 +38,7 @@ def approved_input(tmp_path, *, value=1.5, missing=False):
         "title": "Fixture results", "dataset_identity": "fixture-dataset",
         "query_config_identity": "fixture-config", "code_version": "fixture-code",
         "time_range": {"start": "2025-01-01", "end": "2025-01-02"},
-        "claims": [{"id": "return", "text": "The observed return was 1.5%.", "evidence": [{
-            "artifact": "results", "row": 0, "dataset_identity": "fixture-dataset",
-            "query_config_identity": "fixture-config", "time_range": {"start": "2025-01-01", "end": "2025-01-02"},
-            "uncertainty": "fixture"
-        }]}],
+        "claims": [claim],
         "charts": [{"id": "returns", "data_artifact": "results", "x_column": "time", "y_column": "return",
                      "x_unit": "hours", "y_unit": "percent", "missing_behavior": "explicit_state",
                      "source_attribution": "fixture result", "alt_text": "Observed return over time."}],
@@ -100,6 +105,59 @@ def test_phase4_rejects_unresolved_numeric_claim(tmp_path):
         generate_package(input_dir, tmp_path / "out")
 
 
+def test_phase4_rejects_numeric_claim_that_disagrees_with_evidence(tmp_path):
+    input_dir = approved_input(tmp_path)
+    manifest = json.loads((input_dir / "manifest.json").read_text())
+    manifest["claims"][0]["text"] = "The observed return was 9.0%."
+    manifest["claims"][0]["derivation"]["expected"] = "9.0%"
+    (input_dir / "manifest.json").write_text(json.dumps(manifest))
+    with pytest.raises(ValueError, match="declared value does not match"):
+        generate_package(input_dir, tmp_path / "out")
+
+
+def test_phase4_comparative_claim_derives_direction(tmp_path):
+    input_dir = approved_input(tmp_path)
+    results_path = input_dir / "results.json"
+    results_path.write_text(json.dumps([{"time": 1, "return": 1.5, "baseline": 1.0}]))
+    manifest = json.loads((input_dir / "manifest.json").read_text())
+    digest = hashlib.sha256(results_path.read_bytes()).hexdigest()
+    manifest["staged_tables"]["results"]["sha256"] = digest
+    manifest["research_artifacts"]["results.json"]["sha256"] = digest
+    research = json.loads((input_dir / "research-manifest.json").read_text())
+    research["artifacts"]["results.json"] = digest
+    research_bytes = json.dumps(research, sort_keys=True, separators=(",", ":")).encode()
+    (input_dir / "research-manifest.json").write_bytes(research_bytes)
+    manifest["research_run"]["sha256"] = hashlib.sha256(research_bytes).hexdigest()
+    manifest["claims"][0]["text"] = "The observed return was higher than the baseline."
+    manifest["claims"][0]["derivation"].update(
+        operation="compare", baseline_field="baseline", suffix="", expected="higher")
+    (input_dir / "manifest.json").write_text(json.dumps(manifest))
+    package = generate_package(input_dir, tmp_path / "out")
+    ledger = json.loads((package / "claim-ledger.json").read_text())
+    assert ledger[0]["derivation"]["rendered_value"] == "higher"
+
+
+def test_phase4_chart_semantics_fail_closed_and_identity_is_retained(tmp_path):
+    input_dir = approved_input(tmp_path)
+    manifest = json.loads((input_dir / "manifest.json").read_text())
+    manifest["charts"][0]["transformations"] = ["identity"]
+    (input_dir / "manifest.json").write_text(json.dumps(manifest))
+    package = generate_package(input_dir, tmp_path / "out")
+    specs = json.loads((package / "chart-specs.json").read_text())
+    assert specs[0]["transformations"] == ["identity"]
+
+    manifest["charts"][0]["transformations"] = ["rolling_average"]
+    (input_dir / "manifest.json").write_text(json.dumps(manifest))
+    with pytest.raises(ValueError, match="unsupported transformation"):
+        generate_package(input_dir, tmp_path / "other-out")
+
+    manifest["charts"][0]["transformations"] = []
+    manifest["charts"][0]["annotations"] = [{"kind": "line", "value": 0}]
+    (input_dir / "manifest.json").write_text(json.dumps(manifest))
+    with pytest.raises(ValueError, match="unsupported annotation"):
+        generate_package(input_dir, tmp_path / "annotation-out")
+
+
 def test_phase4_missing_chart_values_are_explicit_not_zero(tmp_path):
     input_dir = approved_input(tmp_path, missing=True)
     package = generate_package(input_dir, tmp_path / "out")
@@ -154,7 +212,10 @@ def test_phase3_artifact_is_accepted_only_through_explicit_approved_handoff(tmp_
         "claims": [{"id": "return", "text": "The observed return was 0.1.", "evidence": [{
             "artifact": "results", "row": 0, "dataset_identity": "fixture-dataset",
             "query_config_identity": "fixture-config", "time_range": {"start": "2025-01-01", "end": "2025-01-02"},
-            "uncertainty": "fixture"}]}],
+            "uncertainty": "fixture"}], "derivation": {
+                "evidence_index": 0, "source_field": "value", "operation": "identity",
+                "source_unit": "log-return", "result_unit": "log-return", "decimals": 1,
+                "expected": "0.1"}}],
         "charts": [{"id": "returns", "data_artifact": "results", "x_column": "horizon", "y_column": "value",
                      "x_unit": "label", "y_unit": "log-return", "missing_behavior": "explicit_state",
                      "source_attribution": "approved Phase 3 result", "alt_text": "Observed return label."}],
@@ -210,10 +271,13 @@ def test_offline_phase1_to_phase4_chain_is_content_addressed_and_review_gated(tm
         "research_run": {"path": relative_manifest, "sha256": hashlib.sha256(research_manifest_path.read_bytes()).hexdigest()},
         "research_artifacts": {"labels.json": {"path": relative_labels, "sha256": labels_hash}},
         "staged_tables": {"labels": {"path": relative_labels, "sha256": labels_hash}},
-        "claims": [{"id": "label", "text": f"The observed return was {labels[0].value}.", "evidence": [{
+        "claims": [{"id": "label", "text": f"The observed return was {labels[0].value:.12f}.", "evidence": [{
             "artifact": "labels", "row": 0, "dataset_identity": dataset.dataset_identity,
             "query_config_identity": "fixture-phase4-config", "time_range": time_range,
-            "uncertainty": "fixture"}]}],
+            "uncertainty": "fixture"}], "derivation": {
+                "evidence_index": 0, "source_field": "value", "operation": "identity",
+                "source_unit": "log-return", "result_unit": "log-return", "decimals": 12,
+                "expected": f"{labels[0].value:.12f}"}}],
         "charts": [{"id": "label", "data_artifact": "labels", "x_column": "value", "y_column": "value",
                      "x_unit": "log-return", "y_unit": "log-return", "missing_behavior": "explicit_state",
                      "source_attribution": "approved Phase 3 result", "alt_text": "Observed one-hour return."}],
