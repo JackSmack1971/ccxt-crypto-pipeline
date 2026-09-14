@@ -12,7 +12,7 @@ import yaml
 
 from storage.db import (insert_dex_price_observations, insert_event, log_run_end, log_run_start,
                         record_observation_capability, safe_error_message, upsert_asset,
-                        upsert_asset_relationship)
+                        upsert_asset_relationship, upsert_price_observation)
 
 from .clients import GeckoTerminalClient, ProviderError
 
@@ -28,7 +28,8 @@ def _asset(network: str, address: str, token: dict[str, Any], now: datetime):
 
 
 def poll_network(network_config: dict[str, Any], *, db_path="storage/pipeline.duckdb",
-                 gecko=None, max_pools=20, now=None, price_config: dict[str, Any] | None = None) -> int:
+                 gecko=None, max_pools=20, now=None, cadence="20m",
+                 price_config: dict[str, Any] | None = None) -> int:
     network = network_config["name"]
     gecko_network = network_config.get("gecko_network", network)
     gecko = gecko or GeckoTerminalClient()
@@ -54,6 +55,19 @@ def poll_network(network_config: dict[str, Any], *, db_path="storage/pipeline.du
                           "timestamp": pool["created_at"],
                           "payload_json": json.dumps(pool, default=str, sort_keys=True),
                           "source": "geckoterminal"}, db_path)
+            for observation in pool.get("price_observations", ()):
+                upsert_price_observation({
+                    "asset_canonical_id": f"{network}:{observation['token_address']}",
+                    "market_canonical_id": canonical_id,
+                    "observed_at": now,
+                    "price": observation["price"],
+                    "quote_asset": observation.get("quote_asset", "USD"),
+                    "liquidity_usd": float(pool["reserve_usd"]) if pool.get("reserve_usd") is not None else None,
+                    "volume_usd": pool.get("volume_usd"),
+                    "cadence": cadence,
+                    "source": "geckoterminal",
+                    "evidence_json": {"pool": pool.get("raw", {}), "event_type": event_type},
+                }, db_path)
             written += 1
             for token_key in ("base_token_address", "quote_token_address"):
                 token_address = pool.get(token_key)
@@ -104,6 +118,7 @@ def poll(config_path="config/chains.yaml", *, db_path=None, gecko=None) -> int:
         for network in config.get("networks", []):
             written += poll_network(network, db_path=db_path, gecko=gecko,
                                     max_pools=config.get("max_pools_per_network", 20),
+                                    cadence=f"{config.get('poll_interval_minutes', 20)}m",
                                     price_config=config.get("price_observations", {}))
     except Exception as exc:
         log_run_end(run_id, "failed", db_path, rows_written=written, error_message=safe_error_message(exc))

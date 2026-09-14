@@ -6,7 +6,13 @@ from ingestion.evm.models import Capability, CapabilityStatus, EnrichmentResult
 from ingestion.evm.providers import EtherscanV2Provider, MegaNodeProvider, RoutescanProvider, build_provider
 from ingestion.evm.risk import HoneypotRiskProvider
 from ingestion.evm.rpc import PAIR_CREATED_TOPIC, decode_created_asset
-from storage.db import read_events, read_metadata, read_runs
+from storage.db import (get_ingestion_cursor, insert_event, read_event_history, read_events,
+                        read_evm_block_observations, read_metadata, read_runs)
+
+
+def fixture_block(number, suffix="aa", parent_suffix="00"):
+    return {"hash": "0x" + suffix * 32, "parentHash": "0x" + parent_suffix * 32,
+            "timestamp": "0x" + format(1735689600 + number, "x")}
 
 
 class Response:
@@ -87,6 +93,9 @@ def test_listener_persists_enrichment_and_run(tmp_path):
     token0 = "0x1111111111111111111111111111111111111111"
     token1 = "0x2222222222222222222222222222222222222222"
     class RPC:
+        def get_block(self, block_number):
+            return fixture_block(block_number, format(block_number, "02x"),
+                                 format(block_number - 1, "02x"))
         def get_factory_logs(self, factories, from_block, to_block):
             return [{"topics": [PAIR_CREATED_TOPIC, "0x" + "0" * 24 + token0[2:],
                                 "0x" + "0" * 24 + token1[2:]],
@@ -106,6 +115,73 @@ def test_listener_persists_enrichment_and_run(tmp_path):
     assert {row["asset_canonical_id"] for row in read_asset_relationships(db)} == {
         f"ethereum:{token0}", f"ethereum:{token1}"}
 
+
+def test_listener_cursor_survives_restart_and_rejects_skipped_range(tmp_path):
+    calls = []
+
+    class RPC:
+        def get_block(self, block_number):
+            return fixture_block(block_number, format(block_number, "02x"),
+                                 format(block_number - 1, "02x"))
+        def get_factory_logs(self, factories, from_block, to_block):
+            calls.append((from_block, to_block))
+            return []
+
+    class Provider:
+        pass
+
+    db = str(tmp_path / "cursor.duckdb")
+    chain = {"name": "ethereum", "chain_id": 1, "factories": []}
+    assert observe_once(chain, RPC(), Provider(), Provider(), db_path=db,
+                        from_block=10, to_block=20, cursor_source="evm_rpc") == 0
+    assert get_ingestion_cursor("evm_rpc", "ethereum", db)["position"] == 20
+    assert observe_once(chain, RPC(), Provider(), Provider(), db_path=db,
+                        from_block=21, to_block=25, cursor_source="evm_rpc") == 0
+    assert get_ingestion_cursor("evm_rpc", "ethereum", db)["position"] == 25
+    try:
+        observe_once(chain, RPC(), Provider(), Provider(), db_path=db,
+                     from_block=27, to_block=30, cursor_source="evm_rpc")
+    except ValueError as exc:
+        assert "skipped block range" in str(exc)
+    else:
+        raise AssertionError("a skipped block range should fail closed")
+    assert calls == [(10, 20), (21, 25)]
+    assert get_ingestion_cursor("evm_rpc", "ethereum", db)["position"] == 25
+
+
+def test_listener_reconciles_short_reorg_without_deleting_block_evidence(tmp_path):
+    hashes = {100: "aa", 101: "bb"}
+
+    class RPC:
+        def get_block(self, block_number):
+            parent = hashes.get(block_number - 1, "99")
+            return fixture_block(block_number, hashes[block_number], parent)
+        def get_factory_logs(self, factories, from_block, to_block): return []
+
+    db = str(tmp_path / "reorg.duckdb")
+    chain = {"name": "ethereum", "chain_id": 1, "factories": []}
+    assert observe_once(chain, RPC(), object(), object(), db_path=db, from_block=100,
+                        to_block=101, cursor_source="evm_rpc") == 0
+    insert_event({"canonical_id": "ethereum:0xpool", "event_type": "new_pool_detected",
+                  "timestamp": datetime(2025, 1, 1, tzinfo=timezone.utc), "payload_json": {},
+                  "source": "evm_rpc", "block_number": 100,
+                  "block_hash": "0x" + "aa" * 32}, db)
+    hashes[100] = "cc"
+    hashes[101] = "dd"
+    assert observe_once(chain, RPC(), object(), object(), db_path=db, from_block=100,
+                        to_block=101, cursor_source="evm_rpc") == 0
+
+    rows = read_evm_block_observations(db)
+    assert [(row["block_number"], row["block_hash"], row["canonical"]) for row in rows] == [
+        (100, "0x" + "aa" * 32, False), (100, "0x" + "cc" * 32, True),
+        (101, "0x" + "bb" * 32, False), (101, "0x" + "dd" * 32, True),
+    ]
+    reorgs = [row for row in read_events(db) if row["event_type"] == "chain_reorg_detected"]
+    assert len(reorgs) == 2
+    assert {json.loads(row["payload_json"])["block_number"] for row in reorgs} == {100, 101}
+    assert not [row for row in read_events(db) if row["event_type"] == "new_pool_detected"]
+    orphaned = [row for row in read_event_history(db) if row["event_type"] == "new_pool_detected"]
+    assert len(orphaned) == 1 and orphaned[0]["canonical"] is False
 
 def test_chain_configuration_contains_all_required_evm_networks():
     from ingestion.evm.config import load_chain

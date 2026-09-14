@@ -10,6 +10,7 @@ from typing import Any
 from reporting.charts.spec import validate_chart
 from reporting.claims.model import validate_claims
 from reporting.render.static import RENDERER_VERSION, render_svg, validate_accessibility
+from .handoff import validate_approved_handoff
 
 
 def _json(value: Any) -> bytes:
@@ -90,6 +91,8 @@ def generate_package(input_dir: str | Path, output_dir: str | Path) -> Path:
     """Build a pending human-review package from one immutable approved input."""
     root = Path(input_dir).resolve()
     manifest = _read(root / "manifest.json")
+    if manifest.get("handoff_version"):
+        validate_approved_handoff(manifest)
     if not manifest.get("immutable") or manifest.get("approved") is not True:
         raise ValueError("Phase 4 requires an immutable approved manifest")
     approval = manifest.get("approval")

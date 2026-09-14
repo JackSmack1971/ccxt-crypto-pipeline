@@ -77,8 +77,18 @@ def normalize_usd_price(raw_price: float, *, quote_asset: str = "USD", conversio
                    "conversion_source": conversion_source, "quote_currency": "USD"}
 
 
+def _reference_series_observations(quote: str, point: datetime,
+                                   snapshot: DatasetSnapshot | None) -> tuple[ConversionObservation, ...]:
+    """Read persisted point-in-time reference series rows as reusable conversion evidence."""
+    if snapshot is None:
+        return ()
+    rows = snapshot.reference_series_at(f"{quote}/USD", point)
+    return tuple(ConversionObservation(quote, row["observed_at"], row["value"], row["source"]) for row in rows)
+
+
 def _convert_at(raw_price: float, quote_asset: str, point: datetime,
-                observations: tuple[ConversionObservation, ...], policy: ConversionPolicy) -> tuple[float, dict[str, Any]]:
+                observations: tuple[ConversionObservation, ...], policy: ConversionPolicy,
+                snapshot: DatasetSnapshot | None = None) -> tuple[float, dict[str, Any]]:
     quote = quote_asset.strip().upper()
     if not quote:
         raise ValueError("quote asset identity is unavailable")
@@ -87,7 +97,8 @@ def _convert_at(raw_price: float, quote_asset: str, point: datetime,
     elif quote in policy.approved_stablecoins:
         rate, source, observed = 1.0, "approved_stablecoin_parity", point
     else:
-        eligible = [item for item in observations
+        candidates = observations + _reference_series_observations(quote, point, snapshot)
+        eligible = [item for item in candidates
                     if item.quote_asset.strip().upper() == quote and as_time(item.timestamp) <= point]
         if not eligible:
             raise ValueError(f"no temporally valid {quote}/USD conversion")
@@ -123,7 +134,7 @@ def generate_labels(snapshot: DatasetSnapshot, cohort: tuple[Any, ...], definiti
         status = "COMPLETE" if begin and end and coverage["passes"] else ("RIGHT_CENSORED" if snapshot.policy.end and as_time(snapshot.policy.end) < target else "DATA_CENSORED")
         quote_asset = quote_assets.get(member.canonical_id, "USD")
         normalizer = price_normalizer or (lambda bar: _convert_at(
-            bar.close, quote_asset, bar.timestamp, conversion_observations, conversion_policy))
+            bar.close, quote_asset, bar.timestamp, conversion_observations, conversion_policy, snapshot))
         try:
             begin_price, begin_provenance = normalizer(begin) if begin else (None, {})
             end_price, end_provenance = normalizer(end) if end else (None, {})

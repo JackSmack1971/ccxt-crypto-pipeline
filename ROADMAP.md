@@ -1,9 +1,9 @@
 # Engineering Roadmap
 
 **Status:** Active execution authority for forward work  
-**Current phase:** Phase 4 completion and integrity reconciliation  
-**Baseline:** `main` at `d5041339688e25a81d2c0344754f1a2a58bd60a1`  
-**Last reconciled:** 2026-09-11
+**Current phase:** Phase 6 governed experiment control plane
+**Baseline:** `main` at `23dbd389af88cade4584cb5fdc10b60dc17fcc3b`
+**Last reconciled:** 2026-09-14 (Slice 6.1 closed; Slice 6.2 active)
 
 This file is the durable forward roadmap for `ccxt-crypto-pipeline`. It exists so a new agent can determine the repository's actual execution frontier without reconstructing intent from chat history, stale phase prose, or commit messages.
 
@@ -100,7 +100,7 @@ These gaps are why the project is considered **in Phase 4, but not yet Phase 4-c
 
 # Phase 4R — Completion & Integrity Reconciliation
 
-**Status:** ACTIVE  
+**Status:** DONE
 **Goal:** Close the trust chain across Phases 1–4 before expanding product surface.  
 **Exit condition:** A production-shaped local dataset can move through point-in-time research, statistically governed candidate evaluation, explicit approval, and deterministic reporting with every identity, timestamp, derivation, input, and decision traceable and replayable.
 
@@ -284,19 +284,28 @@ Live-provider acceptance, when credentials are available, MUST be reported separ
 
 Evidence:
 
-- Schema version 7 adds source-scoped, idempotent DEX price/liquidity observations plus explicit
-  per-chain/provider capability observations without filling absent intervals.
+- Schema version 13 adds source-scoped, idempotent DEX price/liquidity observations (`dex_price_observations`)
+  plus explicit per-chain/provider capability observations (`observation_capabilities`) without filling
+  absent intervals, alongside an idempotent generic `price_observations` table with address-scoped
+  asset/market identity, observation time, positive price, quote asset, optional USD liquidity/volume,
+  configured cadence, source, and raw evidence.
+- `storage/db.py` provides deterministic upsert/read accessors for both observation contracts; migration
+  and fresh/repeated initialization tests preserve existing rows and converge on the target contract.
 - GeckoTerminal's ingestion-owned adapter normalizes configured minute candles for address-scoped
-  base assets and retains market, quote-asset, source, candle, and observation timestamps.
+  base assets and retains market, quote-asset, source, candle, and observation timestamps; Tier-0 also
+  normalizes GeckoTerminal base/quote USD prices, liquidity, volume, and the configured polling cadence
+  into the generic observation contract.
 - The read-only dataset boundary consumes persisted DEX observations and carries quote identity into
   Phase 3 label conversion; an offline fixture proves persisted launch-to-1h-label replay.
 - EVM and Solana Tier-0 fixtures cover subsequent observations, gap preservation, capability status,
-  and replay-safe storage. Live provider behavior remains `UNVERIFIED_RUNTIME` without a credentialed
-  or network-enabled smoke check.
+  address-scoped identities, and replay-safe storage for both observation contracts. Live provider
+  behavior remains `UNVERIFIED_RUNTIME` without a credentialed or network-enabled smoke check.
+- `tests/test_storage.py` and `tests/test_tier0.py` cover migration, idempotency, deterministic reads,
+  address-scoped identities, optional values, and both network shapes.
 
 ## Slice 4R.7 — Phase 2 metric/time-index hardening
 
-**Status:** ACTIVE
+**Status:** DONE
 
 Make portfolio metrics safe for broader multi-asset and intraday research.
 
@@ -314,9 +323,22 @@ Acceptance:
 - missing-gap execution behavior is explicit and tested;
 - existing single-asset deterministic behavior remains compatible unless an approved correction requires a versioned semantic change.
 
+Evidence:
+
+- `analysis/backtesting/simulator.py` groups bars by timestamp and emits one
+  portfolio state per timestamp. `BacktestConfig.stale_signal_policy` makes
+  missing-gap handling explicit while preserving next-available execution as
+  the default.
+- `analysis/metrics/core.py` derives annualization periods from the declared
+  observation frequency or timestamp intervals and reports interval spacing and
+  irregularity.
+- `tests/test_phase2.py` covers simultaneous multi-asset timestamps, 1h/1d
+  annualization, irregular spacing, and stale-signal handling. The locked full
+  suite passed with 84 tests and no network access.
+
 ## Slice 4R.8 — Canonical approved-research handoff
 
-**Status:** PLANNED
+**Status:** DONE
 
 Eliminate hand-assembled Phase 4 manifests as the normal integration path.
 
@@ -335,9 +357,21 @@ Acceptance:
 - approval does not mutate the original research run;
 - Phase 4 cannot consume an unapproved or unverifiable result.
 
+Evidence:
+
+- `reporting/package/handoff.py` provides the versioned `phase4-approved-v1`
+  builder and strict validator. It stages only hash-verified Phase 3 artifacts,
+  records approval identity/reviewer/time/scope and research-run identity, and
+  produces a deterministic immutable handoff without modifying the source run.
+- `reporting/package/generate.py` validates canonical handoffs before loading
+  staged inputs. Phase 4 tests use the builder for normal fixtures and cover
+  deterministic replay, changed-artifact rejection, unknown-field rejection,
+  explicit approval, and unchanged Phase 3 source bytes.
+- The locked full suite passed with 88 tests and no network access.
+
 ## Slice 4R.9 — Evidence-bound claims and chart semantics
 
-**Status:** PLANNED
+**Status:** DONE
 
 Upgrade Phase 4 from evidence *reference* validation to evidence *derivation* validation where factual numbers are emitted.
 
@@ -356,9 +390,25 @@ Acceptance:
 - declared transformations are deterministic and represented in package provenance;
 - missing/unsupported values cannot become zero or disappear without explicit representation.
 
+Evidence:
+
+- `reporting/claims/model.py` evaluates typed identity and comparison
+  derivations from an approved evidence row/field, enforces compatible units
+  and explicit formatting, and rejects prose or declared values that disagree
+  with the derived result.
+- `reporting/charts/spec.py` permits only the explicit deterministic identity
+  transform and rejects unknown transformations and all currently unsupported
+  annotations; normalized chart specs retain the transform for package replay.
+- `reporting/render/static.py` executes the transform whitelist defensively and
+  parses SVG output to validate structural accessibility metadata.
+- `tests/test_phase4.py` covers evidence/value disagreement, comparative
+  direction, retained identity-transform provenance, unsupported transform and
+  annotation rejection, missing-value representation, and offline deterministic
+  package generation. The locked full suite passed with 91 tests.
+
 ## Slice 4R.10 — Phase 4 closure acceptance matrix
 
-**Status:** PLANNED
+**Status:** DONE
 
 Freeze the repaired Phase 1–4 contract before starting Phase 5.
 
@@ -378,65 +428,363 @@ Phase 4R is DONE only when:
 - all local gates and CI pass;
 - `ROADMAP.md` is updated to make Phase 5 ACTIVE.
 
+Evidence:
+
+- `docs/plans/phase-3-acceptance-matrix.md` and
+  `docs/plans/phase-4-acceptance-matrix.md` freeze the mandatory local criteria,
+  executable evidence, and separately blocked live/external checks.
+- `tests/test_phase4.py::test_offline_phase1_to_phase4_chain_is_content_addressed_and_review_gated`
+  denies network access and spans persisted launch observation, point-in-time
+  dataset loading, cohort/feature/label construction, an explicit governed
+  candidate decision, immutable research artifacts, the canonical approval
+  handoff, and a deterministic pending-review report package.
+- The locked full suite passed with 91 tests; byte compilation, the reporting
+  guard, and whitespace validation also passed. Hosted CI remains the required
+  merge-time confirmation.
+
 ---
 
 # Phase 5 — Research-Grade Data Reliability
 
-**Status:** PLANNED  
+**Status:** ACTIVE
 **Depends on:** Phase 4R complete.  
 **Goal:** Move from a correct local research chain to a measurable, recoverable observation system suitable for longitudinal studies.
 
 ## Slice 5.1 — Durable ingestion cursors
 
+**Status:** DONE
+
 Persist per-source/per-chain progress so polling completeness is measurable and restarts do not depend solely on rolling lookbacks.
 
 Acceptance includes restart replay, monotonic cursor rules, and explicit skipped-range detection.
 
+Evidence:
+
+- Schema version 8 adds the canonical `ingestion_cursors` table and a
+  provider-agnostic storage API with source/scope identity, monotonic updates,
+  compare-and-set continuity checks, run lineage, and deterministic reads.
+- The EVM listener resumes each chain at the block after its durable `evm_rpc`
+  cursor, advances only after a successful observation, permits idempotent
+  overlap replay, and rejects a requested range that would silently skip
+  blocks. The first observation retains the configured rolling lookback as an
+  explicit bootstrap boundary.
+- Fixture-only storage migration and listener restart tests cover v7-to-v8
+  preservation, repeated initialization, per-chain isolation, regression and
+  stale-writer rejection, restart continuation, and skipped-range failure.
+  Solana's non-numeric signature continuation remains intentionally owned by
+  Slice 5.3 rather than being coerced into this block-position contract.
+
 ## Slice 5.2 — EVM confirmation and reorg handling
+
+**Status:** DONE
 
 Introduce confirmation depth, canonical block identity, and reorg reconciliation for event observations.
 
 Acceptance includes simulated short reorgs and deterministic correction without silently deleting historical evidence.
 
+Evidence:
+
+- Schema version 9 adds canonical EVM block observations keyed by chain, height,
+  and block hash. Re-observed heights preserve orphaned hashes, enforce canonical
+  parent continuity, and atomically mark linked EVM event observations orphaned.
+- Configurable confirmation depth prevents the normal listener path from
+  observing the unconfirmed head, while a configurable overlap window replays
+  recent confirmed blocks on restart so short reorgs are detected.
+- Fixture-only migration, listener, and storage tests cover v8-to-v9 event
+  preservation, idempotent initialization, canonical block replacement, reorg
+  audit events, and exclusion of orphaned observations from research snapshots.
+
 ## Slice 5.3 — Solana resumability and completeness
+
+**Status:** DONE
 
 Replace bounded recent-window assumptions with a durable resumable discovery contract where provider capabilities allow it.
 
 Acceptance includes high-activity fixtures proving no silent window loss.
 
+Evidence:
+
+- Schema version 10 adds provider-agnostic opaque ingestion continuations with
+  compare-and-set updates while preserving the numeric EVM cursor contract.
+- The Helius enhanced-transaction client supports signature pagination. Each
+  configured program resumes from its last durable signature, processes every
+  intervening page oldest-to-newest, and advances only after persistence.
+- Missing signatures, invalid paging limits, an unreachable prior signature,
+  or exhaustion of the configured page budget fail closed without advancing
+  progress. Initial observation remains an explicit one-page bootstrap boundary.
+- Fixture-only migration and Solana listener tests cover v9-to-v10 row
+  preservation, idempotent initialization, stale continuation writers,
+  multi-page high-activity restart replay, and explicit gap failure. The locked
+  full suite passed with 100 tests.
+
 ## Slice 5.4 — Provider observation ledger and quality SLOs
+
+**Status:** DONE
 
 Track expected/observed intervals, provider failures, rate-limit gaps, source latency, and completeness by source/chain.
 
 Research eligibility must be able to consume these quality facts without live provider calls.
 
+Evidence:
+
+- Schema version 11 adds a `provider_observation_log` table keyed by
+  `(source, scope, observed_at)` recording status (`success`, `failure`,
+  `rate_limited`), latency, the configured expected poll interval, the
+  observed gap since the prior attempt for that source/scope, rows observed,
+  and error/run linkage.
+- `storage/db.py` adds `record_provider_observation` (computes the observed
+  gap from the last durable attempt), `classify_provider_failure` (rate-limit
+  message heuristic consistent with the existing `safe_error_message`
+  pattern), `read_provider_observation_log`, and `provider_quality_summary`
+  (an offline, network-free aggregate of completeness ratio, average latency,
+  worst observed gap, and last status per source/scope).
+- `scheduler/pipeline.py` wires every scheduled job (`cex_refresh`,
+  `tier0_poll`, `evm_listeners`, `solana_listener`, `normalization`) through
+  `Pipeline.run_job`, which times each attempt, records success/failure/
+  rate-limit outcomes at the job-name scope, and compares against
+  `Pipeline.expected_job_intervals()` (derived from the same configured
+  cadence used by `build_scheduler`).
+- Per-source/chain granularity below the scheduled-job boundary: within one
+  `evm_listeners` invocation, `Pipeline.evm_listeners()` now times and records
+  each configured EVM chain individually under the `evm_rpc`/chain-name scope
+  (the same identity already used for its durable ingestion cursor), and
+  isolates each chain's failure so one unreachable RPC no longer prevents the
+  remaining configured chains from being attempted that cycle. Within one
+  `solana_listener` invocation, `ingestion/solana/listener.py::run_once` times
+  and records each configured program under the `helius_enhanced`/address
+  scope (the same identity already used for its durable signature
+  continuation); a program failure is still recorded before propagating, so
+  the whole run remains fail-closed per the Slice 5.3 contract rather than
+  silently swallowing a gap.
+- A documented research-eligibility gate: `analysis/alpha/eligibility.py`
+  adds a pure `evaluate_chain_eligibility` function (plus `EligibilityPolicy`
+  and `ChainEligibility`) that decides, per configured chain, whether its
+  backing `(source, scope)` provider-quality rows clear configurable
+  completeness/gap/last-status thresholds -- explicitly distinguishing a
+  chain with no configured scope or no recorded observations from one that is
+  merely unhealthy. It is a pure function over already-fetched
+  `provider_quality_summary` rows, preserving the existing `analysis/alpha`
+  boundary of never reading `storage/db.py` directly. `CohortConfig` gains an
+  optional `chain_eligibility` field; `extract_cohort` in
+  `analysis/alpha/cohort.py` treats a chain that fails this gate as a new,
+  explicit `CHAIN_PROVIDER_QUALITY_INELIGIBLE` exclusion reason -- retained in
+  the cohort with full evidence per the Phase 3 inclusion/exclusion
+  invariant, distinct from and decided before the existing liquidity/coverage
+  analysis-eligibility tier documented in
+  `docs/plans/phase-3-authoritative-decisions.md`.
+- `tests/test_storage.py` covers the v10-to-v11 migration preserving existing
+  cursor rows, fresh/repeated initialization, gap computation, the offline
+  quality summary aggregate, unsupported-status rejection, and the rate-limit
+  classifier. `tests/test_scheduler.py` covers a full cycle populating the
+  ledger with the configured expected intervals, a rate-limited failure being
+  classified and persisted distinctly from a generic failure, a per-chain EVM
+  observation being recorded, and one EVM chain's failure being isolated from
+  a second chain's success within the same job invocation.
+  `tests/test_solana.py` covers a per-program observation being recorded on
+  success and a program failure being recorded before the run still raises.
+  `tests/test_eligibility.py` covers healthy/unhealthy/unobserved/
+  multi-scope chains and policy validation. `tests/test_phase3.py` covers a
+  cohort excluding an ineligible chain while an unaffected chain's exclusion
+  reason is decided independently, a chain with no provider evidence being
+  treated as ineligible rather than defaulting to healthy, and unchanged
+  behavior when no `chain_eligibility` is supplied. The locked full suite
+  passed with 121 tests; the storage migration guard reported the fresh and
+  migrated schemas as converged.
+
 ## Slice 5.5 — Two-store recovery protocol
+
+**Status:** DONE
 
 Make DuckDB authoritative/cache semantics mechanically recoverable when Parquet publication diverges after a committed DB write.
 
 Acceptance includes a simulated publication failure and automated deterministic repair/rebuild.
 
+Evidence:
+
+- `storage/db.py` adds `list_ohlcv_partitions` (every `(source, date)` partition
+  the authoritative `ohlcv` table currently holds), `verify_parquet_publication`
+  (compares each partition's DuckDB content against its published Parquet
+  file and classifies it `missing`, `unreadable`, or `stale` without changing
+  anything), and `repair_parquet_publication` (rebuilds only the diverging
+  partitions from DuckDB using the same stage-to-temp-file-then-atomic-`os.replace`
+  sequence normal ingestion uses, so a crash mid-repair still leaves every
+  partition at either its prior or its fully repaired state). `insert_ohlcv_batch`
+  is unchanged in its committed-then-publish ordering; its exception path now
+  documents that a raised publication failure leaves DuckDB authoritative and
+  recoverable through this repair path rather than a lost write.
+- No `SCHEMA_VERSION` change was required: Parquet is fully derivable from the
+  authoritative DuckDB `ohlcv` rows, so recovery needed no new persisted
+  divergence-tracking state, consistent with the storage-schema-migration
+  skill's scope (persisted-contract changes only).
+- `python -m storage <db> --verify-parquet` and `--repair-parquet` expose the
+  same functions as an operator-facing CLI (`storage/__main__.py`), replacing
+  the prior manual "rerun the same ingestion write" guidance in
+  `docs/RUNBOOK.md`, which now documents the mechanical recovery commands.
+- `tests/test_storage.py` covers detecting missing, unreadable, and stale
+  partitions in one store; deterministic repair of all three; idempotent
+  repair against an already-repaired store; and a simulated `os.replace`
+  publication failure during `insert_ohlcv_batch` proving the DuckDB write
+  stays committed and is fully recoverable via `--repair-parquet` without
+  re-ingesting. The locked full suite passed with 123 tests; byte-compilation
+  and whitespace validation also passed.
+
 ## Slice 5.6 — Historical conversion/reference series
+
+**Status:** DONE
 
 Generalize the Phase 4R quote-currency policy into reusable point-in-time reference series with provenance and coverage metrics.
 
+Evidence:
+
+- Schema version 12 adds a canonical `reference_series` table keyed by
+  `(series_id, observed_at, source)` holding a positive value plus
+  evidence, generalizing the Phase 4R quote-conversion overlay into a
+  persisted, provider-agnostic point-in-time series contract that is not
+  limited to label-boundary USD conversion.
+- `storage/db.py` adds `upsert_reference_series_observation` (idempotent
+  upsert), `read_reference_series` (deterministic ordered read), and
+  `reference_series_coverage_summary` (an offline, network-free aggregate
+  of per-series observation count, distinct-source count, first/last
+  observed time, last source, and worst observed gap), mirroring the
+  Slice 5.4 provider-quality-summary pattern for coverage/provenance
+  evidence.
+- `analysis/datasets/snapshot.py` exposes the persisted series through
+  `DatasetSnapshot`: a `reference_series` field (deduplicated and ordered
+  by `series_id`/`observed_at`/`source`, rejecting duplicate identity) and
+  a `reference_series_at(series_id, decision_time)` point-in-time accessor
+  consistent with the existing `metadata_at`/`relationships_at` boundary.
+  `from_duckdb` loads it as a required table and folds it into the
+  dataset's content-addressed identity hash.
+- `analysis/alpha/labels.py` sources quote/USD conversion evidence from
+  `snapshot.reference_series_at(f"{quote}/USD", point)` in addition to any
+  explicitly supplied `ConversionObservation` tuple, so a persisted
+  reference series can back label conversion without every caller having
+  to hand-assemble observations; explicit observations, stablecoin parity,
+  fail-closed unavailability, and existing provenance fields are
+  unchanged.
+- `tests/test_storage.py` covers the v11-to-v12 migration preserving the
+  provider observation log, idempotent upsert, deterministic read, and the
+  offline coverage summary (count, source count, first/last observed time,
+  last source, max gap). `tests/test_phase3.py` covers
+  `DatasetSnapshot.reference_series_at` point-in-time visibility and
+  duplicate-identity rejection, and a label generated purely from a
+  persisted reference series (no explicit `conversion_observations`)
+  proving temporally valid selection and unchanged provenance shape. The
+  locked full suite passed with 127 tests; the storage migration guard
+  reported the fresh and migrated schemas as converged; byte-compilation
+  and whitespace validation also passed.
+
 ## Slice 5.7 — Data-plane closure matrix
 
+**Status:** DONE
+
 Demonstrate restart, gap detection, reorg/recovery, multi-source selection, historical metadata/lineage, and price/conversion replay across representative chains.
+
+Evidence:
+
+- `docs/plans/phase-5-data-plane-closure-matrix.md` freezes the executable
+  Phase 5 data-plane contract: durable EVM cursor restart, EVM/Solana gap
+  detection failing closed, EVM reorg reconciliation, Solana resumable
+  multi-page discovery, the provider observation ledger and offline quality
+  summary, the research-eligibility gate, DuckDB/Parquet recovery, and
+  reference-series-backed conversion replay, each with executable evidence
+  and status.
+- `tests/test_phase5_closure.py` adds no new production behavior. It proves
+  the Slice 5.1-5.6 guarantees compose in one local, offline dataset across
+  two representative chains: durable-cursor EVM restart composes with reorg
+  reconciliation and rejects a subsequent skipped range
+  (`test_evm_cursor_restart_and_reorg_compose_and_gap_detection_fails_closed`);
+  Solana's durable-signature discovery fails closed on an unreachable
+  checkpoint without advancing progress
+  (`test_solana_gap_detection_fails_closed_without_advancing_progress`); and
+  the full composed flow denies socket creation while threading Solana's
+  resumable multi-page discovery, a research-eligibility gate computed from
+  real persisted provider-quality rows (two healthy representative chains
+  plus one never-observed chain failing closed), a detected-and-repaired
+  Parquet publication gap, and ETH/USD- and SOL/USD-backed forward-return
+  labels sourced purely from persisted reference series, through the real
+  Phase 1 storage boundary into Phase 3 cohort extraction and label
+  generation for both chains
+  (`test_phase5_data_plane_closure_across_representative_evm_and_solana_chains`).
+  That same test also proves a malformed/unresolved event identity (the
+  Solana listener's own real transaction shape, which carries no
+  address-identifying key the cohort rule recognizes) is retained as an
+  explicit exclusion rather than silently collapsed onto the resolved token.
+- The closure matrix doc records one deliberate scope boundary: EVM
+  `chain_reorg_detected` audit events are canonical-id-scoped to a synthetic
+  block identity, not a persisted asset, so composing them into the same
+  store `DatasetSnapshot.from_duckdb` loads would trip its existing
+  unknown-asset-identity validation -- a Phase 1/3 integrity guarantee this
+  slice preserves rather than weakens. EVM restart/reorg/gap-detection is
+  therefore proven in an isolated store, and only the resulting
+  provider-quality outcome (exactly what `Pipeline.evm_listeners` itself
+  records) feeds the composed research dataset. No mandatory Slice 5.1-5.6
+  acceptance criterion required otherwise, and no existing behavior changed.
+- The locked full suite passed with 130 tests (127 prior + 3 new); the
+  storage migration guard, byte-compilation, and whitespace validation also
+  passed.
+
+Phase 5 is **DONE**: every Slice 5.1-5.7 acceptance criterion is satisfied by
+executable, offline fixture evidence, and the composed closure matrix proves
+those guarantees hold together rather than only in isolation. Live-provider
+acceptance and production-scale longitudinal sample adequacy remain
+explicitly out of scope and separately blocked, per the closure matrix doc.
 
 ---
 
 # Phase 6 — Governed Experiment Control Plane
 
-**Status:** PLANNED  
-**Depends on:** Phase 5 data contracts stable.  
+**Status:** ACTIVE
+**Depends on:** Phase 5 data contracts stable (DONE -- see Phase 5 above).
 **Goal:** Make a complete research experiment a first-class, versioned, reproducible object rather than a composition of manually invoked helpers.
 
 ## Slice 6.1 — Experiment specification schema
 
+**Status:** DONE
+
 Version cohort, feature, label, split, hypothesis family, correction policy, candidate definition, costs, baselines, and code/config identities in one declarative experiment spec.
 
+Evidence:
+
+- `analysis/experiments/spec.py` adds the versioned, frozen `ExperimentSpec`
+  (`phase6-experiment-v1`) composing the existing governed Phase 3 objects
+  (`CohortConfig`, `LabelDefinition`, `PromotionPolicy`) with new versioned
+  declarative components: `SplitPolicy` (chronological split window
+  configuration), `HypothesisFamily` (the frozen feature/threshold/horizon/
+  subgroup grid plus its discovery/confirmation correction identity),
+  `CandidateDefinition` (a selection-rule identity string rather than an
+  executable callable), `CostPolicy` (turnover/cost scenarios), and
+  `BaselinePolicy` (required baseline families). `code_version` and
+  `config_identity` are required scalar identities on the spec itself.
+- The spec never executes cohort extraction, feature computation, labeling,
+  splitting, or candidate evaluation; it only versions, cross-validates, and
+  content-identifies configuration those already-governed Phase 3 helpers
+  consume, preserving the "compose, don't duplicate" boundary for Phase 6.
+- Cross-component validation fails closed rather than silently drifting:
+  hypothesis-family/candidate horizons must be declared by the spec's own
+  labels, the split's label-horizon window must cover the longest declared
+  label horizon, and the promotion policy's correction method/thresholds
+  must match the hypothesis family's declared correction identity. Only the
+  currently implemented `benjamini-hochberg`/`holm-bonferroni` corrections
+  and the existing `baseline_families` names are accepted.
+- `experiment_spec_id` produces a deterministic sha256-derived content
+  identity (mirroring the existing run/handoff id pattern in
+  `analysis/alpha/artifacts.py` and `reporting/package/handoff.py`); the same
+  spec fields always hash identically, and changing any versioned component
+  (split embargo, hypothesis threshold, cost scenario, etc.) changes the
+  identity.
+- `tests/test_phase6.py` covers deterministic identity replay, an identity
+  change from each versioned component, feature-set normalization/dedup,
+  and fail-closed rejection of unsupported spec/correction versions,
+  undeclared horizons, a split window shorter than the longest label
+  horizon, a promotion-policy/hypothesis-family correction mismatch, and
+  invalid baseline/cost/candidate/split configuration. The locked full suite
+  passed with 154 tests (130 prior + 24 new); the storage migration guard,
+  byte-compilation, and whitespace validation also passed.
+
 ## Slice 6.2 — Deterministic experiment runner
+
+**Status:** ACTIVE
 
 Execute the spec from local persisted inputs only and produce one immutable run directory/manifest.
 
@@ -592,4 +940,37 @@ For a fresh agent, the intended pickup sequence is:
 
 `AGENTS.md` → `ROADMAP.md` → active `docs/plans/phase-*.md` → relevant code/tests → Git history/status.
 
-The current frontier is **Phase 4R.7 — Phase 2 metric/time-index hardening**. Phase 4R.1 established the mandatory CI gate; do not begin Phase 5 until every mandatory Phase 4R closure criterion is satisfied.
+The current frontier is **Phase 6.1 — Experiment specification schema**.
+
+Phase 5 is DONE. Slice 5.7 closed the phase with
+`docs/plans/phase-5-data-plane-closure-matrix.md` and
+`tests/test_phase5_closure.py`, proving the composed data-plane guarantees
+Phase 5 built hold together across two representative chains rather than
+only in isolation: durable-cursor restart replay (5.1), EVM reorg
+detection/recovery (5.2), Solana resumable/complete discovery (5.3), provider
+quality/eligibility gating (5.4), DuckDB/Parquet recovery (5.5), and
+historical/reference-series-backed conversion replay (5.6), plus explicit
+gap-detection fail-closed paths for both EVM and Solana (see the Slice 5.7
+evidence above). Live-provider acceptance (credentialed EVM RPC and Helius)
+and production-scale longitudinal sample adequacy remain explicitly
+out of scope and separately blocked, per the closure matrix doc.
+
+Slice 6.1 is DONE. `analysis/experiments/spec.py` defines the versioned,
+declarative `ExperimentSpec` (`phase6-experiment-v1`) covering cohort,
+feature, label, split, hypothesis family, correction policy, candidate
+definition, costs, baselines, and code/config identities in one
+cross-validated, content-addressed object, composing the existing governed
+`analysis/alpha/` types (`CohortConfig`, `LabelDefinition`,
+`PromotionPolicy`) rather than duplicating them.
+
+Slice 6.2 has not started. It needs a deterministic experiment runner that
+takes an `ExperimentSpec` plus a local `DatasetSnapshot` and executes the
+already-governed Phase 3 helpers (`extract_cohort`, `compute_features`,
+`generate_labels`, `build_split`, `score_candidate`,
+`evaluate_candidate_promotion`, `baseline_families`) in the sequence the
+spec declares, producing one immutable run directory/manifest analogous to
+`analysis/alpha/artifacts.py::write_research_run` and
+`analysis/runs/artifacts.py::write_run` -- keyed by `experiment_spec_id` plus
+dataset identity, with no recomputation or redefinition of Phase 3 research
+semantics. The runner is the first slice that actually executes a spec;
+6.1 intentionally stops at the versioned, validated declaration.

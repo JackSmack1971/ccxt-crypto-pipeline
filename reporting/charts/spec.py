@@ -35,6 +35,11 @@ def validate_chart(value: ChartSpec | dict[str, Any], staged: dict[str, Any]) ->
         raise ValueError(f"chart {spec.id!r} is missing required accessibility/provenance metadata")
     if spec.missing_behavior not in {"explicit_state", "fail"}:
         raise ValueError(f"chart {spec.id} has unsupported missing-data behavior")
+    unsupported = [item for item in spec.transformations if item != "identity"]
+    if unsupported:
+        raise ValueError(f"chart {spec.id} has unsupported transformation: {unsupported[0]}")
+    if spec.annotations:
+        raise ValueError(f"chart {spec.id} has unsupported annotation")
     if spec.width < 320 or spec.height < 180:
         raise ValueError(f"chart {spec.id} dimensions are not readable")
     rows = staged.get(spec.data_artifact)

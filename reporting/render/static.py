@@ -1,12 +1,16 @@
 from __future__ import annotations
 
 import html
+import xml.etree.ElementTree as ET
 from typing import Any
 
 RENDERER_VERSION = "svg-1"
 
 
 def render_svg(spec: dict[str, Any], rows: list[dict[str, Any]]) -> str:
+    for transformation in spec["transformations"]:
+        if transformation != "identity":
+            raise ValueError(f"chart {spec['id']} has unsupported transformation: {transformation}")
     points = []
     unavailable = False
     for row in rows:
@@ -43,5 +47,16 @@ def render_svg(spec: dict[str, Any], rows: list[dict[str, Any]]) -> str:
 
 
 def validate_accessibility(svg: str, spec: dict[str, Any]) -> None:
-    if not all(token in svg for token in ('role="img"', "<title>", "<desc>", spec["y_unit"], spec["x_unit"], spec["source_attribution"])):
+    try:
+        root = ET.fromstring(svg)
+    except ET.ParseError:
+        raise ValueError(f"chart {spec['id']} is not valid SVG") from None
+    namespace = "{http://www.w3.org/2000/svg}"
+    title = root.find(f"{namespace}title")
+    desc = root.find(f"{namespace}desc")
+    text = " ".join(root.itertext())
+    structural = (root.tag == f"{namespace}svg" and root.get("role") == "img"
+                  and root.get("width") == str(spec["width"]) and root.get("height") == str(spec["height"])
+                  and title is not None and bool(title.text) and desc is not None and bool(desc.text))
+    if not structural or not all(token in text for token in (spec["y_unit"], spec["x_unit"], spec["source_attribution"])):
         raise ValueError(f"chart {spec['id']} failed accessibility validation")

@@ -10,7 +10,8 @@ from analysis.alpha import (CohortConfig, FeatureDefinition, FeatureRegistry, HO
                             descriptive_baseline, phase2_strategy_spec, rank_candidates, score_candidate, write_research_run,
                             validate_temporal_alignment, baseline_comparison, HypothesisRegistry,
                             PromotionEvidence, evaluate_candidate_promotion,
-                            ConversionObservation, ConversionPolicy)
+                            ConversionObservation, ConversionPolicy,
+                            EligibilityPolicy, evaluate_chain_eligibility)
 from analysis.datasets import Asset, Bar, DatasetPolicy, DatasetSnapshot
 from ingestion.dex.tier0.poller import poll_network
 from storage.db import connect, insert_event, insert_ohlcv_batch, upsert_asset
@@ -42,6 +43,41 @@ def test_cohort_deduplicates_launches_and_preserves_liquidity_exclusion():
     assert result[0].analysis_eligible is True
     assert result[1].exclusion_reason == "BELOW_LIQUIDITY_GATE"
     assert len(result[0].source_evidence) == 2
+
+
+def test_cohort_excludes_a_chain_whose_provider_quality_fails_the_gate():
+    quality_rows = [{"source": "evm_rpc", "scope": "ethereum", "completeness_ratio": 0.4,
+                     "max_observed_gap_seconds": 60.0, "expected_interval_seconds": 60.0,
+                     "last_status": "success"}]
+    chain_eligibility = evaluate_chain_eligibility(quality_rows, {"ethereum": [("evm_rpc", "ethereum")]})
+    config = CohortConfig(datetime(2025, 1, 1), datetime(2025, 1, 2), chains=("ethereum", "solana"),
+                          chain_eligibility=chain_eligibility)
+    result = extract_cohort(snapshot(), config)
+    ethereum_row = next(row for row in result if row.chain == "ethereum")
+    assert ethereum_row.included is True
+    assert ethereum_row.analysis_eligible is False
+    assert ethereum_row.exclusion_reason == "CHAIN_PROVIDER_QUALITY_INELIGIBLE"
+    assert ethereum_row.provenance["chain_eligibility"] == {
+        "eligible": False, "reason": "BELOW_COMPLETENESS_THRESHOLD",
+    }
+    # An unaffected chain's eligibility is decided independently.
+    solana_row = next(row for row in result if row.chain == "solana")
+    assert solana_row.exclusion_reason == "BELOW_LIQUIDITY_GATE"
+
+
+def test_cohort_keeps_prior_behavior_when_a_chain_has_no_eligibility_evidence():
+    chain_eligibility = evaluate_chain_eligibility([], {"ethereum": [("evm_rpc", "ethereum")]})
+    assert chain_eligibility["ethereum"].reason == "NO_PROVIDER_OBSERVATIONS"
+    config = CohortConfig(datetime(2025, 1, 1), datetime(2025, 1, 2), chains=("ethereum",),
+                          chain_eligibility=chain_eligibility)
+    result = extract_cohort(snapshot(), config)
+    assert result[0].exclusion_reason == "CHAIN_PROVIDER_QUALITY_INELIGIBLE"
+
+
+def test_cohort_is_unaffected_by_default_when_no_chain_eligibility_is_supplied():
+    result = extract_cohort(snapshot(), CohortConfig(datetime(2025, 1, 1), datetime(2025, 1, 2), chains=("ethereum",)))
+    assert result[0].analysis_eligible is True
+    assert result[0].provenance["chain_eligibility"] is None
 
 
 def test_pool_constituents_are_address_scoped_and_relationships_are_point_in_time():
@@ -333,6 +369,52 @@ def test_non_usd_quote_without_conversion_fails_closed_and_stablecoin_parity_is_
     assert stable.status == "COMPLETE"
     assert stable.provenance["start_conversion"]["conversion_source"] == "approved_stablecoin_parity"
     assert stable.provenance["start_conversion"]["conversion_rate"] == 1.0
+
+
+def test_dataset_snapshot_exposes_point_in_time_reference_series():
+    t = datetime(2025, 1, 1)
+    asset = (Asset("ethereum:0xaaa", "dex", "ethereum", "0xaaa", t, "0xaaa"),)
+    reference_series = (
+        {"series_id": "ETH/USD", "observed_at": t, "value": 2_000.0, "source": "local-reference"},
+        {"series_id": "ETH/USD", "observed_at": t + timedelta(hours=1), "value": 2_200.0, "source": "local-reference"},
+        {"series_id": "SOL/USD", "observed_at": t, "value": 100.0, "source": "local-reference"},
+    )
+    data = DatasetSnapshot(asset, (), (), (), (), DatasetPolicy(timeframe="1h"), "fixture",
+                           reference_series=reference_series)
+    assert [row["value"] for row in data.reference_series_at("ETH/USD", t)] == [2_000.0]
+    assert {row["value"] for row in data.reference_series_at("ETH/USD", t + timedelta(hours=1))} == {2_000.0, 2_200.0}
+    assert data.reference_series_at("SOL/USD", t - timedelta(seconds=1)) == ()
+    assert data.reference_series_at("BTC/USD", t) == ()
+
+    duplicate = reference_series + (reference_series[0],)
+    with pytest.raises(ValueError, match="duplicate reference series observation"):
+        DatasetSnapshot(asset, (), (), (), (), DatasetPolicy(timeframe="1h"), "fixture", reference_series=duplicate)
+
+
+def test_generate_labels_sources_conversion_from_persisted_reference_series_without_explicit_observations():
+    data = snapshot()
+    cohort = extract_cohort(data, CohortConfig(datetime(2025, 1, 1), datetime(2025, 1, 2), chains=("ethereum",)))
+    reference_series = (
+        {"series_id": "ETH/USD", "observed_at": datetime(2025, 1, 1), "value": 2_000.0, "source": "persisted-reference"},
+        {"series_id": "ETH/USD", "observed_at": datetime(2025, 1, 1, 1), "value": 2_200.0, "source": "persisted-reference"},
+        # A later-observed point must never be selected for either endpoint.
+        {"series_id": "ETH/USD", "observed_at": datetime(2025, 1, 1, 2), "value": 9_999.0, "source": "future-reference"},
+    )
+    data = DatasetSnapshot(data.assets, data.bars, data.metadata, data.events, data.lineage, data.policy,
+                           data.dataset_identity, data.asset_relationships,
+                           reference_series=reference_series)
+
+    label = generate_labels(data, cohort, LabelDefinition("return", "1h"),
+                            quote_assets={"ethereum:0xaaa": "ETH"})[0]
+
+    assert label.status == "COMPLETE"
+    assert label.value == pytest.approx(__import__("math").log((11 * 2_200) / (10 * 2_000)))
+    assert label.provenance["start_conversion"] == {
+        "quote_asset": "ETH", "conversion_rate": 2_000.0,
+        "conversion_source": "persisted-reference", "conversion_time": "2025-01-01T00:00:00",
+        "conversion_policy": "phase3-quote-usd-v1",
+    }
+    assert label.provenance["end_conversion"]["conversion_time"] == "2025-01-01T01:00:00"
 
 
 def test_phase1_to_phase3_replay_uses_persisted_snapshot_and_is_deterministic(tmp_path, monkeypatch):
