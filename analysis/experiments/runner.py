@@ -1,0 +1,211 @@
+"""Deterministic Phase 6 experiment execution.
+
+This module is the first slice that actually executes an ``ExperimentSpec``.
+It composes only the already-governed Phase 3 helpers
+(``extract_cohort``, ``compute_features``, ``generate_labels``, ``build_split``,
+``score_candidate``, ``baseline_families``, ``evaluate_candidate_promotion``)
+in the sequence the spec declares, against one local, already-loaded
+``DatasetSnapshot``. It never redefines cohort, feature, label, split, or
+candidate-evaluation semantics, and it never fabricates statistical
+significance evidence: hypothesis-family multiplicity testing remains
+Slice 6.4's job, so ``discovery_adjusted_p_value`` and
+``holdout_adjusted_p_value`` are left unset here rather than invented.
+"""
+
+from __future__ import annotations
+
+import hashlib
+import json
+import math
+import re
+from dataclasses import asdict, is_dataclass
+from datetime import timedelta
+from pathlib import Path
+from typing import Any, Callable
+
+from analysis.alpha import (FeatureRegistry, PromotionEvidence, baseline_families, build_split,
+                            compute_features, evaluate_candidate_promotion, extract_cohort,
+                            generate_labels, score_candidate, validate_temporal_alignment)
+from analysis.alpha.features import close_return_feature, launch_liquidity_feature
+from analysis.datasets.snapshot import DatasetSnapshot
+
+from .spec import ExperimentSpec, experiment_spec_dict, experiment_spec_id
+
+MANIFEST_VERSION = "phase6-run-v1"
+
+# Only feature identities with an implemented, versioned definition may be
+# resolved. An experiment spec MAY declare a feature that does not exist yet;
+# the runner fails closed rather than silently substituting a different
+# computation.
+_FEATURE_FACTORIES: dict[str, Callable[[Any], Any]] = {
+    "launch_liquidity_usd": lambda split: launch_liquidity_feature(),
+    "lookback_return": lambda split: close_return_feature(timedelta(seconds=split.feature_lookback_seconds)),
+}
+
+
+def resolve_feature_registry(spec: ExperimentSpec) -> FeatureRegistry:
+    """Resolve the spec's declared feature identities to canonical definitions."""
+    unsupported = sorted(set(spec.feature_set) - set(_FEATURE_FACTORIES))
+    if unsupported:
+        raise ValueError(f"unsupported experiment feature identity: {', '.join(unsupported)}")
+    registry = FeatureRegistry()
+    for name in spec.feature_set:
+        registry.register(_FEATURE_FACTORIES[name](spec.split))
+    return registry
+
+
+_SELECTION_RULE = re.compile(r"^(?P<feature>[A-Za-z0-9_]+)(?P<op>>=|<=|==|>|<)p(?P<pct>\d{1,3})$")
+_OPERATORS: dict[str, Callable[[float, float], bool]] = {
+    ">=": lambda value, threshold: value >= threshold,
+    "<=": lambda value, threshold: value <= threshold,
+    ">": lambda value, threshold: value > threshold,
+    "<": lambda value, threshold: value < threshold,
+    "==": lambda value, threshold: value == threshold,
+}
+
+
+def _parse_selection_rule(rule: str) -> tuple[str, str, float]:
+    match = _SELECTION_RULE.match(rule.strip())
+    if not match:
+        raise ValueError(f"unsupported candidate selection rule: {rule}")
+    pct = float(match.group("pct"))
+    if not (0 <= pct <= 100):
+        raise ValueError(f"selection rule percentile out of range: {rule}")
+    return match.group("feature"), match.group("op"), pct
+
+
+def _percentile(values: list[float], pct: float) -> float:
+    ordered = sorted(values)
+    if len(ordered) == 1:
+        return ordered[0]
+    rank = (pct / 100) * (len(ordered) - 1)
+    lower, upper = math.floor(rank), math.ceil(rank)
+    if lower == upper:
+        return ordered[int(rank)]
+    return ordered[lower] + (ordered[upper] - ordered[lower]) * (rank - lower)
+
+
+def _selected_token_ids(feature_rows: tuple[dict[str, Any], ...], rule: str) -> frozenset[str]:
+    """Resolve a declarative selection rule within one partition only.
+
+    The percentile threshold is computed from feature values observed inside
+    the same partition being scored, so no other-partition information can
+    leak into the selection boundary. A missing feature value is excluded
+    from selection rather than defaulted.
+    """
+    feature_name, operator, pct = _parse_selection_rule(rule)
+    if feature_name not in {"launch_liquidity_usd", "lookback_return"}:
+        raise ValueError(f"unsupported candidate selection feature: {feature_name}")
+    available = [(row["token_id"], row.get(feature_name)) for row in feature_rows]
+    numeric_values = [value for _, value in available if isinstance(value, (int, float)) and math.isfinite(value)]
+    if not numeric_values:
+        return frozenset()
+    threshold = _percentile(numeric_values, pct)
+    compare = _OPERATORS[operator]
+    return frozenset(token_id for token_id, value in available
+                     if isinstance(value, (int, float)) and math.isfinite(value) and compare(value, threshold))
+
+
+def _plain(value: Any) -> Any:
+    if hasattr(value, "as_artifact"):
+        return _plain(value.as_artifact())
+    if is_dataclass(value):
+        return _plain(asdict(value))
+    if isinstance(value, dict):
+        return {str(key): _plain(item) for key, item in value.items()}
+    if isinstance(value, (list, tuple, frozenset, set)):
+        return [_plain(item) for item in value]
+    return value
+
+
+_SECRET = re.compile(r"(?i)(api[_-]?key|password|secret|token|private[_-]?key|rpc[_-]?url)\s*[:=]\s*[^\s,;]+")
+_URL_CREDENTIAL = re.compile(r"(?i)(://)[^/\s:@]+:[^/\s@]+@")
+
+
+def _safe(value: Any) -> Any:
+    value = _plain(value)
+    if isinstance(value, dict):
+        return {key: "[REDACTED]" if re.search(r"(?i)(api[_-]?key|password|secret|token|private[_-]?key|rpc[_-]?url)$", key)
+                else _safe(item) for key, item in value.items()}
+    if isinstance(value, list):
+        return [_safe(item) for item in value]
+    if isinstance(value, str):
+        return _SECRET.sub(r"\1=[REDACTED]", _URL_CREDENTIAL.sub(r"\1[REDACTED]@", value))
+    return value
+
+
+def _dump(value: Any) -> bytes:
+    return (json.dumps(_safe(value), default=str, sort_keys=True, separators=(",", ":")) + "\n").encode()
+
+
+def run_experiment(spec: ExperimentSpec, snapshot: DatasetSnapshot, output_dir: str | Path) -> Path:
+    """Execute ``spec`` against ``snapshot`` and write one immutable run directory.
+
+    The run identity is keyed by the spec's own content-addressed identity
+    plus the dataset identity and code version, so identical inputs always
+    resolve to the same run and a changed spec, dataset, or code version
+    always produces a distinct one.
+    """
+    cohort = extract_cohort(snapshot, spec.cohort)
+    registry = resolve_feature_registry(spec)
+    feature_rows = compute_features(snapshot, cohort, registry)
+
+    labels_by_horizon = {label.horizon: generate_labels(snapshot, cohort, label) for label in spec.labels}
+    candidate_labels = labels_by_horizon[spec.candidate.horizon]
+    validate_temporal_alignment(cohort, feature_rows, candidate_labels)
+
+    split = build_split(cohort, embargo_days=spec.split.embargo_days,
+                        feature_lookback=timedelta(seconds=spec.split.feature_lookback_seconds),
+                        label_horizon=timedelta(seconds=spec.split.label_horizon_seconds))
+
+    discovery_ids = frozenset(split.discovery)
+    discovery_features = tuple(row for row in feature_rows if row["token_id"] in discovery_ids)
+    discovery_labels = tuple(row for row in candidate_labels if row.token_id in discovery_ids)
+
+    selected_ids = _selected_token_ids(discovery_features, spec.candidate.selection_rule)
+    baselines = baseline_families(discovery_labels, horizon=spec.candidate.horizon, feature_rows=discovery_features)
+    candidate = score_candidate(spec.candidate.name, discovery_labels, horizon=spec.candidate.horizon,
+                                selected=lambda row: row.token_id in selected_ids,
+                                baseline_mean=baselines["no_trade"]["mean_return"],
+                                turnover=spec.costs.turnover, costs=spec.costs.scenarios,
+                                min_coverage=spec.candidate.min_coverage)
+
+    difference = candidate.baseline_comparison.get("difference")
+    ci95_low = candidate.uncertainty.get("ci95_low")
+    evidence = PromotionEvidence(
+        target_stage="discovery",
+        baseline_superior=difference is not None and difference > 0,
+        uncertainty_supports_effect=ci95_low is not None and ci95_low > 0,
+        cost_sensitivity_passed=bool(candidate.cost_sensitivity)
+        and all(value is not None and value > 0 for value in candidate.cost_sensitivity.values()),
+    )
+    decision = evaluate_candidate_promotion(candidate, evidence, spec.promotion_policy)
+
+    spec_id = experiment_spec_id(spec)
+    inputs = {"experiment_spec_id": spec_id, "dataset_identity": snapshot.dataset_identity,
+              "code_version": spec.code_version}
+    run_id = hashlib.sha256(_dump(inputs)).hexdigest()[:24]
+    target = Path(output_dir) / run_id
+    target.mkdir(parents=True, exist_ok=True)
+
+    artifacts = {
+        "spec.json": experiment_spec_dict(spec),
+        "cohort.json": cohort,
+        "features.json": feature_rows,
+        "labels.json": labels_by_horizon,
+        "split.json": split.as_dict(),
+        "baselines.json": baselines,
+        "candidate.json": candidate,
+        "promotion.json": decision,
+    }
+    manifest = {"manifest_version": MANIFEST_VERSION, "run_id": run_id, "immutable": True,
+                "inputs": inputs, "artifacts": {name: hashlib.sha256(_dump(value)).hexdigest()
+                                                for name, value in artifacts.items()}}
+    for name, value in {**artifacts, "manifest.json": manifest}.items():
+        path = target / name
+        content = _dump(value)
+        if path.exists() and path.read_bytes() != content:
+            raise FileExistsError(f"immutable experiment run artifact differs: {path}")
+        if not path.exists():
+            path.write_bytes(content)
+    return target
