@@ -463,13 +463,27 @@ Evidence:
 
 ## Slice 5.2 — EVM confirmation and reorg handling
 
-**Status:** ACTIVE
+**Status:** DONE
 
 Introduce confirmation depth, canonical block identity, and reorg reconciliation for event observations.
 
 Acceptance includes simulated short reorgs and deterministic correction without silently deleting historical evidence.
 
+Evidence:
+
+- Schema version 9 adds canonical EVM block observations keyed by chain, height,
+  and block hash. Re-observed heights preserve orphaned hashes, enforce canonical
+  parent continuity, and atomically mark linked EVM event observations orphaned.
+- Configurable confirmation depth prevents the normal listener path from
+  observing the unconfirmed head, while a configurable overlap window replays
+  recent confirmed blocks on restart so short reorgs are detected.
+- Fixture-only migration, listener, and storage tests cover v8-to-v9 event
+  preservation, idempotent initialization, canonical block replacement, reorg
+  audit events, and exclusion of orphaned observations from research snapshots.
+
 ## Slice 5.3 — Solana resumability and completeness
+
+**Status:** ACTIVE
 
 Replace bounded recent-window assumptions with a durable resumable discovery contract where provider capabilities allow it.
 
@@ -663,7 +677,7 @@ For a fresh agent, the intended pickup sequence is:
 
 `AGENTS.md` → `ROADMAP.md` → active `docs/plans/phase-*.md` → relevant code/tests → Git history/status.
 
-The current frontier is **Phase 5.1 — Durable ingestion cursors**. Phase 4R is
+The current frontier is **Phase 5.3 — Solana resumability and completeness**. Phase 4R is
 closed by the Phase 3 and Phase 4 acceptance matrices plus the canonical offline
 end-to-end fixture; live-provider evidence remains separate and does not turn
 fixture methodology into a claim of profitability or production readiness.

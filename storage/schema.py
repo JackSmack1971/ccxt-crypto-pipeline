@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import duckdb
 
-SCHEMA_VERSION = 8
+SCHEMA_VERSION = 9
 
 SCHEMA_SQL = """
 CREATE TABLE IF NOT EXISTS assets (
@@ -34,7 +34,10 @@ CREATE TABLE IF NOT EXISTS events (
     event_type VARCHAR NOT NULL,
     timestamp TIMESTAMP NOT NULL,
     payload_json VARCHAR NOT NULL,
-    source VARCHAR NOT NULL
+    source VARCHAR NOT NULL,
+    block_number BIGINT,
+    block_hash VARCHAR,
+    canonical BOOLEAN NOT NULL DEFAULT true
 );
 
 CREATE TABLE IF NOT EXISTS metadata (
@@ -97,6 +100,17 @@ CREATE TABLE IF NOT EXISTS ingestion_cursors (
     updated_at TIMESTAMP NOT NULL,
     run_id VARCHAR,
     PRIMARY KEY (source, scope)
+);
+
+CREATE TABLE IF NOT EXISTS evm_block_observations (
+    chain VARCHAR NOT NULL,
+    block_number BIGINT NOT NULL CHECK (block_number >= 0),
+    block_hash VARCHAR NOT NULL,
+    parent_hash VARCHAR NOT NULL,
+    observed_at TIMESTAMP NOT NULL,
+    canonical BOOLEAN NOT NULL,
+    run_id VARCHAR,
+    PRIMARY KEY (chain, block_number, block_hash)
 );
 
 CREATE TABLE IF NOT EXISTS schema_version (
@@ -245,6 +259,30 @@ def initialize(connection: duckdb.DuckDBPyConnection) -> None:
                 updated_at TIMESTAMP NOT NULL,
                 run_id VARCHAR,
                 PRIMARY KEY (source, scope)
+            )""")
+            connection.execute("UPDATE schema_version SET version = ?", [SCHEMA_VERSION])
+            connection.execute("COMMIT")
+        except Exception:
+            connection.execute("ROLLBACK")
+            raise
+        versions = (8,)
+    if versions[0] < 9:
+        connection.execute("BEGIN TRANSACTION")
+        try:
+            connection.execute("ALTER TABLE events ADD COLUMN IF NOT EXISTS block_number BIGINT")
+            connection.execute("ALTER TABLE events ADD COLUMN IF NOT EXISTS block_hash VARCHAR")
+            connection.execute("ALTER TABLE events ADD COLUMN IF NOT EXISTS canonical BOOLEAN DEFAULT true")
+            connection.execute("UPDATE events SET canonical = true WHERE canonical IS NULL")
+            connection.execute("ALTER TABLE events ALTER COLUMN canonical SET NOT NULL")
+            connection.execute("""CREATE TABLE IF NOT EXISTS evm_block_observations (
+                chain VARCHAR NOT NULL,
+                block_number BIGINT NOT NULL CHECK (block_number >= 0),
+                block_hash VARCHAR NOT NULL,
+                parent_hash VARCHAR NOT NULL,
+                observed_at TIMESTAMP NOT NULL,
+                canonical BOOLEAN NOT NULL,
+                run_id VARCHAR,
+                PRIMARY KEY (chain, block_number, block_hash)
             )""")
             connection.execute("UPDATE schema_version SET version = ?", [SCHEMA_VERSION])
             connection.execute("COMMIT")
