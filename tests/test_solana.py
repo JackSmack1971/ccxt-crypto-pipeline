@@ -3,7 +3,8 @@ from datetime import datetime, timezone
 
 from ingestion.solana.helius import HeliusClient
 from ingestion.solana.listener import extract_mints, extract_pool_addresses, is_solana_address, run_once
-from storage.db import read_asset_relationships, read_assets, read_events, read_metadata, read_runs
+from storage.db import (get_ingestion_continuation, read_asset_relationships, read_assets,
+                        read_events, read_metadata, read_runs)
 
 
 class Response:
@@ -44,7 +45,7 @@ def test_run_once_persists_comparable_solana_event_and_metadata(tmp_path):
     mint = "So11111111111111111111111111111111111111112"
 
     class Client:
-        def recent_transactions(self, address, *, limit):
+        def recent_transactions(self, address, *, limit, before=None):
             return [{"type": "TOKEN_MINT", "signature": "sig", "timestamp": 1735787040,
                      "feePayer": "deployer", "events": {"tokenMint": mint}}]
         def get_asset(self, address):
@@ -68,11 +69,12 @@ def test_create_pool_persists_market_and_address_scoped_constituents(tmp_path):
     pool = "11111111111111111111111111111111"
     mint_a = "So11111111111111111111111111111111111111112"
     mint_b = "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
-    transaction = {"type": "CREATE_POOL", "timestamp": 1735787040, "feePayer": "deployer",
+    transaction = {"type": "CREATE_POOL", "signature": "pool-signature",
+                   "timestamp": 1735787040, "feePayer": "deployer",
                    "events": {"poolAddress": pool, "token1Mint": mint_a, "token2Mint": mint_b}}
 
     class Client:
-        def recent_transactions(self, address, *, limit): return [transaction]
+        def recent_transactions(self, address, *, limit, before=None): return [transaction]
         def get(self, address): return None
         def get_asset(self, address): return {}
         def largest_accounts(self, address): return []
@@ -92,3 +94,66 @@ def test_config_includes_required_solana_venues():
     from ingestion.solana.config import load_config
     programs = load_config()["programs"]
     assert {"orca_whirlpools", "pump_fun", "pump_swap"}.issubset(programs)
+
+
+def test_run_once_pages_to_durable_signature_without_silent_high_activity_loss(tmp_path):
+    mint = "So11111111111111111111111111111111111111112"
+    timestamp = 1735787040
+
+    class Client:
+        def __init__(self):
+            self.pages = {
+                None: [{"signature": "sig-5"}, {"signature": "sig-4"}],
+                "sig-4": [{"signature": "sig-3"}, {"signature": "sig-2"}],
+                "sig-2": [{"signature": "sig-1"}, {"signature": "sig-old"}],
+            }
+            self.bootstrap = True
+            self.calls = []
+
+        def recent_transactions(self, address, *, limit, before=None):
+            self.calls.append(before)
+            if self.bootstrap:
+                self.bootstrap = False
+                return [{"type": "TOKEN_MINT", "signature": "sig-old", "timestamp": timestamp,
+                         "events": {"tokenMint": mint}}]
+            return [{**tx, "type": "TOKEN_MINT", "timestamp": timestamp + {"sig-5": 5, "sig-4": 4, "sig-3": 3, "sig-2": 2, "sig-1": 1, "sig-old": 0}[tx["signature"]],
+                     "events": {"tokenMint": mint}} for tx in self.pages[before]]
+
+        def get_asset(self, address): return {}
+        def largest_accounts(self, address): return []
+
+    client = Client()
+    cfg = {"programs": {"token_metadata": "program"},
+           "discovery": {"limit": 2, "max_pages": 3, "transaction_types": ["TOKEN_MINT"]}}
+    db = str(tmp_path / "resume.duckdb")
+    assert run_once(db_path=db, config=cfg, client=client) == 1
+    assert run_once(db_path=db, config=cfg, client=client) == 5
+    assert client.calls == [None, None, "sig-4", "sig-2"]
+    assert len(read_events(db)) == 6
+    assert get_ingestion_continuation("helius_enhanced", "program", db)["token"] == "sig-5"
+
+
+def test_run_once_fails_closed_when_durable_signature_cannot_be_reached(tmp_path):
+    class Client:
+        def __init__(self): self.bootstrap = True
+        def recent_transactions(self, address, *, limit, before=None):
+            if self.bootstrap:
+                self.bootstrap = False
+                return [{"signature": "checkpoint", "timestamp": 1}]
+            return [{"signature": "newest" if before is None else "still-not-checkpoint", "timestamp": 2}]
+        def get_asset(self, address): return {}
+        def largest_accounts(self, address): return []
+
+    cfg = {"programs": {"token_metadata": "program"},
+           "discovery": {"limit": 1, "max_pages": 2, "transaction_types": ["TOKEN_MINT"]}}
+    db = str(tmp_path / "gap.duckdb")
+    client = Client()
+    assert run_once(db_path=db, config=cfg, client=client) == 0
+    try:
+        run_once(db_path=db, config=cfg, client=client)
+    except RuntimeError as exc:
+        assert "was not reached" in str(exc)
+    else:
+        raise AssertionError("unreachable durable signature should fail")
+    assert get_ingestion_continuation("helius_enhanced", "program", db)["token"] == "checkpoint"
+    assert read_runs(db)[-1]["status"] == "failed"

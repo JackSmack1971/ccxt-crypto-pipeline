@@ -2,7 +2,9 @@ from datetime import datetime, timezone
 
 from storage.db import (
     SCHEMA_VERSION,
+    advance_ingestion_continuation,
     advance_ingestion_cursor,
+    get_ingestion_continuation,
     get_ingestion_cursor,
     init_db,
     insert_event,
@@ -14,6 +16,7 @@ from storage.db import (
     read_events,
     read_evm_block_observations,
     read_ingestion_cursors,
+    read_ingestion_continuations,
     read_metadata,
     read_ohlcv,
     read_price_observations,
@@ -56,7 +59,7 @@ def test_storage_round_trip_and_idempotent_init(tmp_path):
     run_id = log_run_start("fixture_job", db_path, started_at=timestamp, run_id="run-1")
     log_run_end(run_id, "success", db_path, finished_at=timestamp, rows_written=1)
 
-    assert SCHEMA_VERSION == 9
+    assert SCHEMA_VERSION == 10
     asset = read_assets(db_path)[0]
     assert (asset["canonical_id"], asset["source_type"], asset["chain_or_exchange"],
             asset["symbol_or_contract"]) == ("kraken:BTC/USDT", "cex", "kraken", "BTC/USDT")
@@ -110,7 +113,7 @@ def test_v1_store_migrates_in_place_and_preserves_rows(tmp_path):
 
     init_db(db_path)
     connection = duckdb.connect(str(db_path))
-    assert connection.execute("SELECT version FROM schema_version").fetchone() == (9,)
+    assert connection.execute("SELECT version FROM schema_version").fetchone() == (SCHEMA_VERSION,)
     assert connection.execute("SELECT contract_address FROM assets").fetchone() == (None,)
     assert connection.execute("SELECT COUNT(*) FROM lineage").fetchone() == (1,)
     assert connection.execute("SELECT canonical_id FROM assets").fetchone() == ("kraken:BTC/USDT",)
@@ -139,7 +142,7 @@ def test_v1_store_migrates_in_place_and_preserves_rows(tmp_path):
     fresh.close()
     init_db(db_path)
     repeat = duckdb.connect(str(db_path))
-    assert repeat.execute("SELECT version FROM schema_version").fetchone() == (9,)
+    assert repeat.execute("SELECT version FROM schema_version").fetchone() == (SCHEMA_VERSION,)
     assert repeat.execute("SELECT COUNT(*) FROM metadata").fetchone() == (1,)
     assert repeat.execute("SELECT COUNT(*) FROM lineage").fetchone() == (1,)
     assert repeat.execute("SELECT COUNT(*) FROM ohlcv").fetchone() == (1,)
@@ -162,14 +165,14 @@ def test_v5_store_adds_identity_relationship_contract_without_losing_rows(tmp_pa
 
     init_db(db_path)
     connection = duckdb.connect(str(db_path))
-    assert connection.execute("SELECT version FROM schema_version").fetchone() == (9,)
+    assert connection.execute("SELECT version FROM schema_version").fetchone() == (SCHEMA_VERSION,)
     assert connection.execute("SELECT canonical_id FROM assets").fetchone() == ("ethereum:0xpool",)
     assert connection.execute("SELECT COUNT(*) FROM ingestion_cursors").fetchone() == (0,)
     connection.close()
 
     init_db(db_path)
     connection = duckdb.connect(str(db_path))
-    assert connection.execute("SELECT version FROM schema_version").fetchone() == (9,)
+    assert connection.execute("SELECT version FROM schema_version").fetchone() == (SCHEMA_VERSION,)
     assert connection.execute("SELECT canonical_id FROM assets").fetchone() == ("ethereum:0xpool",)
     assert connection.execute("SELECT COUNT(*) FROM asset_relationships").fetchone() == (0,)
     connection.close()
@@ -189,14 +192,14 @@ def test_v6_store_adds_price_observation_contract_without_losing_rows(tmp_path):
 
     init_db(db_path)
     connection = duckdb.connect(str(db_path))
-    assert connection.execute("SELECT version FROM schema_version").fetchone() == (9,)
+    assert connection.execute("SELECT version FROM schema_version").fetchone() == (SCHEMA_VERSION,)
     assert connection.execute("SELECT canonical_id FROM assets").fetchone() == ("ethereum:0xpool",)
     assert connection.execute("SELECT COUNT(*) FROM asset_relationships").fetchone() == (0,)
     connection.close()
 
     init_db(db_path)
     connection = duckdb.connect(str(db_path))
-    assert connection.execute("SELECT version FROM schema_version").fetchone() == (9,)
+    assert connection.execute("SELECT version FROM schema_version").fetchone() == (SCHEMA_VERSION,)
     assert connection.execute("SELECT COUNT(*) FROM price_observations").fetchone() == (0,)
     connection.close()
 
@@ -237,7 +240,7 @@ def test_v8_store_adds_evm_canonical_history_without_losing_events(tmp_path):
 
     init_db(db_path)
     connection = duckdb.connect(str(db_path))
-    assert connection.execute("SELECT version FROM schema_version").fetchone() == (9,)
+    assert connection.execute("SELECT version FROM schema_version").fetchone() == (SCHEMA_VERSION,)
     assert connection.execute(
         "SELECT canonical_id, block_number, block_hash, canonical FROM events"
     ).fetchone() == ("ethereum:0xpool", None, None, True)
@@ -246,10 +249,37 @@ def test_v8_store_adds_evm_canonical_history_without_losing_events(tmp_path):
 
     init_db(db_path)
     connection = duckdb.connect(str(db_path))
-    assert connection.execute("SELECT version FROM schema_version").fetchone() == (9,)
+    assert connection.execute("SELECT version FROM schema_version").fetchone() == (SCHEMA_VERSION,)
     assert connection.execute("SELECT canonical_id, canonical FROM events").fetchone() == (
         "ethereum:0xpool", True)
     connection.close()
+
+
+def test_v9_store_adds_opaque_continuations_without_losing_numeric_cursors(tmp_path):
+    db_path = tmp_path / "v9.duckdb"
+    connection = duckdb.connect(str(db_path))
+    connection.execute("CREATE TABLE schema_version (version INTEGER NOT NULL)")
+    connection.execute("INSERT INTO schema_version VALUES (9)")
+    from storage.schema import SCHEMA_SQL
+    for statement in SCHEMA_SQL.split(";"):
+        if statement.strip() and "ingestion_continuations" not in statement:
+            connection.execute(statement)
+    connection.execute(
+        "INSERT INTO ingestion_cursors VALUES ('evm_rpc', 'ethereum', 42, ?, 'run-old')",
+        [datetime(2025, 1, 1)],
+    )
+    connection.close()
+
+    init_db(db_path)
+    connection = duckdb.connect(str(db_path))
+    assert connection.execute("SELECT version FROM schema_version").fetchone() == (SCHEMA_VERSION,)
+    assert connection.execute("SELECT source, scope, position FROM ingestion_cursors").fetchone() == (
+        "evm_rpc", "ethereum", 42)
+    assert connection.execute("SELECT COUNT(*) FROM ingestion_continuations").fetchone() == (0,)
+    connection.close()
+
+    init_db(db_path)
+    assert read_ingestion_continuations(db_path) == []
 
 
 def test_ingestion_cursor_is_scoped_monotonic_and_continuity_checked(tmp_path):
@@ -276,6 +306,25 @@ def test_ingestion_cursor_is_scoped_monotonic_and_continuity_checked(tmp_path):
         else:
             raise AssertionError("invalid cursor advance should fail")
     assert get_ingestion_cursor("evm_rpc", "ethereum", db_path)["position"] == 101
+
+
+def test_opaque_ingestion_continuation_round_trip_and_compare_and_set(tmp_path):
+    db_path = tmp_path / "continuations.duckdb"
+    observed = datetime(2025, 1, 1, tzinfo=timezone.utc)
+    advance_ingestion_continuation("helius_enhanced", "program-a", "sig-1", db_path,
+                                   updated_at=observed, run_id="run-1")
+    advance_ingestion_continuation("helius_enhanced", "program-a", "sig-2", db_path,
+                                   expected_previous="sig-1", run_id="run-2")
+    assert get_ingestion_continuation("helius_enhanced", "program-a", db_path)["token"] == "sig-2"
+    assert read_ingestion_continuations(db_path)[0]["run_id"] == "run-2"
+    try:
+        advance_ingestion_continuation("helius_enhanced", "program-a", "sig-3", db_path,
+                                       expected_previous="stale")
+    except ValueError as exc:
+        assert "continuation continuity failure" in str(exc)
+    else:
+        raise AssertionError("stale continuation writer should fail")
+    assert get_ingestion_continuation("helius_enhanced", "program-a", db_path)["token"] == "sig-2"
 
 
 def test_price_observation_round_trip_is_idempotent_and_ordered(tmp_path):

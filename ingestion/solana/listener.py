@@ -6,7 +6,8 @@ import argparse
 from datetime import datetime, timezone
 from typing import Any, Iterable
 
-from storage.db import (insert_event, log_run_end, log_run_start, safe_error_message, upsert_asset,
+from storage.db import (advance_ingestion_continuation, get_ingestion_continuation, insert_event,
+                        log_run_end, log_run_start, safe_error_message, upsert_asset,
                         upsert_asset_relationship, upsert_metadata)
 
 from .config import ROOT, load_config
@@ -56,6 +57,38 @@ def _event_type(transaction: dict[str, Any], configured_types: list[str]) -> str
     return None
 
 
+def _transactions_since(client: HeliusClient, address: str, *, checkpoint: str | None,
+                        page_size: int, max_pages: int) -> tuple[list[dict[str, Any]], str | None]:
+    """Page newest-to-oldest until the prior durable signature is reached."""
+    before = None
+    collected: list[dict[str, Any]] = []
+    newest_signature = None
+    for _ in range(max_pages):
+        page = client.recent_transactions(address, limit=page_size, before=before)
+        if not page:
+            if checkpoint is not None:
+                raise RuntimeError(f"Solana continuation {checkpoint!r} was not found for {address}")
+            break
+        signatures = [tx.get("signature") for tx in page]
+        if any(not isinstance(signature, str) or not signature for signature in signatures):
+            raise ValueError(f"Helius transaction page for {address} contains a missing signature")
+        if newest_signature is None:
+            newest_signature = signatures[0]
+        if checkpoint in signatures:
+            collected.extend(page[:signatures.index(checkpoint)])
+            return list(reversed(collected)), newest_signature
+        collected.extend(page)
+        before = signatures[-1]
+        if checkpoint is None:
+            # The initial observation boundary is explicitly the newest provider page.
+            return list(reversed(collected)), newest_signature
+    if checkpoint is not None:
+        raise RuntimeError(
+            f"Solana continuation {checkpoint!r} was not reached within {max_pages} pages for {address}"
+        )
+    return list(reversed(collected)), newest_signature
+
+
 def persist_launch(mint: str, transaction: dict[str, Any], client: HeliusClient, *, db_path: str,
                    now: datetime | None = None) -> int:
     now = now or datetime.now(timezone.utc)
@@ -83,10 +116,19 @@ def run_once(*, db_path: str, config: dict[str, Any] | None = None, client: Heli
     written = 0
     try:
         programs = config.get("programs", {})
-        limit = int(config.get("discovery", {}).get("limit", 20))
-        types = config.get("discovery", {}).get("transaction_types", ["TOKEN_MINT", "CREATE_POOL"])
+        discovery = config.get("discovery", {})
+        limit = int(discovery.get("limit", 20))
+        max_pages = int(discovery.get("max_pages", 25))
+        if limit <= 0 or max_pages <= 0:
+            raise ValueError("Solana discovery limit and max_pages must be positive")
+        types = discovery.get("transaction_types", ["TOKEN_MINT", "CREATE_POOL"])
         for program_name, address in programs.items():
-            for tx in client.recent_transactions(address, limit=limit):
+            cursor = get_ingestion_continuation("helius_enhanced", address, db_path)
+            checkpoint = cursor["token"] if cursor else None
+            transactions, newest_signature = _transactions_since(
+                client, address, checkpoint=checkpoint, page_size=limit, max_pages=max_pages
+            )
+            for tx in transactions:
                 event_type = _event_type(tx, types)
                 mints = extract_mints(tx)
                 if not event_type or not mints:
@@ -117,6 +159,11 @@ def run_once(*, db_path: str, config: dict[str, Any] | None = None, client: Heli
                                                    "relationship_type": f"constituent_{mints.index(mint)}",
                                                    "venue": program_name, "observed_at": timestamp,
                                                    "source": "helius", "evidence_json": {"transaction": tx}}, db_path)
+            if newest_signature is not None and newest_signature != checkpoint:
+                advance_ingestion_continuation(
+                    "helius_enhanced", address, newest_signature, db_path,
+                    updated_at=now, run_id=run_id, expected_previous=checkpoint,
+                )
         log_run_end(run_id, "success", db_path, rows_written=written)
         return written
     except Exception as exc:
