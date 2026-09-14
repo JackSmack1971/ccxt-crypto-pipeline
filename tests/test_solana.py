@@ -3,8 +3,9 @@ from datetime import datetime, timezone
 
 from ingestion.solana.helius import HeliusClient
 from ingestion.solana.listener import extract_mints, extract_pool_addresses, is_solana_address, run_once
-from storage.db import (get_ingestion_continuation, read_asset_relationships, read_assets,
-                        read_events, read_metadata, read_runs)
+from storage.db import (get_ingestion_continuation, provider_quality_summary,
+                        read_asset_relationships, read_assets, read_events, read_metadata,
+                        read_provider_observation_log, read_runs)
 
 
 class Response:
@@ -157,3 +158,59 @@ def test_run_once_fails_closed_when_durable_signature_cannot_be_reached(tmp_path
         raise AssertionError("unreachable durable signature should fail")
     assert get_ingestion_continuation("helius_enhanced", "program", db)["token"] == "checkpoint"
     assert read_runs(db)[-1]["status"] == "failed"
+
+
+def test_run_once_records_a_per_program_provider_observation(tmp_path):
+    mint = "So11111111111111111111111111111111111111112"
+
+    class Client:
+        def recent_transactions(self, address, *, limit, before=None):
+            return [{"type": "TOKEN_MINT", "signature": "sig", "timestamp": 1735787040,
+                     "feePayer": "deployer", "events": {"tokenMint": mint}}]
+        def get_asset(self, address):
+            return {"content": {"metadata": {}}, "token_info": {}}
+        def largest_accounts(self, address): return []
+
+    cfg = {"programs": {"token_metadata": "metadata-program"},
+           "discovery": {"limit": 1, "transaction_types": ["TOKEN_MINT"]}}
+    db = str(tmp_path / "solana-quality.duckdb")
+    assert run_once(db_path=db, config=cfg, client=Client(), expected_interval_seconds=60.0) == 1
+
+    log = read_provider_observation_log(db)
+    assert len(log) == 1
+    row = log[0]
+    assert (row["source"], row["scope"]) == ("helius_enhanced", "metadata-program")
+    assert row["status"] == "success"
+    assert row["rows_observed"] == 1
+    assert row["expected_interval_seconds"] == 60.0
+
+    summary = {(row["source"], row["scope"]): row for row in provider_quality_summary(db)}
+    assert summary[("helius_enhanced", "metadata-program")]["completeness_ratio"] == 1.0
+
+
+def test_run_once_records_program_failure_before_failing_the_whole_run(tmp_path):
+    class Client:
+        def __init__(self): self.bootstrap = True
+        def recent_transactions(self, address, *, limit, before=None):
+            if self.bootstrap:
+                self.bootstrap = False
+                return [{"signature": "checkpoint", "timestamp": 1}]
+            return [{"signature": "newest" if before is None else "still-not-checkpoint", "timestamp": 2}]
+        def get_asset(self, address): return {}
+        def largest_accounts(self, address): return []
+
+    cfg = {"programs": {"token_metadata": "program"},
+           "discovery": {"limit": 1, "max_pages": 2, "transaction_types": ["TOKEN_MINT"]}}
+    db = str(tmp_path / "solana-gap.duckdb")
+    client = Client()
+    assert run_once(db_path=db, config=cfg, client=client) == 0
+    try:
+        run_once(db_path=db, config=cfg, client=client)
+    except RuntimeError:
+        pass
+    else:
+        raise AssertionError("unreachable durable signature should fail")
+
+    log = read_provider_observation_log(db)
+    assert [row["status"] for row in log] == ["success", "failure"]
+    assert "was not reached" in log[-1]["error_message"]

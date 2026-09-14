@@ -506,14 +506,13 @@ Evidence:
 
 ## Slice 5.4 — Provider observation ledger and quality SLOs
 
-**Status:** ACTIVE
+**Status:** DONE
 
 Track expected/observed intervals, provider failures, rate-limit gaps, source latency, and completeness by source/chain.
 
 Research eligibility must be able to consume these quality facts without live provider calls.
 
-Progress so far (this slice remains ACTIVE; per-source/chain granularity below the
-scheduled-job boundary is still open):
+Evidence:
 
 - Schema version 11 adds a `provider_observation_log` table keyed by
   `(source, scope, observed_at)` recording status (`success`, `failure`,
@@ -528,25 +527,60 @@ scheduled-job boundary is still open):
   worst observed gap, and last status per source/scope).
 - `scheduler/pipeline.py` wires every scheduled job (`cex_refresh`,
   `tier0_poll`, `evm_listeners`, `solana_listener`, `normalization`) through
-  `Pipeline.run_job`, which now times each attempt, records success/failure/
-  rate-limit outcomes, and compares against `Pipeline.expected_job_intervals()`
-  (derived from the same configured cadence used by `build_scheduler`).
+  `Pipeline.run_job`, which times each attempt, records success/failure/
+  rate-limit outcomes at the job-name scope, and compares against
+  `Pipeline.expected_job_intervals()` (derived from the same configured
+  cadence used by `build_scheduler`).
+- Per-source/chain granularity below the scheduled-job boundary: within one
+  `evm_listeners` invocation, `Pipeline.evm_listeners()` now times and records
+  each configured EVM chain individually under the `evm_rpc`/chain-name scope
+  (the same identity already used for its durable ingestion cursor), and
+  isolates each chain's failure so one unreachable RPC no longer prevents the
+  remaining configured chains from being attempted that cycle. Within one
+  `solana_listener` invocation, `ingestion/solana/listener.py::run_once` times
+  and records each configured program under the `helius_enhanced`/address
+  scope (the same identity already used for its durable signature
+  continuation); a program failure is still recorded before propagating, so
+  the whole run remains fail-closed per the Slice 5.3 contract rather than
+  silently swallowing a gap.
+- A documented research-eligibility gate: `analysis/alpha/eligibility.py`
+  adds a pure `evaluate_chain_eligibility` function (plus `EligibilityPolicy`
+  and `ChainEligibility`) that decides, per configured chain, whether its
+  backing `(source, scope)` provider-quality rows clear configurable
+  completeness/gap/last-status thresholds -- explicitly distinguishing a
+  chain with no configured scope or no recorded observations from one that is
+  merely unhealthy. It is a pure function over already-fetched
+  `provider_quality_summary` rows, preserving the existing `analysis/alpha`
+  boundary of never reading `storage/db.py` directly. `CohortConfig` gains an
+  optional `chain_eligibility` field; `extract_cohort` in
+  `analysis/alpha/cohort.py` treats a chain that fails this gate as a new,
+  explicit `CHAIN_PROVIDER_QUALITY_INELIGIBLE` exclusion reason -- retained in
+  the cohort with full evidence per the Phase 3 inclusion/exclusion
+  invariant, distinct from and decided before the existing liquidity/coverage
+  analysis-eligibility tier documented in
+  `docs/plans/phase-3-authoritative-decisions.md`.
 - `tests/test_storage.py` covers the v10-to-v11 migration preserving existing
   cursor rows, fresh/repeated initialization, gap computation, the offline
   quality summary aggregate, unsupported-status rejection, and the rate-limit
   classifier. `tests/test_scheduler.py` covers a full cycle populating the
-  ledger with the configured expected intervals and a rate-limited failure
-  being classified and persisted distinctly from a generic failure. The
-  locked full suite passed with 105 tests; the storage migration guard
-  reported the fresh and migrated schemas as converged.
-- Remaining for this slice: today's ledger entries are scoped to the
-  scheduler's job boundary (e.g. all EVM chains share the `evm_listeners`
-  scope). Per-chain/per-program granularity inside `evm_listeners` and
-  `solana_listener`, and a documented research-eligibility gate that consumes
-  `provider_quality_summary` before a source/chain is treated as eligible for
-  Phase 3 cohort construction, remain open before this slice can close.
+  ledger with the configured expected intervals, a rate-limited failure being
+  classified and persisted distinctly from a generic failure, a per-chain EVM
+  observation being recorded, and one EVM chain's failure being isolated from
+  a second chain's success within the same job invocation.
+  `tests/test_solana.py` covers a per-program observation being recorded on
+  success and a program failure being recorded before the run still raises.
+  `tests/test_eligibility.py` covers healthy/unhealthy/unobserved/
+  multi-scope chains and policy validation. `tests/test_phase3.py` covers a
+  cohort excluding an ineligible chain while an unaffected chain's exclusion
+  reason is decided independently, a chain with no provider evidence being
+  treated as ineligible rather than defaulting to healthy, and unchanged
+  behavior when no `chain_eligibility` is supplied. The locked full suite
+  passed with 121 tests; the storage migration guard reported the fresh and
+  migrated schemas as converged.
 
 ## Slice 5.5 — Two-store recovery protocol
+
+**Status:** ACTIVE
 
 Make DuckDB authoritative/cache semantics mechanically recoverable when Parquet publication diverges after a committed DB write.
 
@@ -728,15 +762,15 @@ For a fresh agent, the intended pickup sequence is:
 
 `AGENTS.md` → `ROADMAP.md` → active `docs/plans/phase-*.md` → relevant code/tests → Git history/status.
 
-The current frontier is **Phase 5.4 — Provider observation ledger and quality
-SLOs**. Phase 5.3 establishes durable signature-based Solana replay after an
-explicit bounded bootstrap; credentialed live Helius compatibility remains
-unverified runtime evidence and is separate from the fixture-proven local
-contract.
+The current frontier is **Phase 5.5 — Two-store recovery protocol**. Phase 5.4
+is DONE: the provider observation ledger now records quality facts at both
+the scheduled-job boundary and per-chain/per-program below it, and
+`analysis/alpha/eligibility.py` gives Phase 3 cohort construction a documented,
+offline gate over that evidence (see the Slice 5.4 evidence above). Phase 5.3
+establishes durable signature-based Solana replay after an explicit bounded
+bootstrap; credentialed live Helius compatibility remains unverified runtime
+evidence and is separate from the fixture-proven local contract.
 
-Slice 5.4 has landed a schema-backed provider observation ledger and an
-offline quality-summary query wired through the scheduler's job boundary
-(see the Slice 5.4 evidence above). The next eligible increment inside 5.4 is
-per-source/chain granularity inside the `evm_listeners` and `solana_listener`
-jobs plus a documented research-eligibility gate over `provider_quality_summary`,
-before moving on to Slice 5.5.
+Slice 5.5 has not started. It needs a simulated Parquet-publication failure
+after a committed DuckDB write, and an automated, deterministic repair/rebuild
+path that restores the two stores' agreed authoritative/cache contract.

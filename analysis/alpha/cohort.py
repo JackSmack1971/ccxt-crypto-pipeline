@@ -2,10 +2,11 @@ from __future__ import annotations
 
 from dataclasses import asdict, dataclass
 from datetime import datetime
-from typing import Any
+from typing import Any, Mapping
 
 from analysis.datasets.snapshot import DatasetSnapshot
 from ._common import address_key, as_time, coverage_report, first, identity, numeric, payload
+from .eligibility import ChainEligibility
 
 @dataclass(frozen=True)
 class CohortConfig:
@@ -18,6 +19,7 @@ class CohortConfig:
     min_source_quality: bool = True
     coverage_horizon: str = "1h"
     min_coverage: float = 0.8
+    chain_eligibility: Mapping[str, ChainEligibility] | None = None
 
     def __post_init__(self):
         if self.end < self.start: raise ValueError("invalid cohort interval")
@@ -106,24 +108,35 @@ def extract_cohort(snapshot: DatasetSnapshot, config: CohortConfig) -> tuple[Coh
                           if numeric(first(payload(e), "liquidity_usd", "reserve_usd", "usd_liquidity")) is not None), None)
         eligible = bool(asset and address and first_event.get("source")) and (not config.min_source_quality or bool(evidence))
         reason = None if eligible else "MISSING_SOURCE_PROVENANCE"
-        analysis = eligible and liquidity is not None and liquidity >= config.primary_liquidity_usd
-        if eligible and liquidity is None: reason = "LIQUIDITY_UNAVAILABLE"
-        elif eligible and liquidity is not None and liquidity < config.primary_liquidity_usd: reason = "BELOW_LIQUIDITY_GATE"
+        chain_quality = config.chain_eligibility.get(chain) if config.chain_eligibility else None
         coverage = None
-        if eligible and analysis and asset:
-            horizon_seconds = {"1h": 3600, "6h": 21600, "24h": 86400, "7d": 604800}.get(config.coverage_horizon)
-            if horizon_seconds is None: raise ValueError("unsupported coverage horizon")
-            from datetime import timedelta
-            coverage = coverage_report(snapshot.bars_for(asset.canonical_id), t0,
-                                       t0 + timedelta(seconds=horizon_seconds), snapshot.policy.timeframe)
-            if not coverage["passes"]:
-                analysis = False
-                reason = "INSUFFICIENT_COVERAGE"
+        if eligible and chain_quality is not None and not chain_quality.eligible:
+            # A chain whose provider observation history fails the offline
+            # quality gate is treated as ineligible for analysis regardless of
+            # liquidity/coverage: those values were computed from the same
+            # unreliable feed and cannot be trusted to justify inclusion.
+            analysis = False
+            reason = "CHAIN_PROVIDER_QUALITY_INELIGIBLE"
+        else:
+            analysis = eligible and liquidity is not None and liquidity >= config.primary_liquidity_usd
+            if eligible and liquidity is None: reason = "LIQUIDITY_UNAVAILABLE"
+            elif eligible and liquidity is not None and liquidity < config.primary_liquidity_usd: reason = "BELOW_LIQUIDITY_GATE"
+            if eligible and analysis and asset:
+                horizon_seconds = {"1h": 3600, "6h": 21600, "24h": 86400, "7d": 604800}.get(config.coverage_horizon)
+                if horizon_seconds is None: raise ValueError("unsupported coverage horizon")
+                from datetime import timedelta
+                coverage = coverage_report(snapshot.bars_for(asset.canonical_id), t0,
+                                           t0 + timedelta(seconds=horizon_seconds), snapshot.policy.timeframe)
+                if not coverage["passes"]:
+                    analysis = False
+                    reason = "INSUFFICIENT_COVERAGE"
         first_seen = asset.first_seen if asset else t0
         result.append(CohortRow(token_id, chain, address, token_id if asset else first_event.get("canonical_id", ""), t0, first_seen, eligible, analysis,
                                 reason, liquidity, tuple(sorted({e["event_type"] for e in events})), evidence,
                                 {"dataset_identity": snapshot.dataset_identity, "cohort_config": asdict(config),
                                  "market_canonical_ids": tuple(sorted({e["canonical_id"] for e in events
                                                                        if e["canonical_id"] != token_id})),
-                                 "coverage": coverage}))
+                                 "coverage": coverage,
+                                 "chain_eligibility": ({"eligible": chain_quality.eligible, "reason": chain_quality.reason}
+                                                       if chain_quality is not None else None)}))
     return tuple(sorted(result, key=lambda r: (r.t0 or datetime.max, r.token_id)))
