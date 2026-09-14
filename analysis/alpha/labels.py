@@ -121,7 +121,7 @@ def generate_labels(snapshot: DatasetSnapshot, cohort: tuple[Any, ...], definiti
                     conversion_observations: tuple[ConversionObservation, ...] = (),
                     conversion_policy: ConversionPolicy | None = None) -> tuple[LabelRow, ...]:
     duration, tolerance = HORIZONS[definition.horizon]; result = []
-    quote_assets = quote_assets or {}
+    quote_assets = quote_assets if quote_assets is not None else getattr(snapshot, "quote_assets", {})
     conversion_policy = conversion_policy or ConversionPolicy()
     for member in cohort:
         start = as_time(member.t0); target = start + duration

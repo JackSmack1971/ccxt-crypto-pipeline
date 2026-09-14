@@ -94,6 +94,7 @@ class DatasetSnapshot:
                  metadata: tuple[Metadata, ...], events: tuple[dict[str, Any], ...],
                  lineage: tuple[dict[str, Any], ...], policy: DatasetPolicy,
                  dataset_identity: str, asset_relationships: tuple[dict[str, Any], ...] = (),
+                 quote_assets: dict[str, str] | None = None,
                  reference_series: tuple[dict[str, Any], ...] = ()):
         self.assets = tuple(sorted(assets, key=lambda item: item.canonical_id))
         self.bars = tuple(sorted((bar for bar in bars if policy.allows(bar)),
@@ -132,6 +133,7 @@ class DatasetSnapshot:
             self._reference_series_by_id[key] += (item,)
         self.policy = policy
         self.dataset_identity = dataset_identity
+        self.quote_assets = dict(quote_assets or {})
         self._asset_ids = {item.canonical_id for item in assets}
         self._metadata: dict[str, tuple[Metadata, ...]] = {}
         for item in self.metadata:
@@ -151,7 +153,8 @@ class DatasetSnapshot:
             tables = {row[0] for row in conn.execute(
                 "SELECT table_name FROM information_schema.tables WHERE table_schema = 'main'"
             ).fetchall()}
-            required = {"assets", "ohlcv", "metadata", "events", "lineage", "asset_relationships", "reference_series"}
+            required = {"assets", "ohlcv", "metadata", "events", "lineage", "asset_relationships",
+                        "dex_price_observations", "observation_capabilities", "reference_series"}
             missing = sorted(required - tables)
             if missing:
                 raise ValueError(f"dataset is missing required tables: {', '.join(missing)}")
@@ -176,6 +179,20 @@ class DatasetSnapshot:
                     "FROM read_parquet(?) ORDER BY timestamp, canonical_id, timeframe, source",
                     [[str(path) for path in paths]],
                 ).fetchall()
+            dex_rows = conn.execute(
+                "SELECT asset_canonical_id, timestamp, open, high, low, close, volume, timeframe, source "
+                "FROM dex_price_observations ORDER BY timestamp, asset_canonical_id, timeframe, source"
+            ).fetchall()
+            quote_rows = conn.execute(
+                "SELECT DISTINCT asset_canonical_id, quote_asset_canonical_id FROM dex_price_observations "
+                "ORDER BY asset_canonical_id, quote_asset_canonical_id"
+            ).fetchall()
+            quote_assets: dict[str, str] = {}
+            for asset_id, quote_id in quote_rows:
+                if asset_id in quote_assets and quote_assets[asset_id] != quote_id:
+                    raise ValueError(f"ambiguous DEX quote asset for {asset_id}")
+                quote_assets[asset_id] = quote_id
+            rows = list(rows) + list(dex_rows)
             bars = []
             seen = set()
             for row in rows:
@@ -213,6 +230,13 @@ class DatasetSnapshot:
             ).fetchall())
             for relationship in relationships:
                 relationship["observed_at"] = _time(relationship["observed_at"])
+            capability_columns = ("chain", "provider", "capability", "status", "observed_at", "reason")
+            capabilities = tuple(dict(zip(capability_columns, row)) for row in conn.execute(
+                "SELECT " + ", ".join(capability_columns) + " FROM observation_capabilities "
+                "ORDER BY chain, provider, capability, observed_at"
+            ).fetchall())
+            for capability in capabilities:
+                capability["observed_at"] = _time(capability["observed_at"])
             reference_series = tuple(dict(zip(("series_id", "observed_at", "value", "source", "evidence_json"), row))
                                      for row in conn.execute(
                 "SELECT series_id, observed_at, value, source, evidence_json FROM reference_series "
@@ -235,10 +259,13 @@ class DatasetSnapshot:
             conn.close()
         payload = {"assets": [asdict(x) for x in assets], "bars": [asdict(x) for x in bars],
                    "metadata": [asdict(x) for x in metadata], "events": list(events), "lineage": list(lineage),
-                   "asset_relationships": list(relationships), "reference_series": list(reference_series),
+                   "asset_relationships": list(relationships),
+                   "observation_capabilities": list(capabilities),
+                   "reference_series": list(reference_series),
                    "policy": asdict(policy)}
         identity = hashlib.sha256(json.dumps(payload, default=str, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
-        return cls(assets, tuple(bars), metadata, events, lineage, policy, identity, relationships, reference_series)
+        return cls(assets, tuple(bars), metadata, events, lineage, policy, identity, relationships,
+                   quote_assets, reference_series)
 
     def bars_for(self, canonical_id: str) -> tuple[Bar, ...]:
         if canonical_id not in self._asset_ids:

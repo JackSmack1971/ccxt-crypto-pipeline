@@ -284,11 +284,24 @@ Live-provider acceptance, when credentials are available, MUST be reported separ
 
 Evidence:
 
-- Schema version 7 adds an idempotent `price_observations` table with address-scoped asset/market identity, observation time, positive price, quote asset, optional USD liquidity/volume, configured cadence, source, and raw evidence.
-- `storage/db.py` provides deterministic upsert/read accessors; v6-to-v7 and fresh/repeated initialization tests preserve existing rows and converge on the target contract.
-- Tier-0 normalizes GeckoTerminal base/quote USD prices, liquidity, volume, and the configured polling cadence. EVM-shaped and Solana-shaped offline fixtures each persist a launch event plus subsequent observations, and repeated polling updates the same observation identity rather than duplicating it.
-- `tests/test_storage.py` and `tests/test_tier0.py` cover migration, idempotency, deterministic reads, address-scoped identities, optional values, and both network shapes. The complete fixture suite ran with no network access and passed.
-- Live-provider acceptance remains unverified and separate from this fixture evidence.
+- Schema version 13 adds source-scoped, idempotent DEX price/liquidity observations (`dex_price_observations`)
+  plus explicit per-chain/provider capability observations (`observation_capabilities`) without filling
+  absent intervals, alongside an idempotent generic `price_observations` table with address-scoped
+  asset/market identity, observation time, positive price, quote asset, optional USD liquidity/volume,
+  configured cadence, source, and raw evidence.
+- `storage/db.py` provides deterministic upsert/read accessors for both observation contracts; migration
+  and fresh/repeated initialization tests preserve existing rows and converge on the target contract.
+- GeckoTerminal's ingestion-owned adapter normalizes configured minute candles for address-scoped
+  base assets and retains market, quote-asset, source, candle, and observation timestamps; Tier-0 also
+  normalizes GeckoTerminal base/quote USD prices, liquidity, volume, and the configured polling cadence
+  into the generic observation contract.
+- The read-only dataset boundary consumes persisted DEX observations and carries quote identity into
+  Phase 3 label conversion; an offline fixture proves persisted launch-to-1h-label replay.
+- EVM and Solana Tier-0 fixtures cover subsequent observations, gap preservation, capability status,
+  address-scoped identities, and replay-safe storage for both observation contracts. Live provider
+  behavior remains `UNVERIFIED_RUNTIME` without a credentialed or network-enabled smoke check.
+- `tests/test_storage.py` and `tests/test_tier0.py` cover migration, idempotency, deterministic reads,
+  address-scoped identities, optional values, and both network shapes.
 
 ## Slice 4R.7 — Phase 2 metric/time-index hardening
 
