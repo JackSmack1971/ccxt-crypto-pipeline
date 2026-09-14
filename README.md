@@ -111,6 +111,8 @@ docs/                   Architecture and local operations documentation
 | Command | Purpose |
 | --- | --- |
 | `python -m storage PATH_TO_DATABASE` | Initialize canonical storage |
+| `python -m storage PATH_TO_DATABASE --verify-parquet` | Report OHLCV Parquet partitions that diverge from DuckDB |
+| `python -m storage PATH_TO_DATABASE --repair-parquet` | Deterministically rebuild diverging OHLCV Parquet partitions from DuckDB |
 | `python -m ingestion.cex.backfill ...` | Backfill one CEX symbol/timeframe |
 | `python -m ingestion.cex.refresh` | Refresh configured CEX assets |
 | `python -m ingestion.dex.tier0.poller` | Run one Tier 0 poll |

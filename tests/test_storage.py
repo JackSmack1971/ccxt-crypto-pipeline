@@ -1,5 +1,7 @@
 from datetime import datetime, timezone
 
+import pytest
+
 from storage.db import (
     SCHEMA_VERSION,
     advance_ingestion_continuation,
@@ -10,6 +12,7 @@ from storage.db import (
     init_db,
     insert_event,
     insert_ohlcv_batch,
+    list_ohlcv_partitions,
     log_run_end,
     log_run_start,
     provider_quality_summary,
@@ -26,11 +29,13 @@ from storage.db import (
     read_provider_observation_log,
     read_runs,
     record_provider_observation,
+    repair_parquet_publication,
     safe_error_message,
     upsert_asset,
     upsert_asset_relationship,
     upsert_metadata,
     upsert_price_observation,
+    verify_parquet_publication,
 )
 import duckdb
 
@@ -521,3 +526,80 @@ def test_storage_error_messages_redact_urls_and_credentials():
     message = safe_error_message(ValueError("https://user:pass@example.test api_key=top-secret"))
     assert "user:pass" not in message
     assert "top-secret" not in message
+
+
+def test_verify_parquet_publication_detects_missing_stale_and_unreadable_partitions(tmp_path):
+    import pyarrow as pa
+    import pyarrow.parquet as pq
+
+    db_path = tmp_path / "recovery.duckdb"
+    parquet_dir = tmp_path / "parquet"
+    days = [datetime(2025, 2, day, tzinfo=timezone.utc) for day in (1, 2, 3)]
+    rows = [{"canonical_id": "kraken:BTC/USDT", "timestamp": day, "open": 1.0 + i,
+             "high": 2.0 + i, "low": 0.5 + i, "close": 1.5 + i, "volume": 10.0 + i,
+             "timeframe": "1d", "source": "kraken"} for i, day in enumerate(days)]
+    insert_ohlcv_batch(rows, db_path, parquet_dir=parquet_dir)
+
+    assert set(list_ohlcv_partitions(db_path)) == {("kraken", day.date()) for day in days}
+    assert verify_parquet_publication(db_path, parquet_dir=parquet_dir) == []
+
+    unreadable = parquet_dir / "source=kraken" / "date=2025-02-01" / "part-00000.parquet"
+    stale = parquet_dir / "source=kraken" / "date=2025-02-02" / "part-00000.parquet"
+    missing = parquet_dir / "source=kraken" / "date=2025-02-03" / "part-00000.parquet"
+    unreadable.write_bytes(b"not a real parquet file")
+    pq.write_table(pa.Table.from_pylist([{"canonical_id": "wrong", "timestamp": days[1],
+                    "open": 0.0, "high": 0.0, "low": 0.0, "close": 0.0, "volume": 0.0,
+                    "timeframe": "1d", "source": "kraken"}]), stale)
+    missing.unlink()
+
+    divergent = {(item["source"], item["partition_date"].isoformat()): item["status"]
+                 for item in verify_parquet_publication(db_path, parquet_dir=parquet_dir)}
+    assert divergent == {
+        ("kraken", "2025-02-01"): "unreadable",
+        ("kraken", "2025-02-02"): "stale",
+        ("kraken", "2025-02-03"): "missing",
+    }
+
+    repaired = {(item["source"], item["partition_date"].isoformat(), item["status"])
+                for item in repair_parquet_publication(db_path, parquet_dir=parquet_dir)}
+    assert repaired == {
+        ("kraken", "2025-02-01", "repaired"),
+        ("kraken", "2025-02-02", "repaired"),
+        ("kraken", "2025-02-03", "repaired"),
+    }
+    assert verify_parquet_publication(db_path, parquet_dir=parquet_dir) == []
+    assert len(read_ohlcv(db_path)) == 3
+
+    # Repair is deterministic and idempotent against an already-repaired store.
+    assert repair_parquet_publication(db_path, parquet_dir=parquet_dir) == []
+
+
+def test_insert_ohlcv_batch_publication_failure_leaves_db_committed_and_mechanically_recoverable(
+    tmp_path, monkeypatch,
+):
+    db_path = tmp_path / "publish-failure.duckdb"
+    parquet_dir = tmp_path / "parquet"
+    timestamp = datetime(2025, 3, 1, tzinfo=timezone.utc)
+    row = {"canonical_id": "kraken:ETH/USDT", "timestamp": timestamp, "open": 1.0,
+           "high": 2.0, "low": 0.5, "close": 1.5, "volume": 10.0, "timeframe": "1d",
+           "source": "kraken"}
+
+    def failing_replace(_src, _dst):
+        raise OSError("simulated filesystem publication failure")
+
+    monkeypatch.setattr("storage.db.os.replace", failing_replace)
+    with pytest.raises(OSError):
+        insert_ohlcv_batch([row], db_path, parquet_dir=parquet_dir)
+    monkeypatch.undo()
+
+    # The DuckDB write already committed before publication failed; it is
+    # the authoritative record and must not be treated as lost.
+    assert len(read_ohlcv(db_path)) == 1
+
+    divergent = verify_parquet_publication(db_path, parquet_dir=parquet_dir)
+    assert [(item["source"], item["status"]) for item in divergent] == [("kraken", "missing")]
+
+    repaired = repair_parquet_publication(db_path, parquet_dir=parquet_dir)
+    assert [(item["source"], item["status"]) for item in repaired] == [("kraken", "repaired")]
+    assert verify_parquet_publication(db_path, parquet_dir=parquet_dir) == []
+    assert list(parquet_dir.glob("source=kraken/date=2025-03-01/*.parquet"))

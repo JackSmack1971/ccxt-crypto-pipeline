@@ -3,7 +3,7 @@
 **Status:** Active execution authority for forward work  
 **Current phase:** Phase 5 research-grade data reliability
 **Baseline:** `main` at `d5041339688e25a81d2c0344754f1a2a58bd60a1`  
-**Last reconciled:** 2026-09-14
+**Last reconciled:** 2026-09-14 (Slice 5.5 closed)
 
 This file is the durable forward roadmap for `ccxt-crypto-pipeline`. It exists so a new agent can determine the repository's actual execution frontier without reconstructing intent from chat history, stale phase prose, or commit messages.
 
@@ -580,13 +580,44 @@ Evidence:
 
 ## Slice 5.5 — Two-store recovery protocol
 
-**Status:** ACTIVE
+**Status:** DONE
 
 Make DuckDB authoritative/cache semantics mechanically recoverable when Parquet publication diverges after a committed DB write.
 
 Acceptance includes a simulated publication failure and automated deterministic repair/rebuild.
 
+Evidence:
+
+- `storage/db.py` adds `list_ohlcv_partitions` (every `(source, date)` partition
+  the authoritative `ohlcv` table currently holds), `verify_parquet_publication`
+  (compares each partition's DuckDB content against its published Parquet
+  file and classifies it `missing`, `unreadable`, or `stale` without changing
+  anything), and `repair_parquet_publication` (rebuilds only the diverging
+  partitions from DuckDB using the same stage-to-temp-file-then-atomic-`os.replace`
+  sequence normal ingestion uses, so a crash mid-repair still leaves every
+  partition at either its prior or its fully repaired state). `insert_ohlcv_batch`
+  is unchanged in its committed-then-publish ordering; its exception path now
+  documents that a raised publication failure leaves DuckDB authoritative and
+  recoverable through this repair path rather than a lost write.
+- No `SCHEMA_VERSION` change was required: Parquet is fully derivable from the
+  authoritative DuckDB `ohlcv` rows, so recovery needed no new persisted
+  divergence-tracking state, consistent with the storage-schema-migration
+  skill's scope (persisted-contract changes only).
+- `python -m storage <db> --verify-parquet` and `--repair-parquet` expose the
+  same functions as an operator-facing CLI (`storage/__main__.py`), replacing
+  the prior manual "rerun the same ingestion write" guidance in
+  `docs/RUNBOOK.md`, which now documents the mechanical recovery commands.
+- `tests/test_storage.py` covers detecting missing, unreadable, and stale
+  partitions in one store; deterministic repair of all three; idempotent
+  repair against an already-repaired store; and a simulated `os.replace`
+  publication failure during `insert_ohlcv_batch` proving the DuckDB write
+  stays committed and is fully recoverable via `--repair-parquet` without
+  re-ingesting. The locked full suite passed with 123 tests; byte-compilation
+  and whitespace validation also passed.
+
 ## Slice 5.6 — Historical conversion/reference series
+
+**Status:** ACTIVE
 
 Generalize the Phase 4R quote-currency policy into reusable point-in-time reference series with provenance and coverage metrics.
 
@@ -762,15 +793,20 @@ For a fresh agent, the intended pickup sequence is:
 
 `AGENTS.md` → `ROADMAP.md` → active `docs/plans/phase-*.md` → relevant code/tests → Git history/status.
 
-The current frontier is **Phase 5.5 — Two-store recovery protocol**. Phase 5.4
-is DONE: the provider observation ledger now records quality facts at both
-the scheduled-job boundary and per-chain/per-program below it, and
-`analysis/alpha/eligibility.py` gives Phase 3 cohort construction a documented,
-offline gate over that evidence (see the Slice 5.4 evidence above). Phase 5.3
+The current frontier is **Phase 5.6 — Historical conversion/reference series**.
+Phase 5.5 is DONE: `storage/db.py` can detect and deterministically repair
+OHLCV Parquet partitions that diverge from the authoritative DuckDB `ohlcv`
+table after a committed write whose publication failed, exposed operator-side
+through `python -m storage <db> --verify-parquet`/`--repair-parquet` (see the
+Slice 5.5 evidence above). Phase 5.4 is DONE: the provider observation ledger
+records quality facts at both the scheduled-job boundary and per-chain/
+per-program below it, and `analysis/alpha/eligibility.py` gives Phase 3 cohort
+construction a documented, offline gate over that evidence. Phase 5.3
 establishes durable signature-based Solana replay after an explicit bounded
 bootstrap; credentialed live Helius compatibility remains unverified runtime
 evidence and is separate from the fixture-proven local contract.
 
-Slice 5.5 has not started. It needs a simulated Parquet-publication failure
-after a committed DuckDB write, and an automated, deterministic repair/rebuild
-path that restores the two stores' agreed authoritative/cache contract.
+Slice 5.6 has not started. It needs to generalize the Phase 4R quote-currency
+conversion policy (`analysis/alpha/labels.py`) into a reusable, point-in-time
+reference series contract with its own provenance and coverage metrics,
+usable beyond the label-boundary USD conversion it was originally scoped for.
