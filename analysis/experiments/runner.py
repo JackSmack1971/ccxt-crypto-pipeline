@@ -25,32 +25,33 @@ from typing import Any, Callable
 
 from analysis.alpha import (FeatureRegistry, PromotionEvidence, baseline_families, build_split,
                             compute_features, evaluate_candidate_promotion, extract_cohort,
-                            generate_labels, score_candidate, validate_temporal_alignment)
-from analysis.alpha.features import close_return_feature, launch_liquidity_feature
+                            feature_definition_id, feature_policy_versions, generate_labels,
+                            label_definition_id, resolve_feature_definition, score_candidate,
+                            validate_temporal_alignment)
 from analysis.datasets.snapshot import DatasetSnapshot
 
 from .spec import ExperimentSpec, experiment_spec_dict, experiment_spec_id
 
 MANIFEST_VERSION = "phase6-run-v1"
 
-# Only feature identities with an implemented, versioned definition may be
-# resolved. An experiment spec MAY declare a feature that does not exist yet;
-# the runner fails closed rather than silently substituting a different
-# computation.
-_FEATURE_FACTORIES: dict[str, Callable[[Any], Any]] = {
-    "launch_liquidity_usd": lambda split: launch_liquidity_feature(),
-    "lookback_return": lambda split: close_return_feature(timedelta(seconds=split.feature_lookback_seconds)),
-}
-
 
 def resolve_feature_registry(spec: ExperimentSpec) -> FeatureRegistry:
-    """Resolve the spec's declared feature identities to canonical definitions."""
-    unsupported = sorted(set(spec.feature_set) - set(_FEATURE_FACTORIES))
+    """Resolve the spec's declared feature identities to canonical, versioned
+    definitions through the durable ``analysis/alpha/registry.py`` catalog.
+
+    ``ExperimentSpec`` already rejects an unresolved feature identity at
+    construction time, so every name here is guaranteed to have a version in
+    the spec's declared policy; this stays a defensive re-check rather than
+    the sole gate.
+    """
+    versions = feature_policy_versions(spec.feature_policy_version)
+    unsupported = sorted(set(spec.feature_set) - set(versions))
     if unsupported:
         raise ValueError(f"unsupported experiment feature identity: {', '.join(unsupported)}")
     registry = FeatureRegistry()
     for name in spec.feature_set:
-        registry.register(_FEATURE_FACTORIES[name](spec.split))
+        registry.register(resolve_feature_definition(
+            name, versions[name], lookback=timedelta(seconds=spec.split.feature_lookback_seconds)))
     return registry
 
 
@@ -188,6 +189,13 @@ def run_experiment(spec: ExperimentSpec, snapshot: DatasetSnapshot, output_dir: 
     target = Path(output_dir) / run_id
     target.mkdir(parents=True, exist_ok=True)
 
+    definitions = {
+        "features": {feature.name: {"version": feature.version, "definition_id": feature_definition_id(feature)}
+                    for feature in registry.definitions()},
+        "labels": {label.horizon: {"version": label.version, "definition_id": label_definition_id(label)}
+                  for label in spec.labels},
+    }
+
     artifacts = {
         "spec.json": experiment_spec_dict(spec),
         "cohort.json": cohort,
@@ -197,6 +205,7 @@ def run_experiment(spec: ExperimentSpec, snapshot: DatasetSnapshot, output_dir: 
         "baselines.json": baselines,
         "candidate.json": candidate,
         "promotion.json": decision,
+        "definitions.json": definitions,
     }
     manifest = {"manifest_version": MANIFEST_VERSION, "run_id": run_id, "immutable": True,
                 "inputs": inputs, "artifacts": {name: hashlib.sha256(_dump(value)).hexdigest()

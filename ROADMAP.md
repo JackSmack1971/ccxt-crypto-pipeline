@@ -3,7 +3,7 @@
 **Status:** Active execution authority for forward work  
 **Current phase:** Phase 6 governed experiment control plane
 **Baseline:** `main` at `23dbd389af88cade4584cb5fdc10b60dc17fcc3b`
-**Last reconciled:** 2026-09-14 (Slice 6.2 closed; Slice 6.3 active)
+**Last reconciled:** 2026-09-14 (Slice 6.3 closed; Slice 6.4 active)
 
 This file is the durable forward roadmap for `ccxt-crypto-pipeline`. It exists so a new agent can determine the repository's actual execution frontier without reconstructing intent from chat history, stale phase prose, or commit messages.
 
@@ -832,11 +832,63 @@ Evidence:
 
 ## Slice 6.3 — Feature/label registry versioning
 
-**Status:** ACTIVE
+**Status:** DONE
 
 Give feature and label definitions durable identities, semantic versions, compatibility rules, and provenance hashes.
 
+Evidence:
+
+- `analysis/alpha/features.py` adds a required `version` field to
+  `FeatureDefinition` (fails closed on a blank version) and
+  `feature_definition_id`, a deterministic sha256 content hash over every
+  declared, hashable field (name, version, source columns, effective
+  timestamp, lookback, missing-value policy, allowed horizons, source
+  timestamp). The `compute` callable itself is intentionally excluded from
+  the hash: its behavior per (name, version) is governed by catalog
+  discipline rather than hashed Python code, the same pattern already used
+  for other Phase 3 config objects.
+- `analysis/alpha/labels.py` adds `LABEL_SEMANTIC_VERSIONS` (the currently
+  implemented semantic version of each horizon's tolerance/censoring
+  contract) and a required `version` field on `LabelDefinition` that must
+  match its horizon's implemented version, failing closed on an
+  unimplemented one. `label_definition_id` content-hashes a label's declared
+  semantic fields (name, version, horizon, quote currency, censoring
+  policy, unavailable treatment).
+- Every produced feature value and label row now carries its own resolved
+  `feature_version`/`feature_definition_id` or `label_version`/
+  `label_definition_id` in its provenance, so a value can be traced to the
+  exact versioned definition that produced it, not just a bare name.
+- `analysis/alpha/registry.py` adds the durable catalog layer: `FEATURE_POLICIES`
+  (named bundles of per-feature versions, e.g. `phase3-feature-v1`),
+  `resolve_feature_definition`/`feature_policy_versions` (fail closed on an
+  unknown policy or (name, version) pair), and `FEATURE_COMPATIBILITY`/
+  `LABEL_COMPATIBILITY` with `assert_feature_versions_compatible`/
+  `assert_label_versions_compatible` — compatibility fails closed by default
+  and only an explicit declared entry permits treating two versions of the
+  same name as comparable. Only `v1` of each feature/label exists today, so
+  no compatibility entry is populated yet; the assertions are exercised
+  directly by tests ahead of Slice 6.5's run-comparison consumer.
+- `analysis/experiments/spec.py` resolves `ExperimentSpec.feature_policy_version`
+  against the registry catalog at spec construction time, so an unresolved
+  feature identity now fails closed earlier (spec construction) rather than
+  only at runner resolution; `analysis/experiments/runner.py` resolves
+  features through the same catalog and writes a new `definitions.json` run
+  artifact recording the resolved version and content-addressed identity of
+  every feature and label the run actually used.
+- `tests/test_phase6.py` covers: feature/label version validation
+  (blank/unimplemented versions fail closed), deterministic content-hash
+  replay and change-on-version/change-on-censoring-policy, hash independence
+  from the `compute` callable, policy/catalog resolution success and
+  fail-closed cases, compatibility-assertion identity/undeclared-pair
+  behavior, per-row feature/label provenance carrying the resolved
+  identity, the earlier (spec-construction-time) unresolved-feature
+  rejection, and the new `definitions.json` run artifact. The locked full
+  suite passed with 193 tests (179 prior + 14 new); the storage migration
+  guard, byte-compilation, and whitespace validation also passed.
+
 ## Slice 6.4 — Hypothesis-family governance
+
+**Status:** ACTIVE
 
 Freeze multiplicity families before evaluation and prevent post-result silent redefinition.
 
@@ -984,7 +1036,7 @@ For a fresh agent, the intended pickup sequence is:
 
 `AGENTS.md` → `ROADMAP.md` → active `docs/plans/phase-*.md` → relevant code/tests → Git history/status.
 
-The current frontier is **Phase 6.1 — Experiment specification schema**.
+The current frontier is **Slice 6.4 — Hypothesis-family governance**.
 
 Phase 5 is DONE. Slice 5.7 closed the phase with
 `docs/plans/phase-5-data-plane-closure-matrix.md` and
@@ -1020,11 +1072,25 @@ significance evidence (`discovery_adjusted_p_value`/
 honestly reports `insufficient_evidence` until real multiplicity-family
 testing lands.
 
-Slice 6.3 has not started. It needs to give feature and label definitions
-(currently just Python constructors in `analysis/alpha/features.py` and
-`analysis/alpha/labels.py`, referenced by bare name strings from
-`ExperimentSpec.feature_set`/`LabelDefinition`) durable identities, semantic
-versions, compatibility rules, and provenance hashes, so a run manifest can
-prove exactly which versioned feature/label definition produced its values
-rather than trusting an unversioned name-to-constructor mapping such as the
-one `resolve_feature_registry` introduced in Slice 6.2.
+Slice 6.3 is DONE. `analysis/alpha/features.py` and `analysis/alpha/labels.py`
+now require a `version` on every `FeatureDefinition`/`LabelDefinition` (a
+label's version must match its horizon's implemented semantic version) and
+expose `feature_definition_id`/`label_definition_id`, deterministic
+content hashes of each definition's declared semantic fields, recorded on
+every produced feature/label row's own provenance. `analysis/alpha/registry.py`
+adds the durable catalog (`FEATURE_POLICIES`, `resolve_feature_definition`,
+`feature_policy_versions`) that replaced the ad hoc bare-name-to-constructor
+mapping `resolve_feature_registry` used in Slice 6.2, plus
+`assert_feature_versions_compatible`/`assert_label_versions_compatible`,
+which fail closed on any undeclared cross-version comparison so Slice 6.5's
+run-comparison contract has a compatibility rule to enforce rather than
+having to invent one. `ExperimentSpec` now resolves `feature_policy_version`
+against this catalog at construction time, and every experiment run writes
+a `definitions.json` artifact recording the resolved version and
+content-addressed identity of every feature/label the run actually used.
+
+Slice 6.4 has not started. It needs to freeze each experiment's
+`HypothesisFamily` grid (already declared and content-identified by Slice
+6.1, but not yet enforced against post-hoc redefinition) before evaluation,
+so a discovery/confirmation correction cannot be recomputed over a silently
+widened or narrowed hypothesis set after results are seen.
