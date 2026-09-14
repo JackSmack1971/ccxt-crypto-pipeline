@@ -4,7 +4,11 @@ from datetime import datetime, timedelta
 
 import pytest
 
-from analysis.alpha import CohortConfig, LabelDefinition, PromotionPolicy
+from analysis.alpha import (CohortConfig, FeatureDefinition, LabelDefinition, PromotionPolicy,
+                            assert_feature_versions_compatible, assert_label_versions_compatible,
+                            compute_features, extract_cohort, feature_definition_id,
+                            feature_policy_versions, generate_labels, label_definition_id,
+                            resolve_feature_definition)
 from analysis.datasets import Asset, Bar, DatasetPolicy, DatasetSnapshot
 from analysis.experiments import (BaselinePolicy, CandidateDefinition, CostPolicy,
                                   ExperimentSpec, HypothesisFamily, SPEC_VERSION, SplitPolicy,
@@ -249,7 +253,15 @@ def test_runner_executes_the_declared_sequence_and_honestly_withholds_significan
     assert set(manifest["artifacts"]) == {
         "spec.json", "cohort.json", "features.json", "labels.json",
         "split.json", "baselines.json", "candidate.json", "promotion.json",
+        "definitions.json",
     }
+
+    definitions = json.loads((run / "definitions.json").read_text())
+    assert definitions["features"]["launch_liquidity_usd"]["version"] == "v1"
+    assert definitions["features"]["lookback_return"]["version"] == "v1"
+    assert definitions["labels"]["24h"]["version"] == "v1"
+    assert all(len(entry["definition_id"]) == 24
+              for family in definitions.values() for entry in family.values())
 
 
 def test_runner_replay_is_byte_identical(tmp_path):
@@ -268,12 +280,14 @@ def test_runner_run_identity_changes_with_the_spec(tmp_path):
 
 
 def test_runner_rejects_an_unresolved_feature_identity(tmp_path):
-    spec = runner_spec(feature_set=("launch_liquidity_usd", "holder_count_growth"),
-                       hypothesis_family=HypothesisFamily(
-                           name="x", features=("launch_liquidity_usd", "holder_count_growth"),
-                           thresholds=(">=p75",), horizons=("24h",)))
+    # ExperimentSpec now fails closed on an unresolved feature identity at
+    # construction time via the durable registry catalog, before a runner
+    # ever gets to resolve it.
     with pytest.raises(ValueError, match="unsupported experiment feature identity: holder_count_growth"):
-        resolve_feature_registry(spec)
+        runner_spec(feature_set=("launch_liquidity_usd", "holder_count_growth"),
+                   hypothesis_family=HypothesisFamily(
+                       name="x", features=("launch_liquidity_usd", "holder_count_growth"),
+                       thresholds=(">=p75",), horizons=("24h",)))
 
 
 def test_runner_rejects_an_unsupported_selection_rule(tmp_path):
@@ -291,3 +305,97 @@ def test_runner_selection_threshold_is_computed_within_the_discovery_partition_o
     # 20k/30k/40k/50k); a >=p75 threshold over just that partition selects
     # only the 50k token, never a validation/holdout launch.
     assert candidate["independent_launches"] == 1
+
+
+# --- Slice 6.3: feature/label registry versioning ---------------------------
+
+def test_feature_definition_requires_a_version():
+    with pytest.raises(ValueError, match="requires a version"):
+        FeatureDefinition("x", ("col",), "t0", timedelta(0), version=" ")
+
+
+def test_feature_definition_id_is_deterministic_and_changes_with_version():
+    base = FeatureDefinition("x", ("col",), "t0", timedelta(0))
+    same = FeatureDefinition("x", ("col",), "t0", timedelta(0))
+    bumped = FeatureDefinition("x", ("col",), "t0", timedelta(0), version="v2")
+    assert feature_definition_id(base) == feature_definition_id(same)
+    assert feature_definition_id(base) != feature_definition_id(bumped)
+
+
+def test_feature_definition_id_ignores_the_compute_callable():
+    # The catalog, not the raw dataclass, governs compute behavior per
+    # version; two definitions with identical declared metadata but
+    # different compute functions still share an identity, so a version bump
+    # is the only supported way to signal a behavior change.
+    declared = dict(name="x", source_columns=("col",), effective_timestamp="t0", lookback=timedelta(0))
+    a = FeatureDefinition(**declared, compute=lambda member, bars: 1)
+    b = FeatureDefinition(**declared, compute=lambda member, bars: 2)
+    assert feature_definition_id(a) == feature_definition_id(b)
+
+
+def test_label_definition_rejects_unimplemented_version():
+    with pytest.raises(ValueError, match="unsupported label semantic version"):
+        LabelDefinition("return_24h", "24h", version="v2")
+
+
+def test_label_definition_id_is_deterministic_and_changes_with_censoring_policy():
+    base = LabelDefinition("return_24h", "24h")
+    same = LabelDefinition("return_24h", "24h")
+    changed = replace(base, censoring_policy="custom_policy")
+    assert label_definition_id(base) == label_definition_id(same)
+    assert label_definition_id(base) != label_definition_id(changed)
+
+
+def test_feature_policy_versions_resolves_a_known_policy():
+    versions = feature_policy_versions("phase3-feature-v1")
+    assert versions == {"launch_liquidity_usd": "v1", "lookback_return": "v1"}
+
+
+def test_feature_policy_versions_fails_closed_on_an_unknown_policy():
+    with pytest.raises(ValueError, match="unsupported feature policy version"):
+        feature_policy_versions("made-up-policy")
+
+
+def test_resolve_feature_definition_fails_closed_on_an_unknown_pair():
+    with pytest.raises(ValueError, match="unsupported feature identity: launch_liquidity_usd@v9"):
+        resolve_feature_definition("launch_liquidity_usd", "v9")
+
+
+def test_assert_feature_versions_compatible_allows_identical_versions():
+    assert_feature_versions_compatible("launch_liquidity_usd", "v1", "v1")
+
+
+def test_assert_feature_versions_compatible_fails_closed_on_undeclared_pair():
+    with pytest.raises(ValueError, match="incompatible feature versions"):
+        assert_feature_versions_compatible("launch_liquidity_usd", "v1", "v2")
+
+
+def test_assert_label_versions_compatible_allows_identical_versions():
+    assert_label_versions_compatible("24h", "v1", "v1")
+
+
+def test_assert_label_versions_compatible_fails_closed_on_undeclared_pair():
+    with pytest.raises(ValueError, match="incompatible label versions"):
+        assert_label_versions_compatible("24h", "v1", "v2")
+
+
+def test_feature_row_provenance_carries_the_resolved_definition_identity():
+    spec = runner_spec()
+    snapshot = runner_snapshot()
+    registry = resolve_feature_registry(spec)
+    definition = registry.get("launch_liquidity_usd")
+    cohort = extract_cohort(snapshot, spec.cohort)
+    feature_rows = compute_features(snapshot, cohort, registry)
+    provenance = feature_rows[0]["feature_provenance"]["launch_liquidity_usd"]
+    assert provenance["feature_version"] == "v1"
+    assert provenance["feature_definition_id"] == feature_definition_id(definition)
+
+
+def test_label_row_provenance_carries_the_definition_identity():
+    spec = runner_spec()
+    snapshot = runner_snapshot()
+    cohort = extract_cohort(snapshot, spec.cohort)
+    label = spec.labels[0]
+    rows = generate_labels(snapshot, cohort, label)
+    assert rows[0].provenance["label_version"] == "v1"
+    assert rows[0].provenance["label_definition_id"] == label_definition_id(label)

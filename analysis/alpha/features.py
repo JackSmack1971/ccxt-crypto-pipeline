@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import hashlib
+import json
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import Any, Callable
@@ -17,10 +19,34 @@ class FeatureDefinition:
     allowed_horizons: tuple[str, ...] = ()
     compute: Callable[[Any, tuple[Any, ...]], Any] | None = None
     source_timestamp: str | None = None
+    version: str = "v1"
 
     def __post_init__(self):
         if self.missing_value_policy not in {"unknown", "zero", "reject"}: raise ValueError("unsupported missing-value policy")
         if self.lookback.total_seconds() < 0: raise ValueError("lookback must be non-negative")
+        if not self.version.strip(): raise ValueError("feature definition requires a version")
+
+
+def feature_definition_id(definition: FeatureDefinition) -> str:
+    """Content-addressed identity for a resolved feature definition.
+
+    Covers every declared, hashable field except ``compute``: the executable
+    behavior behind a (name, version) pair is governed by catalog discipline
+    in ``analysis/alpha/registry.py`` (a version bump is required whenever a
+    catalog entry's compute behavior changes), the same pattern already used
+    for other Phase 3 config objects that version behavior without hashing
+    Python code directly.
+    """
+    payload = {
+        "name": definition.name, "version": definition.version,
+        "source_columns": definition.source_columns,
+        "effective_timestamp": definition.effective_timestamp,
+        "lookback_seconds": definition.lookback.total_seconds(),
+        "missing_value_policy": definition.missing_value_policy,
+        "allowed_horizons": definition.allowed_horizons,
+        "source_timestamp": definition.source_timestamp,
+    }
+    return hashlib.sha256((json.dumps(payload, sort_keys=True, separators=(",", ":")) + "\n").encode()).hexdigest()[:24]
 
 class FeatureRegistry:
     def __init__(self): self._items: dict[str, FeatureDefinition] = {}
@@ -55,6 +81,7 @@ def compute_features(snapshot: DatasetSnapshot, cohort: tuple[Any, ...], registr
                 "lookback_seconds": definition.lookback.total_seconds(), "missing_value_policy": definition.missing_value_policy,
                 "allowed_horizons": definition.allowed_horizons, "observation_count": len(bars),
                 "coverage": values["coverage"][definition.name],
+                "feature_version": definition.version, "feature_definition_id": feature_definition_id(definition),
             }
             if definition.source_timestamp is not None:
                 values["feature_provenance"][definition.name]["source_timestamp"] = as_time(definition.source_timestamp).isoformat()
