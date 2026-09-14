@@ -1,9 +1,9 @@
 # Engineering Roadmap
 
 **Status:** Active execution authority for forward work  
-**Current phase:** Phase 5 research-grade data reliability
-**Baseline:** `main` at `2948a28520ed6e05d9ecfd78d110690a9c50a2cc`
-**Last reconciled:** 2026-09-14 (Slice 5.6 closed)
+**Current phase:** Phase 6 governed experiment control plane
+**Baseline:** `main` at `23dbd389af88cade4584cb5fdc10b60dc17fcc3b`
+**Last reconciled:** 2026-09-14 (Slice 5.7 closed; Phase 5 complete)
 
 This file is the durable forward roadmap for `ccxt-crypto-pipeline`. It exists so a new agent can determine the repository's actual execution frontier without reconstructing intent from chat history, stale phase prose, or commit messages.
 
@@ -663,19 +663,71 @@ Evidence:
 
 ## Slice 5.7 — Data-plane closure matrix
 
-**Status:** ACTIVE
+**Status:** DONE
 
 Demonstrate restart, gap detection, reorg/recovery, multi-source selection, historical metadata/lineage, and price/conversion replay across representative chains.
+
+Evidence:
+
+- `docs/plans/phase-5-data-plane-closure-matrix.md` freezes the executable
+  Phase 5 data-plane contract: durable EVM cursor restart, EVM/Solana gap
+  detection failing closed, EVM reorg reconciliation, Solana resumable
+  multi-page discovery, the provider observation ledger and offline quality
+  summary, the research-eligibility gate, DuckDB/Parquet recovery, and
+  reference-series-backed conversion replay, each with executable evidence
+  and status.
+- `tests/test_phase5_closure.py` adds no new production behavior. It proves
+  the Slice 5.1-5.6 guarantees compose in one local, offline dataset across
+  two representative chains: durable-cursor EVM restart composes with reorg
+  reconciliation and rejects a subsequent skipped range
+  (`test_evm_cursor_restart_and_reorg_compose_and_gap_detection_fails_closed`);
+  Solana's durable-signature discovery fails closed on an unreachable
+  checkpoint without advancing progress
+  (`test_solana_gap_detection_fails_closed_without_advancing_progress`); and
+  the full composed flow denies socket creation while threading Solana's
+  resumable multi-page discovery, a research-eligibility gate computed from
+  real persisted provider-quality rows (two healthy representative chains
+  plus one never-observed chain failing closed), a detected-and-repaired
+  Parquet publication gap, and ETH/USD- and SOL/USD-backed forward-return
+  labels sourced purely from persisted reference series, through the real
+  Phase 1 storage boundary into Phase 3 cohort extraction and label
+  generation for both chains
+  (`test_phase5_data_plane_closure_across_representative_evm_and_solana_chains`).
+  That same test also proves a malformed/unresolved event identity (the
+  Solana listener's own real transaction shape, which carries no
+  address-identifying key the cohort rule recognizes) is retained as an
+  explicit exclusion rather than silently collapsed onto the resolved token.
+- The closure matrix doc records one deliberate scope boundary: EVM
+  `chain_reorg_detected` audit events are canonical-id-scoped to a synthetic
+  block identity, not a persisted asset, so composing them into the same
+  store `DatasetSnapshot.from_duckdb` loads would trip its existing
+  unknown-asset-identity validation -- a Phase 1/3 integrity guarantee this
+  slice preserves rather than weakens. EVM restart/reorg/gap-detection is
+  therefore proven in an isolated store, and only the resulting
+  provider-quality outcome (exactly what `Pipeline.evm_listeners` itself
+  records) feeds the composed research dataset. No mandatory Slice 5.1-5.6
+  acceptance criterion required otherwise, and no existing behavior changed.
+- The locked full suite passed with 130 tests (127 prior + 3 new); the
+  storage migration guard, byte-compilation, and whitespace validation also
+  passed.
+
+Phase 5 is **DONE**: every Slice 5.1-5.7 acceptance criterion is satisfied by
+executable, offline fixture evidence, and the composed closure matrix proves
+those guarantees hold together rather than only in isolation. Live-provider
+acceptance and production-scale longitudinal sample adequacy remain
+explicitly out of scope and separately blocked, per the closure matrix doc.
 
 ---
 
 # Phase 6 — Governed Experiment Control Plane
 
-**Status:** PLANNED  
-**Depends on:** Phase 5 data contracts stable.  
+**Status:** ACTIVE
+**Depends on:** Phase 5 data contracts stable (DONE -- see Phase 5 above).
 **Goal:** Make a complete research experiment a first-class, versioned, reproducible object rather than a composition of manually invoked helpers.
 
 ## Slice 6.1 — Experiment specification schema
+
+**Status:** ACTIVE
 
 Version cohort, feature, label, split, hypothesis family, correction policy, candidate definition, costs, baselines, and code/config identities in one declarative experiment spec.
 
@@ -835,31 +887,28 @@ For a fresh agent, the intended pickup sequence is:
 
 `AGENTS.md` → `ROADMAP.md` → active `docs/plans/phase-*.md` → relevant code/tests → Git history/status.
 
-The current frontier is **Phase 5.7 — Data-plane closure matrix**.
-Slice 5.6 is DONE: schema version 12's `reference_series` table gives the
-Phase 4R quote-currency conversion policy a reusable, persisted, point-in-time
-contract with its own provenance (`upsert_reference_series_observation`) and
-offline coverage metrics (`reference_series_coverage_summary`), exposed to
-analysis through `DatasetSnapshot.reference_series_at` and wired into
-`analysis/alpha/labels.py` conversion lookups alongside the pre-existing
-explicit-observation path (see the Slice 5.6 evidence above). Phase 5.5 is
-DONE: `storage/db.py` can detect and deterministically repair OHLCV Parquet
-partitions that diverge from the authoritative DuckDB `ohlcv` table after a
-committed write whose publication failed, exposed operator-side through
-`python -m storage <db> --verify-parquet`/`--repair-parquet` (see the
-Slice 5.5 evidence above). Phase 5.4 is DONE: the provider observation ledger
-records quality facts at both the scheduled-job boundary and per-chain/
-per-program below it, and `analysis/alpha/eligibility.py` gives Phase 3 cohort
-construction a documented, offline gate over that evidence. Phase 5.3
-establishes durable signature-based Solana replay after an explicit bounded
-bootstrap; credentialed live Helius compatibility remains unverified runtime
-evidence and is separate from the fixture-proven local contract.
+The current frontier is **Phase 6.1 — Experiment specification schema**.
 
-Slice 5.7 has not started. It needs to demonstrate, across representative
-chains and with fixture-only evidence, the composed data-plane guarantees
-Phase 5 has now built: durable-cursor restart replay (5.1), EVM reorg
+Phase 5 is DONE. Slice 5.7 closed the phase with
+`docs/plans/phase-5-data-plane-closure-matrix.md` and
+`tests/test_phase5_closure.py`, proving the composed data-plane guarantees
+Phase 5 built hold together across two representative chains rather than
+only in isolation: durable-cursor restart replay (5.1), EVM reorg
 detection/recovery (5.2), Solana resumable/complete discovery (5.3), provider
 quality/eligibility gating (5.4), DuckDB/Parquet recovery (5.5), and
-historical/reference-series-backed conversion replay (5.6) -- one closure
-matrix in the style of the Phase 3/Phase 4 acceptance matrices under
-`docs/plans/`, rather than new behavioral surface.
+historical/reference-series-backed conversion replay (5.6), plus explicit
+gap-detection fail-closed paths for both EVM and Solana (see the Slice 5.7
+evidence above). Live-provider acceptance (credentialed EVM RPC and Helius)
+and production-scale longitudinal sample adequacy remain explicitly
+out of scope and separately blocked, per the closure matrix doc.
+
+Slice 6.1 has not started. It needs a versioned, declarative experiment
+specification schema covering cohort, feature, label, split, hypothesis
+family, correction policy, candidate definition, costs, baselines, and
+code/config identities in one object, per `AGENTS.md`'s Phase 3 architecture
+and the Phase 4R/5 provenance invariants this repository already enforces.
+Read the Phase 3 (`analysis/alpha/`) module boundaries and existing
+`write_research_run`/handoff manifests before designing the schema, since
+Phase 6 must not duplicate or bypass those already-governed contracts --
+it makes the composition of manually invoked Phase 3 helpers into a single
+first-class reproducible object, not a second research engine.
