@@ -37,6 +37,12 @@ class EVMRPCClient:
     def latest_block(self) -> int:
         return int(self.call("eth_blockNumber", []), 16)
 
+    def get_block(self, block_number: int) -> dict[str, Any]:
+        block = self.call("eth_getBlockByNumber", [hex(block_number), False]) or {}
+        if not block.get("hash") or not block.get("parentHash"):
+            raise RPCError(f"missing canonical identity for block {block_number}")
+        return block
+
     def get_factory_logs(self, factories: list[dict[str, str]], from_block: int, to_block: int) -> list[dict[str, Any]]:
         logs: list[dict[str, Any]] = []
         for factory in factories:

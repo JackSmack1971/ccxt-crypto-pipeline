@@ -154,13 +154,16 @@ def insert_event(event: Mapping[str, Any], db_path: str | Path | None = None, *,
             payload = json.dumps(payload, default=str, sort_keys=True)
         conn.execute(
             """INSERT INTO events
-            SELECT ?, ?, ?, ?, ?
+            SELECT ?, ?, ?, ?, ?, ?, ?, true
             WHERE NOT EXISTS (
                 SELECT 1 FROM events
                 WHERE canonical_id = ? AND event_type = ? AND timestamp = ? AND source = ?
+                  AND COALESCE(block_hash, '') = COALESCE(?, '')
             )""",
             [event["canonical_id"], event["event_type"], event["timestamp"], payload,
-             event["source"], event["canonical_id"], event["event_type"], event["timestamp"], event["source"]],
+             event["source"], event.get("block_number"), event.get("block_hash"),
+             event["canonical_id"], event["event_type"], event["timestamp"], event["source"],
+             event.get("block_hash")],
         )
     finally:
         _finish(conn, owned)
@@ -310,6 +313,65 @@ def advance_ingestion_cursor(source: str, scope: str, position: int,
         _finish(conn, owned)
 
 
+def record_evm_block_observation(chain: str, block_number: int, block_hash: str,
+                                 parent_hash: str, db_path: str | Path | None = None, *,
+                                 observed_at: datetime | None = None, run_id: str | None = None,
+                                 connection=None) -> list[dict[str, Any]]:
+    """Record a canonical block and retain any hashes it replaces as reorg evidence."""
+    if not chain or not block_hash or not parent_hash:
+        raise ValueError("chain, block hash, and parent hash are required")
+    if isinstance(block_number, bool) or not isinstance(block_number, int) or block_number < 0:
+        raise ValueError("block number must be a non-negative integer")
+    conn, owned = _connection(db_path, connection)
+    try:
+        conn.execute("BEGIN TRANSACTION")
+        cursor = conn.execute(
+            """SELECT block_hash, parent_hash FROM evm_block_observations
+               WHERE chain = ? AND block_number = ? AND canonical
+               ORDER BY block_hash""", [chain, block_number]
+        )
+        replaced = [dict(zip([column[0] for column in cursor.description], row))
+                    for row in cursor.fetchall() if row[0] != block_hash]
+        predecessor = conn.execute(
+            """SELECT block_hash FROM evm_block_observations
+               WHERE chain = ? AND block_number = ? AND canonical""",
+            [chain, block_number - 1],
+        ).fetchone()
+        if predecessor is not None and predecessor[0] != parent_hash:
+            raise ValueError(
+                f"non-canonical parent for {chain} block {block_number}: "
+                f"expected {predecessor[0]}, found {parent_hash}"
+            )
+        conn.execute(
+            """UPDATE evm_block_observations SET canonical = false
+               WHERE chain = ? AND block_number = ? AND block_hash <> ? AND canonical""",
+            [chain, block_number, block_hash],
+        )
+        for old in replaced:
+            conn.execute(
+                """UPDATE events SET canonical = false
+                   WHERE source = 'evm_rpc' AND split_part(canonical_id, ':', 1) = ?
+                     AND block_number = ? AND block_hash = ? AND canonical""",
+                [chain, block_number, old["block_hash"]],
+            )
+        conn.execute(
+            """INSERT INTO evm_block_observations VALUES (?, ?, ?, ?, ?, true, ?)
+               ON CONFLICT (chain, block_number, block_hash) DO UPDATE SET
+                   parent_hash = excluded.parent_hash,
+                   observed_at = excluded.observed_at,
+                   canonical = true,
+                   run_id = excluded.run_id""",
+            [chain, block_number, block_hash, parent_hash, observed_at or datetime.now(), run_id],
+        )
+        conn.execute("COMMIT")
+        return replaced
+    except Exception:
+        conn.execute("ROLLBACK")
+        raise
+    finally:
+        _finish(conn, owned)
+
+
 def _read(table: str, db_path: str | Path | None = None, *, connection=None) -> list[dict[str, Any]]:
     conn, owned = _connection(db_path, connection)
     try:
@@ -321,7 +383,14 @@ def _read(table: str, db_path: str | Path | None = None, *, connection=None) -> 
 
 def read_assets(db_path=None, *, connection=None): return _read("assets", db_path, connection=connection)
 def read_ohlcv(db_path=None, *, connection=None): return _read("ohlcv", db_path, connection=connection)
-def read_events(db_path=None, *, connection=None): return _read("events", db_path, connection=connection)
+def read_events(db_path=None, *, connection=None):
+    conn, owned = _connection(db_path, connection)
+    try:
+        cursor = conn.execute("SELECT * FROM events WHERE canonical ORDER BY timestamp, canonical_id, event_type, source")
+        return [dict(zip([column[0] for column in cursor.description], row)) for row in cursor.fetchall()]
+    finally:
+        _finish(conn, owned)
+def read_event_history(db_path=None, *, connection=None): return _read("events", db_path, connection=connection)
 def read_metadata(db_path=None, *, connection=None):
     conn, owned = _connection(db_path, connection)
     try:
@@ -335,6 +404,14 @@ def read_ingestion_cursors(db_path=None, *, connection=None):
     try:
         cursor = conn.execute("""SELECT * FROM ingestion_cursors
                                ORDER BY source, scope""")
+        return [dict(zip([column[0] for column in cursor.description], row)) for row in cursor.fetchall()]
+    finally:
+        _finish(conn, owned)
+def read_evm_block_observations(db_path=None, *, connection=None):
+    conn, owned = _connection(db_path, connection)
+    try:
+        cursor = conn.execute("""SELECT * FROM evm_block_observations
+                               ORDER BY chain, block_number, block_hash""")
         return [dict(zip([column[0] for column in cursor.description], row)) for row in cursor.fetchall()]
     finally:
         _finish(conn, owned)

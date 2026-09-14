@@ -185,7 +185,7 @@ class DatasetSnapshot:
             ).fetchall())
             events = tuple(dict(zip(("canonical_id", "event_type", "timestamp", "payload_json", "source"), row))
                            for row in conn.execute("SELECT canonical_id, event_type, timestamp, payload_json, source "
-                                                   "FROM events ORDER BY timestamp, canonical_id, event_type, source").fetchall())
+                                                   "FROM events WHERE canonical ORDER BY timestamp, canonical_id, event_type, source").fetchall())
             for event in events:
                 event["timestamp"] = _time(event["timestamp"])
             lineage = tuple(dict(zip(("dex_canonical_id", "cex_canonical_id", "linked_at"), row))

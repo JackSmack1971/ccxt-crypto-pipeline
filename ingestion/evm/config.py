@@ -23,5 +23,6 @@ def load_chain(chain: str, root: Path = ROOT) -> dict[str, Any]:
         if item.get("name") == chain:
             if "chain_id" not in item or "rpc_env" not in item:
                 raise ValueError(f"chain {chain!r} is not an EVM network")
-            return item
+            return {**{key: data[key] for key in ("confirmation_depth", "reorg_lookback_blocks")
+                       if key in data}, **item}
     raise KeyError(f"unknown EVM chain {chain!r}")
