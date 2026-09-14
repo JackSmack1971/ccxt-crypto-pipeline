@@ -121,30 +121,136 @@ def insert_ohlcv_batch(rows: Iterable[Mapping[str, Any]], db_path: str | Path | 
             conn.execute("ROLLBACK")
         for temporary, _final in staged:
             Path(temporary).unlink(missing_ok=True)
+        # DuckDB is authoritative. When `committed` is true here, the raised
+        # partition(s) failed to publish *after* the DB write already landed,
+        # so the two stores now diverge -- `repair_parquet_publication` below
+        # is the durable, mechanical recovery path for that state; callers
+        # MUST NOT reinterpret this exception as a lost write.
         raise
     finally:
         _finish(conn, owned)
+
+
+def _partition_dir(root: Path, source: str, partition_date: date) -> Path:
+    if not _SAFE_PARTITION_VALUE.fullmatch(str(source)):
+        raise ValueError("source must contain only safe partition characters")
+    return root / f"source={source}" / f"date={partition_date.isoformat()}"
+
+
+def _partition_file(root: Path, source: str, partition_date: date) -> Path:
+    return _partition_dir(root, source, partition_date) / "part-00000.parquet"
+
+
+def _select_ohlcv_partition_table(conn, source: str, partition_date: date) -> pa.Table:
+    result = conn.execute(
+        """SELECT canonical_id, timestamp, open, high, low, close, volume, timeframe, source
+        FROM ohlcv WHERE source = ? AND CAST(timestamp AS DATE) = ?
+        ORDER BY canonical_id, timestamp, timeframe""", [source, partition_date]
+    ).fetchall()
+    return pa.Table.from_pylist([dict(zip(_OHLCV_COLUMNS, row)) for row in result])
+
+
+def _stage_partition_file(table: pa.Table, final: Path) -> Path:
+    final.parent.mkdir(parents=True, exist_ok=True)
+    temporary = final.parent / f".{final.name}.{uuid.uuid4().hex}.tmp"
+    pq.write_table(table, temporary)
+    return temporary
 
 
 def _write_ohlcv_partitions(conn, rows: list[Mapping[str, Any]], root: Path) -> list[tuple[Path, Path]]:
     partitions = {(row["source"], _as_date(row["timestamp"])) for row in rows}
     staged = []
     for source, partition_date in partitions:
-        if not _SAFE_PARTITION_VALUE.fullmatch(str(source)):
-            raise ValueError("source must contain only safe partition characters")
-        result = conn.execute(
-            """SELECT canonical_id, timestamp, open, high, low, close, volume, timeframe, source
-            FROM ohlcv WHERE source = ? AND CAST(timestamp AS DATE) = ?
-            ORDER BY canonical_id, timestamp, timeframe""", [source, partition_date]
-        ).fetchall()
-        table = pa.Table.from_pylist([dict(zip(_OHLCV_COLUMNS, row)) for row in result])
-        partition = root / f"source={source}" / f"date={partition_date.isoformat()}"
-        partition.mkdir(parents=True, exist_ok=True)
-        final = partition / "part-00000.parquet"
-        temporary = partition / f".{final.name}.{uuid.uuid4().hex}.tmp"
-        pq.write_table(table, temporary)
+        final = _partition_file(root, source, partition_date)
+        table = _select_ohlcv_partition_table(conn, source, partition_date)
+        temporary = _stage_partition_file(table, final)
         staged.append((temporary, final))
     return staged
+
+
+def list_ohlcv_partitions(db_path: str | Path | None = None, *, connection=None) -> list[tuple[str, date]]:
+    """Return every (source, partition date) the authoritative OHLCV table currently holds."""
+    conn, owned = _connection(db_path, connection)
+    try:
+        cursor = conn.execute("SELECT DISTINCT source, CAST(timestamp AS DATE) FROM ohlcv ORDER BY 1, 2")
+        return [(row[0], row[1]) for row in cursor.fetchall()]
+    finally:
+        _finish(conn, owned)
+
+
+def _resolve_parquet_dir(db_path: str | Path | None, parquet_dir: str | Path | None) -> Path:
+    if parquet_dir is None and db_path is not None:
+        parquet_dir = Path(db_path).parent / "parquet"
+    if parquet_dir is None:
+        raise ValueError("parquet_dir or db_path is required")
+    return Path(parquet_dir)
+
+
+def verify_parquet_publication(db_path: str | Path | None = None, *, parquet_dir: str | Path | None = None,
+                               connection=None) -> list[dict[str, Any]]:
+    """Compare every authoritative OHLCV partition against its published Parquet file.
+
+    DuckDB is authoritative; Parquet is a derived publication cache. A
+    partition diverges when its file is missing, unreadable, or its content
+    does not match what DuckDB currently holds for that (source, date)
+    partition -- the state a partial `insert_ohlcv_batch` publication
+    failure leaves behind once its DB write has already committed.
+    """
+    conn, owned = _connection(db_path, connection)
+    root = _resolve_parquet_dir(db_path, parquet_dir)
+    try:
+        divergent = []
+        for source, partition_date in list_ohlcv_partitions(connection=conn):
+            expected = _select_ohlcv_partition_table(conn, source, partition_date)
+            final = _partition_file(root, source, partition_date)
+            if not final.exists():
+                divergent.append({"source": source, "partition_date": partition_date,
+                                  "status": "missing", "path": str(final)})
+                continue
+            try:
+                actual = pq.read_table(final)
+            except Exception:
+                divergent.append({"source": source, "partition_date": partition_date,
+                                  "status": "unreadable", "path": str(final)})
+                continue
+            if not expected.equals(actual):
+                divergent.append({"source": source, "partition_date": partition_date,
+                                  "status": "stale", "path": str(final)})
+        return divergent
+    finally:
+        _finish(conn, owned)
+
+
+def repair_parquet_publication(db_path: str | Path | None = None, *, parquet_dir: str | Path | None = None,
+                               connection=None) -> list[dict[str, Any]]:
+    """Deterministically rebuild every Parquet partition that diverges from DuckDB.
+
+    Each divergent partition is regenerated in full from the authoritative
+    OHLCV rows and published with the same stage-then-atomic-replace
+    sequence normal ingestion uses, so a crash mid-repair still leaves every
+    partition at either its prior state or its fully repaired state -- never
+    a torn file. Repair is idempotent: repeated calls against an already
+    repaired store return an empty list.
+    """
+    conn, owned = _connection(db_path, connection)
+    root = _resolve_parquet_dir(db_path, parquet_dir)
+    try:
+        divergent = verify_parquet_publication(connection=conn, parquet_dir=root)
+        repaired = []
+        for item in divergent:
+            source, partition_date = item["source"], item["partition_date"]
+            final = _partition_file(root, source, partition_date)
+            table = _select_ohlcv_partition_table(conn, source, partition_date)
+            temporary = _stage_partition_file(table, final)
+            try:
+                os.replace(temporary, final)
+            except Exception:
+                Path(temporary).unlink(missing_ok=True)
+                raise
+            repaired.append({**item, "status": "repaired"})
+        return repaired
+    finally:
+        _finish(conn, owned)
 
 
 def _as_date(value: date | datetime | str) -> date:
