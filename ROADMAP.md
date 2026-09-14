@@ -3,7 +3,7 @@
 **Status:** Active execution authority for forward work  
 **Current phase:** Phase 6 governed experiment control plane
 **Baseline:** `main` at `23dbd389af88cade4584cb5fdc10b60dc17fcc3b`
-**Last reconciled:** 2026-09-14 (Slice 6.1 closed; Slice 6.2 active)
+**Last reconciled:** 2026-09-14 (Slice 6.2 closed; Slice 6.3 active)
 
 This file is the durable forward roadmap for `ccxt-crypto-pipeline`. It exists so a new agent can determine the repository's actual execution frontier without reconstructing intent from chat history, stale phase prose, or commit messages.
 
@@ -785,11 +785,54 @@ Evidence:
 
 ## Slice 6.2 — Deterministic experiment runner
 
-**Status:** ACTIVE
+**Status:** DONE
 
 Execute the spec from local persisted inputs only and produce one immutable run directory/manifest.
 
+Evidence:
+
+- `analysis/experiments/runner.py` adds `run_experiment(spec, snapshot, output_dir)`,
+  the first code that actually executes an `ExperimentSpec`. It composes only the
+  already-governed Phase 3 helpers (`extract_cohort`, `compute_features`,
+  `generate_labels`, `build_split`, `score_candidate`, `baseline_families`,
+  `evaluate_candidate_promotion`) in the sequence the spec declares, and never
+  redefines cohort, feature, label, split, or candidate-evaluation semantics.
+- `resolve_feature_registry` maps only the spec's declared feature identities that
+  have an implemented, versioned definition (`launch_liquidity_usd`,
+  `lookback_return`) to the canonical `analysis/alpha/features.py` constructors,
+  failing closed on any other declared identity rather than substituting a
+  different computation. A declarative `feature>=pXX` candidate selection rule is
+  resolved to concrete token ids using only feature values observed inside the
+  partition being scored (the discovery split), so no other-partition information
+  can leak into the selection boundary; an unsupported rule fails closed.
+- The runner deliberately does not fabricate hypothesis-family significance
+  testing: `discovery_adjusted_p_value`/`holdout_adjusted_p_value` are left unset
+  because frozen multiplicity-family execution is Slice 6.4's job, so
+  `evaluate_candidate_promotion` honestly returns `insufficient_evidence` with an
+  explicit `MISSING_DISCOVERY_CORRECTION` reason rather than an invented pass.
+  `baseline_superior`, `uncertainty_supports_effect`, and `cost_sensitivity_passed`
+  are derived directly and deterministically from the already-computed
+  `CandidateResult` fields.
+- The run identity is keyed by the spec's own content-addressed
+  `experiment_spec_id` plus the dataset identity and code version (mirroring the
+  existing `analysis/alpha/artifacts.py::write_research_run` and
+  `analysis/runs/artifacts.py::write_run` immutable-write pattern); an identical
+  spec/dataset/code-version replay is byte-identical, and changing any of them
+  produces a distinct run directory. Secret-bearing fields are sanitized before
+  being written, following the same pattern already used by the other two
+  artifact writers.
+- `tests/test_phase6.py` adds a full-coverage eight-launch fixture and covers:
+  end-to-end execution through every declared step producing all eight expected
+  artifacts; byte-identical replay; run-identity change on a spec change; a
+  rejected unresolved feature identity; a rejected unsupported selection rule;
+  and a selection threshold computed strictly within the discovery partition
+  (never a validation/holdout launch). The locked full suite passed with 179
+  tests (154 prior + 25 new); the storage migration guard, byte-compilation, and
+  whitespace validation also passed.
+
 ## Slice 6.3 — Feature/label registry versioning
+
+**Status:** ACTIVE
 
 Give feature and label definitions durable identities, semantic versions, compatibility rules, and provenance hashes.
 
@@ -964,14 +1007,24 @@ cross-validated, content-addressed object, composing the existing governed
 `analysis/alpha/` types (`CohortConfig`, `LabelDefinition`,
 `PromotionPolicy`) rather than duplicating them.
 
-Slice 6.2 has not started. It needs a deterministic experiment runner that
-takes an `ExperimentSpec` plus a local `DatasetSnapshot` and executes the
+Slice 6.2 is DONE. `analysis/experiments/runner.py::run_experiment` takes an
+`ExperimentSpec` plus a local `DatasetSnapshot` and executes the
 already-governed Phase 3 helpers (`extract_cohort`, `compute_features`,
-`generate_labels`, `build_split`, `score_candidate`,
-`evaluate_candidate_promotion`, `baseline_families`) in the sequence the
-spec declares, producing one immutable run directory/manifest analogous to
-`analysis/alpha/artifacts.py::write_research_run` and
-`analysis/runs/artifacts.py::write_run` -- keyed by `experiment_spec_id` plus
-dataset identity, with no recomputation or redefinition of Phase 3 research
-semantics. The runner is the first slice that actually executes a spec;
-6.1 intentionally stops at the versioned, validated declaration.
+`generate_labels`, `build_split`, `score_candidate`, `baseline_families`,
+`evaluate_candidate_promotion`) in the sequence the spec declares, producing
+one immutable run directory/manifest keyed by `experiment_spec_id` plus
+dataset identity and code version, with no recomputation or redefinition of
+Phase 3 research semantics. It deliberately leaves hypothesis-family
+significance evidence (`discovery_adjusted_p_value`/
+`holdout_adjusted_p_value`) unset rather than fabricating it, so promotion
+honestly reports `insufficient_evidence` until real multiplicity-family
+testing lands.
+
+Slice 6.3 has not started. It needs to give feature and label definitions
+(currently just Python constructors in `analysis/alpha/features.py` and
+`analysis/alpha/labels.py`, referenced by bare name strings from
+`ExperimentSpec.feature_set`/`LabelDefinition`) durable identities, semantic
+versions, compatibility rules, and provenance hashes, so a run manifest can
+prove exactly which versioned feature/label definition produced its values
+rather than trusting an unversioned name-to-constructor mapping such as the
+one `resolve_feature_registry` introduced in Slice 6.2.

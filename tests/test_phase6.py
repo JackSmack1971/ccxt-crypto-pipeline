@@ -1,12 +1,15 @@
+import json
 from dataclasses import replace
-from datetime import datetime
+from datetime import datetime, timedelta
 
 import pytest
 
 from analysis.alpha import CohortConfig, LabelDefinition, PromotionPolicy
+from analysis.datasets import Asset, Bar, DatasetPolicy, DatasetSnapshot
 from analysis.experiments import (BaselinePolicy, CandidateDefinition, CostPolicy,
                                   ExperimentSpec, HypothesisFamily, SPEC_VERSION, SplitPolicy,
-                                  experiment_spec_dict, experiment_spec_id)
+                                  experiment_spec_dict, experiment_spec_id, resolve_feature_registry,
+                                  run_experiment)
 
 
 def build_spec(**overrides) -> ExperimentSpec:
@@ -168,3 +171,123 @@ def test_feature_set_rejects_duplicate_entries():
 def test_feature_set_rejects_blank_entries():
     with pytest.raises(ValueError, match="non-blank feature"):
         build_spec(feature_set=("launch_liquidity_usd", "  "))
+
+
+# --- Slice 6.2: deterministic experiment runner -----------------------------
+
+def runner_snapshot() -> DatasetSnapshot:
+    """Eight ethereum launches spaced three days apart with full 1h coverage.
+
+    Liquidity increases monotonically with launch order so a top-quartile
+    selection rule deterministically selects exactly one discovery-partition
+    token, and every label horizon has complete bar coverage.
+    """
+    t0 = datetime(2025, 1, 1)
+    liquidities = [20_000, 30_000, 40_000, 50_000, 60_000, 70_000, 80_000, 90_000]
+    assets, events, bars = [], [], []
+    for i, liquidity in enumerate(liquidities):
+        launch = t0 + timedelta(days=3 * i)
+        address = f"0xtok{i}"
+        canonical_id = f"ethereum:{address}"
+        assets.append(Asset(canonical_id, "dex", "ethereum", address, launch, address))
+        events.append({"canonical_id": canonical_id, "event_type": "new_pool_detected", "timestamp": launch,
+                       "payload_json": json.dumps({"reserve_usd": liquidity, "token_address": address}),
+                       "source": "fixture"})
+        for hour in range(26):
+            price = 10 + i + hour * 0.1
+            bars.append(Bar(canonical_id, launch + timedelta(hours=hour), price, price, price, price, 1, "1h", "fixture"))
+    policy = DatasetPolicy(timeframe="1h")
+    return DatasetSnapshot(tuple(assets), tuple(bars), (), tuple(events), (), policy, "runner-fixture")
+
+
+def runner_spec(**overrides) -> ExperimentSpec:
+    t0 = datetime(2025, 1, 1)
+    fields = {
+        "spec_version": SPEC_VERSION,
+        "name": "runner-fixture-experiment",
+        "cohort": CohortConfig(t0, t0 + timedelta(days=25), chains=("ethereum",)),
+        "feature_set": ("launch_liquidity_usd", "lookback_return"),
+        "feature_policy_version": "phase3-feature-v1",
+        "labels": (LabelDefinition("forward_return_24h", "24h"),),
+        "split": SplitPolicy(embargo_days=0, feature_lookback_seconds=0, label_horizon_seconds=24 * 60 * 60),
+        "hypothesis_family": HypothesisFamily(
+            name="runner-fixture-family",
+            features=("launch_liquidity_usd", "lookback_return"),
+            thresholds=(">=p75",),
+            horizons=("24h",),
+        ),
+        "candidate": CandidateDefinition("high_liquidity", "24h", "launch_liquidity_usd>=p75", min_coverage=0.2),
+        "costs": CostPolicy(),
+        "baselines": BaselinePolicy(),
+        "promotion_policy": PromotionPolicy(minimum_sample_size=1, minimum_independent_launches=1, minimum_coverage=0.2),
+        "code_version": "test-code-v1",
+        "config_identity": "test-config-v1",
+    }
+    fields.update(overrides)
+    return ExperimentSpec(**fields)
+
+
+def test_runner_executes_the_declared_sequence_and_honestly_withholds_significance(tmp_path):
+    run = run_experiment(runner_spec(), runner_snapshot(), tmp_path / "runs")
+
+    candidate = json.loads((run / "candidate.json").read_text())
+    assert candidate["sample_size"] == 1
+    assert candidate["independent_launches"] == 1
+    assert candidate["coverage"] == pytest.approx(0.25)
+
+    promotion = json.loads((run / "promotion.json").read_text())
+    # The runner never invents hypothesis-family significance testing (that is
+    # Slice 6.4's job), so promotion must stay honestly unresolved rather than
+    # a fabricated pass.
+    assert promotion["state"] == "insufficient_evidence"
+    assert promotion["reasons"] == ["MISSING_DISCOVERY_CORRECTION"]
+    assert promotion["inputs"]["discovery_adjusted_p_value"] is None
+
+    manifest = json.loads((run / "manifest.json").read_text())
+    assert manifest["manifest_version"] == "phase6-run-v1"
+    assert manifest["inputs"]["dataset_identity"] == "runner-fixture"
+    assert set(manifest["artifacts"]) == {
+        "spec.json", "cohort.json", "features.json", "labels.json",
+        "split.json", "baselines.json", "candidate.json", "promotion.json",
+    }
+
+
+def test_runner_replay_is_byte_identical(tmp_path):
+    spec, snapshot = runner_spec(), runner_snapshot()
+    first = run_experiment(spec, snapshot, tmp_path / "runs")
+    second = run_experiment(spec, snapshot, tmp_path / "runs")
+    assert first == second
+    for name in ("manifest.json", "candidate.json", "promotion.json"):
+        assert (first / name).read_bytes() == (second / name).read_bytes()
+
+
+def test_runner_run_identity_changes_with_the_spec(tmp_path):
+    baseline = run_experiment(runner_spec(), runner_snapshot(), tmp_path / "runs")
+    changed = run_experiment(runner_spec(code_version="test-code-v2"), runner_snapshot(), tmp_path / "runs")
+    assert baseline != changed
+
+
+def test_runner_rejects_an_unresolved_feature_identity(tmp_path):
+    spec = runner_spec(feature_set=("launch_liquidity_usd", "holder_count_growth"),
+                       hypothesis_family=HypothesisFamily(
+                           name="x", features=("launch_liquidity_usd", "holder_count_growth"),
+                           thresholds=(">=p75",), horizons=("24h",)))
+    with pytest.raises(ValueError, match="unsupported experiment feature identity: holder_count_growth"):
+        resolve_feature_registry(spec)
+
+
+def test_runner_rejects_an_unsupported_selection_rule(tmp_path):
+    spec = runner_spec(candidate=CandidateDefinition("bad", "24h", "launch_liquidity_usd>1000"))
+    with pytest.raises(ValueError, match="unsupported candidate selection rule"):
+        run_experiment(spec, runner_snapshot(), tmp_path / "runs")
+
+
+def test_runner_selection_threshold_is_computed_within_the_discovery_partition_only(tmp_path):
+    spec = runner_spec()
+    snapshot = runner_snapshot()
+    run = run_experiment(spec, snapshot, tmp_path / "runs")
+    candidate = json.loads((run / "candidate.json").read_text())
+    # Discovery holds the first 60% of 8 launches (4 tokens, liquidity
+    # 20k/30k/40k/50k); a >=p75 threshold over just that partition selects
+    # only the 50k token, never a validation/holdout launch.
+    assert candidate["independent_launches"] == 1
