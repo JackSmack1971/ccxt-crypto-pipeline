@@ -12,6 +12,7 @@ from analysis.alpha import (CohortConfig, FeatureDefinition, FeatureRegistry, HO
                             PromotionEvidence, evaluate_candidate_promotion,
                             ConversionObservation, ConversionPolicy)
 from analysis.datasets import Asset, Bar, DatasetPolicy, DatasetSnapshot
+from ingestion.dex.tier0.poller import poll_network
 from storage.db import connect, insert_event, insert_ohlcv_batch, upsert_asset
 
 
@@ -262,6 +263,33 @@ def test_unavailable_quote_conversion_is_explicit_censoring():
     assert comparison["families"]["momentum"]["status"] == "unavailable"
 
 
+def test_phase3_labels_are_built_offline_from_persisted_dex_observations(tmp_path, monkeypatch):
+    t0 = datetime(2025, 1, 1)
+
+    class FixtureGecko:
+        def new_pools(self, network):
+            return [{"pool_address": "pool", "created_at": t0, "base_token_address": "base",
+                     "quote_token_address": "usd", "dex_id": "fixture", "reserve_usd": 12000}]
+        def trending_pools(self, network): return []
+        def pool_ohlcv(self, network, address, **kwargs):
+            return [{"timestamp": t0 + timedelta(minutes=minute), "open": 1 + minute / 60,
+                     "high": 1 + minute / 60, "low": 1 + minute / 60,
+                     "close": 1 + minute / 60, "volume": 1} for minute in range(61)]
+
+    db = str(tmp_path / "offline-labels.duckdb")
+    poll_network({"name": "ethereum"}, db_path=db, gecko=FixtureGecko(), now=t0,
+                 price_config={"enabled": True, "timeframe": "minute", "aggregate": 1})
+    monkeypatch.setattr("socket.socket", lambda *args, **kwargs: (_ for _ in ()).throw(
+        AssertionError("network access is forbidden")))
+    data = DatasetSnapshot.from_duckdb(db, DatasetPolicy(timeframe="1m", sources=("geckoterminal",)))
+    cohort = tuple(row for row in extract_cohort(data, CohortConfig(t0, t0, chains=("ethereum",)))
+                   if row.token_id == "ethereum:base")
+    labels = generate_labels(data, cohort, LabelDefinition("return", "1h"),
+                             conversion_policy=ConversionPolicy(approved_stablecoins=("ETHEREUM:USD",)))
+    assert labels[0].status == "COMPLETE"
+    assert labels[0].start_price_usd == 1
+    assert labels[0].end_price_usd == 2
+    assert labels[0].provenance["raw_quote"] == "ethereum:usd"
 def test_non_usd_labels_use_temporally_valid_conversion_provenance():
     data = snapshot()
     cohort = extract_cohort(data, CohortConfig(datetime(2025, 1, 1), datetime(2025, 1, 2), chains=("ethereum",)))

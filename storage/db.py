@@ -186,6 +186,39 @@ def upsert_asset_relationship(relationship: Mapping[str, Any], db_path: str | Pa
         _finish(conn, owned)
 
 
+def insert_dex_price_observations(rows: Iterable[Mapping[str, Any]], db_path=None, *, connection=None) -> int:
+    """Persist source-attributed DEX candles; absent intervals are never synthesized."""
+    rows = [dict(row) for row in rows]
+    if not rows:
+        return 0
+    columns = ("asset_canonical_id", "market_canonical_id", "quote_asset_canonical_id", "timestamp",
+               "observed_at", "open", "high", "low", "close", "volume", "liquidity_usd",
+               "timeframe", "source")
+    conn, owned = _connection(db_path, connection)
+    try:
+        conn.executemany("""INSERT INTO dex_price_observations VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT (asset_canonical_id, market_canonical_id, timestamp, timeframe, source)
+            DO UPDATE SET observed_at = excluded.observed_at, open = excluded.open, high = excluded.high,
+                low = excluded.low, close = excluded.close, volume = excluded.volume,
+                liquidity_usd = excluded.liquidity_usd, quote_asset_canonical_id = excluded.quote_asset_canonical_id""",
+                         [[row[column] for column in columns] for row in rows])
+        return len(rows)
+    finally:
+        _finish(conn, owned)
+
+
+def record_observation_capability(row: Mapping[str, Any], db_path=None, *, connection=None) -> None:
+    conn, owned = _connection(db_path, connection)
+    try:
+        conn.execute("""INSERT INTO observation_capabilities VALUES (?, ?, ?, ?, ?, ?)
+            ON CONFLICT (chain, provider, capability, observed_at) DO UPDATE SET
+                status = excluded.status, reason = excluded.reason""",
+                     [row["chain"], row["provider"], row["capability"], row["status"],
+                      row["observed_at"], row.get("reason")])
+    finally:
+        _finish(conn, owned)
+
+
 def upsert_metadata(metadata: Mapping[str, Any], db_path: str | Path | None = None, *, connection=None) -> None:
     conn, owned = _connection(db_path, connection)
     try:
@@ -263,6 +296,26 @@ def read_asset_relationships(db_path=None, *, connection=None):
         cursor = conn.execute("""SELECT * FROM asset_relationships
                                ORDER BY market_canonical_id, asset_canonical_id, relationship_type,
                                         venue, observed_at, source""")
+        return [dict(zip([column[0] for column in cursor.description], row)) for row in cursor.fetchall()]
+    finally:
+        _finish(conn, owned)
+
+
+def read_dex_price_observations(db_path=None, *, connection=None):
+    conn, owned = _connection(db_path, connection)
+    try:
+        cursor = conn.execute("""SELECT * FROM dex_price_observations
+            ORDER BY timestamp, asset_canonical_id, market_canonical_id, timeframe, source""")
+        return [dict(zip([column[0] for column in cursor.description], row)) for row in cursor.fetchall()]
+    finally:
+        _finish(conn, owned)
+
+
+def read_observation_capabilities(db_path=None, *, connection=None):
+    conn, owned = _connection(db_path, connection)
+    try:
+        cursor = conn.execute("""SELECT * FROM observation_capabilities
+            ORDER BY chain, provider, capability, observed_at""")
         return [dict(zip([column[0] for column in cursor.description], row)) for row in cursor.fetchall()]
     finally:
         _finish(conn, owned)

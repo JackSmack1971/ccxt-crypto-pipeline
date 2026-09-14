@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import duckdb
 
-SCHEMA_VERSION = 6
+SCHEMA_VERSION = 7
 
 SCHEMA_SQL = """
 CREATE TABLE IF NOT EXISTS assets (
@@ -74,6 +74,33 @@ CREATE TABLE IF NOT EXISTS asset_relationships (
     source VARCHAR NOT NULL,
     evidence_json VARCHAR NOT NULL,
     PRIMARY KEY (market_canonical_id, asset_canonical_id, relationship_type, venue, observed_at, source)
+);
+
+CREATE TABLE IF NOT EXISTS dex_price_observations (
+    asset_canonical_id VARCHAR NOT NULL,
+    market_canonical_id VARCHAR NOT NULL,
+    quote_asset_canonical_id VARCHAR NOT NULL,
+    timestamp TIMESTAMP NOT NULL,
+    observed_at TIMESTAMP NOT NULL,
+    open DOUBLE NOT NULL,
+    high DOUBLE NOT NULL,
+    low DOUBLE NOT NULL,
+    close DOUBLE NOT NULL,
+    volume DOUBLE NOT NULL,
+    liquidity_usd DOUBLE,
+    timeframe VARCHAR NOT NULL,
+    source VARCHAR NOT NULL,
+    PRIMARY KEY (asset_canonical_id, market_canonical_id, timestamp, timeframe, source)
+);
+
+CREATE TABLE IF NOT EXISTS observation_capabilities (
+    chain VARCHAR NOT NULL,
+    provider VARCHAR NOT NULL,
+    capability VARCHAR NOT NULL,
+    status VARCHAR NOT NULL CHECK (status IN ('AVAILABLE', 'UNSUPPORTED', 'UNAVAILABLE')),
+    observed_at TIMESTAMP NOT NULL,
+    reason VARCHAR,
+    PRIMARY KEY (chain, provider, capability, observed_at)
 );
 
 CREATE TABLE IF NOT EXISTS schema_version (
@@ -183,6 +210,29 @@ def initialize(connection: duckdb.DuckDBPyConnection) -> None:
                 source VARCHAR NOT NULL,
                 evidence_json VARCHAR NOT NULL,
                 PRIMARY KEY (market_canonical_id, asset_canonical_id, relationship_type, venue, observed_at, source)
+            )""")
+            connection.execute("UPDATE schema_version SET version = ?", [SCHEMA_VERSION])
+            connection.execute("COMMIT")
+        except Exception:
+            connection.execute("ROLLBACK")
+            raise
+        versions = (6,)
+    if versions[0] < 7:
+        connection.execute("BEGIN TRANSACTION")
+        try:
+            connection.execute("""CREATE TABLE IF NOT EXISTS dex_price_observations (
+                asset_canonical_id VARCHAR NOT NULL, market_canonical_id VARCHAR NOT NULL,
+                quote_asset_canonical_id VARCHAR NOT NULL, timestamp TIMESTAMP NOT NULL,
+                observed_at TIMESTAMP NOT NULL, open DOUBLE NOT NULL, high DOUBLE NOT NULL,
+                low DOUBLE NOT NULL, close DOUBLE NOT NULL, volume DOUBLE NOT NULL,
+                liquidity_usd DOUBLE, timeframe VARCHAR NOT NULL, source VARCHAR NOT NULL,
+                PRIMARY KEY (asset_canonical_id, market_canonical_id, timestamp, timeframe, source)
+            )""")
+            connection.execute("""CREATE TABLE IF NOT EXISTS observation_capabilities (
+                chain VARCHAR NOT NULL, provider VARCHAR NOT NULL, capability VARCHAR NOT NULL,
+                status VARCHAR NOT NULL CHECK (status IN ('AVAILABLE', 'UNSUPPORTED', 'UNAVAILABLE')),
+                observed_at TIMESTAMP NOT NULL, reason VARCHAR,
+                PRIMARY KEY (chain, provider, capability, observed_at)
             )""")
             connection.execute("UPDATE schema_version SET version = ?", [SCHEMA_VERSION])
             connection.execute("COMMIT")

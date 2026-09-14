@@ -10,8 +10,9 @@ from typing import Any
 
 import yaml
 
-from storage.db import (insert_event, log_run_end, log_run_start, safe_error_message,
-                        upsert_asset, upsert_asset_relationship)
+from storage.db import (insert_dex_price_observations, insert_event, log_run_end, log_run_start,
+                        record_observation_capability, safe_error_message, upsert_asset,
+                        upsert_asset_relationship)
 
 from .clients import GeckoTerminalClient, ProviderError
 
@@ -27,12 +28,13 @@ def _asset(network: str, address: str, token: dict[str, Any], now: datetime):
 
 
 def poll_network(network_config: dict[str, Any], *, db_path="storage/pipeline.duckdb",
-                 gecko=None, max_pools=20, now=None) -> int:
+                 gecko=None, max_pools=20, now=None, price_config: dict[str, Any] | None = None) -> int:
     network = network_config["name"]
     gecko_network = network_config.get("gecko_network", network)
     gecko = gecko or GeckoTerminalClient()
     now = now or datetime.now(timezone.utc)
     written = 0
+    price_config = price_config or {}
     try:
         new_pools = gecko.new_pools(gecko_network)
     except ProviderError:
@@ -66,6 +68,29 @@ def poll_network(network_config: dict[str, Any], *, db_path="storage/pipeline.du
                         "source": "geckoterminal",
                         "evidence_json": {"pool_created_at": pool["created_at"]},
                     }, db_path)
+            base, quote = pool.get("base_token_address"), pool.get("quote_token_address")
+            if event_type == "new_pool_detected" and price_config.get("enabled", False):
+                status, reason = "AVAILABLE", None
+                if not base or not quote:
+                    status, reason = "UNAVAILABLE", "pool constituents are unavailable"
+                else:
+                    try:
+                        timeframe = str(price_config.get("timeframe", "minute"))
+                        aggregate = int(price_config.get("aggregate", 1))
+                        candles = gecko.pool_ohlcv(gecko_network, address, timeframe=timeframe,
+                                                   aggregate=aggregate,
+                                                   limit=int(price_config.get("limit", 1000)))
+                        rows = [{**candle, "asset_canonical_id": f"{network}:{base}",
+                                 "market_canonical_id": canonical_id,
+                                 "quote_asset_canonical_id": f"{network}:{quote}",
+                                 "observed_at": now, "liquidity_usd": pool.get("reserve_usd"),
+                                 "timeframe": f"{aggregate}m" if timeframe == "minute" else f"{aggregate}{timeframe[0]}",
+                                 "source": "geckoterminal"} for candle in candles]
+                        written += insert_dex_price_observations(rows, db_path)
+                    except (ProviderError, ValueError, TypeError) as error:
+                        status, reason = "UNAVAILABLE", safe_error_message(error)
+                record_observation_capability({"chain": network, "provider": "geckoterminal",
+                    "capability": "dex_ohlcv", "status": status, "observed_at": now, "reason": reason}, db_path)
     return written
 
 
@@ -78,7 +103,8 @@ def poll(config_path="config/chains.yaml", *, db_path=None, gecko=None) -> int:
     try:
         for network in config.get("networks", []):
             written += poll_network(network, db_path=db_path, gecko=gecko,
-                                    max_pools=config.get("max_pools_per_network", 20))
+                                    max_pools=config.get("max_pools_per_network", 20),
+                                    price_config=config.get("price_observations", {}))
     except Exception as exc:
         log_run_end(run_id, "failed", db_path, rows_written=written, error_message=safe_error_message(exc))
         raise
