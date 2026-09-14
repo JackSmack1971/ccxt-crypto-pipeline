@@ -10,7 +10,8 @@ from analysis.alpha import (CohortConfig, FeatureDefinition, FeatureRegistry, HO
                             descriptive_baseline, phase2_strategy_spec, rank_candidates, score_candidate, write_research_run,
                             validate_temporal_alignment, baseline_comparison, HypothesisRegistry,
                             PromotionEvidence, evaluate_candidate_promotion,
-                            ConversionObservation, ConversionPolicy)
+                            ConversionObservation, ConversionPolicy,
+                            EligibilityPolicy, evaluate_chain_eligibility)
 from analysis.datasets import Asset, Bar, DatasetPolicy, DatasetSnapshot
 from storage.db import connect, insert_event, insert_ohlcv_batch, upsert_asset
 
@@ -41,6 +42,41 @@ def test_cohort_deduplicates_launches_and_preserves_liquidity_exclusion():
     assert result[0].analysis_eligible is True
     assert result[1].exclusion_reason == "BELOW_LIQUIDITY_GATE"
     assert len(result[0].source_evidence) == 2
+
+
+def test_cohort_excludes_a_chain_whose_provider_quality_fails_the_gate():
+    quality_rows = [{"source": "evm_rpc", "scope": "ethereum", "completeness_ratio": 0.4,
+                     "max_observed_gap_seconds": 60.0, "expected_interval_seconds": 60.0,
+                     "last_status": "success"}]
+    chain_eligibility = evaluate_chain_eligibility(quality_rows, {"ethereum": [("evm_rpc", "ethereum")]})
+    config = CohortConfig(datetime(2025, 1, 1), datetime(2025, 1, 2), chains=("ethereum", "solana"),
+                          chain_eligibility=chain_eligibility)
+    result = extract_cohort(snapshot(), config)
+    ethereum_row = next(row for row in result if row.chain == "ethereum")
+    assert ethereum_row.included is True
+    assert ethereum_row.analysis_eligible is False
+    assert ethereum_row.exclusion_reason == "CHAIN_PROVIDER_QUALITY_INELIGIBLE"
+    assert ethereum_row.provenance["chain_eligibility"] == {
+        "eligible": False, "reason": "BELOW_COMPLETENESS_THRESHOLD",
+    }
+    # An unaffected chain's eligibility is decided independently.
+    solana_row = next(row for row in result if row.chain == "solana")
+    assert solana_row.exclusion_reason == "BELOW_LIQUIDITY_GATE"
+
+
+def test_cohort_keeps_prior_behavior_when_a_chain_has_no_eligibility_evidence():
+    chain_eligibility = evaluate_chain_eligibility([], {"ethereum": [("evm_rpc", "ethereum")]})
+    assert chain_eligibility["ethereum"].reason == "NO_PROVIDER_OBSERVATIONS"
+    config = CohortConfig(datetime(2025, 1, 1), datetime(2025, 1, 2), chains=("ethereum",),
+                          chain_eligibility=chain_eligibility)
+    result = extract_cohort(snapshot(), config)
+    assert result[0].exclusion_reason == "CHAIN_PROVIDER_QUALITY_INELIGIBLE"
+
+
+def test_cohort_is_unaffected_by_default_when_no_chain_eligibility_is_supplied():
+    result = extract_cohort(snapshot(), CohortConfig(datetime(2025, 1, 1), datetime(2025, 1, 2), chains=("ethereum",)))
+    assert result[0].analysis_eligible is True
+    assert result[0].provenance["chain_eligibility"] is None
 
 
 def test_pool_constituents_are_address_scoped_and_relationships_are_point_in_time():

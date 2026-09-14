@@ -104,20 +104,44 @@ class Pipeline:
         return poll(self.chains_config_path, db_path=self.db_path)
 
     def evm_listeners(self) -> int:
+        """Poll every configured EVM chain, recording a per-chain quality observation.
+
+        Each chain is isolated: one chain's failure is recorded under its own
+        `evm_rpc`/chain-name scope and does not prevent the remaining
+        configured chains from being attempted in the same cycle.
+        """
         config = load_chain_config(self.chains_config_path)
         total = 0
         for chain in config.get("networks", []):
             name, env_name = chain.get("name"), chain.get("rpc_env")
-            if name and env_name and os.getenv(env_name):
-                lookback = int(chain.get("evm_lookback_blocks", config.get("evm_lookback_blocks", 1900)))
-                total += run_evm_once(name, db_path=self.db_path, lookback_blocks=lookback)
+            if not (name and env_name and os.getenv(env_name)):
+                continue
+            lookback = int(chain.get("evm_lookback_blocks", config.get("evm_lookback_blocks", 1900)))
+            started = time.monotonic()
+            try:
+                rows = run_evm_once(name, db_path=self.db_path, lookback_blocks=lookback)
+            except Exception as exc:
+                message = safe_error_message(exc)
+                record_provider_observation(
+                    "evm_rpc", name, classify_provider_failure(message), self.db_path,
+                    latency_ms=(time.monotonic() - started) * 1000,
+                    expected_interval_seconds=_MINUTE_SECONDS, error_message=message,
+                )
+                continue
+            record_provider_observation(
+                "evm_rpc", name, "success", self.db_path,
+                latency_ms=(time.monotonic() - started) * 1000,
+                expected_interval_seconds=_MINUTE_SECONDS, rows_observed=rows,
+            )
+            total += rows
         return total
 
     def solana_listener(self) -> int:
         config = load_solana_config(Path(self.solana_config_path).resolve().parents[1])
         if not os.getenv(config.get("api_key_env", "HELIUS_API_KEY")):
             return 0
-        return run_solana_once(db_path=self.db_path, config=config)
+        return run_solana_once(db_path=self.db_path, config=config,
+                               expected_interval_seconds=_MINUTE_SECONDS)
 
     def normalize(self) -> int:
         return len(reconcile_assets(self.db_path))

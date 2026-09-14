@@ -119,6 +119,50 @@ def test_evm_listener_uses_configured_lookback(tmp_path, monkeypatch):
     assert observed == [("base", {"db_path": pipeline.db_path, "lookback_blocks": 17})]
 
 
+def test_evm_listeners_records_a_per_chain_provider_observation(tmp_path, monkeypatch):
+    monkeypatch.setenv("EVM_RPC_URL_BASE", "https://rpc.example")
+    pipeline = Pipeline(db_path=str(tmp_path / "pipeline.duckdb"))
+    monkeypatch.setattr("scheduler.pipeline.load_chain_config", lambda _: {
+        "networks": [{"name": "base", "rpc_env": "EVM_RPC_URL_BASE"}]
+    })
+    monkeypatch.setattr("scheduler.pipeline.run_evm_once", lambda name, **kwargs: 3)
+
+    assert pipeline.evm_listeners() == 3
+
+    log = {(row["source"], row["scope"]): row for row in read_provider_observation_log(pipeline.db_path)}
+    row = log[("evm_rpc", "base")]
+    assert row["status"] == "success"
+    assert row["rows_observed"] == 3
+    assert row["expected_interval_seconds"] == 60.0
+
+
+def test_evm_listeners_isolates_one_chain_failure_from_the_rest(tmp_path, monkeypatch):
+    monkeypatch.setenv("EVM_RPC_URL_BASE", "https://rpc.example")
+    monkeypatch.setenv("EVM_RPC_URL_ARBITRUM", "https://rpc.example")
+    pipeline = Pipeline(db_path=str(tmp_path / "pipeline.duckdb"))
+    monkeypatch.setattr("scheduler.pipeline.load_chain_config", lambda _: {
+        "networks": [
+            {"name": "base", "rpc_env": "EVM_RPC_URL_BASE"},
+            {"name": "arbitrum", "rpc_env": "EVM_RPC_URL_ARBITRUM"},
+        ]
+    })
+
+    def run_evm_once(name, **kwargs):
+        if name == "base":
+            raise RuntimeError("rpc unreachable")
+        return 4
+
+    monkeypatch.setattr("scheduler.pipeline.run_evm_once", run_evm_once)
+
+    assert pipeline.evm_listeners() == 4
+
+    log = {(row["source"], row["scope"]): row for row in read_provider_observation_log(pipeline.db_path)}
+    assert log[("evm_rpc", "base")]["status"] == "failure"
+    assert log[("evm_rpc", "base")]["error_message"] == "rpc unreachable"
+    assert log[("evm_rpc", "arbitrum")]["status"] == "success"
+    assert log[("evm_rpc", "arbitrum")]["rows_observed"] == 4
+
+
 def test_health_report_uses_deterministic_tie_breaking(tmp_path):
     db = str(tmp_path / "pipeline.duckdb")
     started = datetime(2026, 1, 1)
