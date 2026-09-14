@@ -26,12 +26,21 @@ _SECRET_IN_ERROR = re.compile(
     r"(?i)(authorization\s*:\s*bearer\s+|api[_-]?key|credential|password|secret|token|rpc[_-]?url)\s*[:=]?\s*[^\s,;]+"
 )
 _URL_CREDENTIAL = re.compile(r"(?i)(://)[^/\s:@]+:[^/\s@]+@")
+_RATE_LIMIT_ERROR = re.compile(r"(?i)\b(429|rate[ _-]?limit(?:ed)?|too many requests)\b")
+_PROVIDER_OBSERVATION_STATUSES = frozenset({"success", "failure", "rate_limited"})
 
 
 def safe_error_message(error: Exception, limit: int = 500) -> str:
     """Persist useful failure context without copying conventional credentials."""
     message = _URL_CREDENTIAL.sub(r"\1[REDACTED]@", str(error))
     return _SECRET_IN_ERROR.sub(r"\1[REDACTED]", message)[:limit]
+
+
+def classify_provider_failure(error_message: str | None) -> str:
+    """Distinguish a rate-limit gap from a generic provider failure by message evidence."""
+    if error_message and _RATE_LIMIT_ERROR.search(error_message):
+        return "rate_limited"
+    return "failure"
 
 
 def connect(db_path: str | Path) -> duckdb.DuckDBPyConnection:
@@ -422,6 +431,75 @@ def record_evm_block_observation(chain: str, block_number: int, block_hash: str,
         _finish(conn, owned)
 
 
+def record_provider_observation(source: str, scope: str, status: str,
+                                db_path: str | Path | None = None, *,
+                                observed_at: datetime | None = None, latency_ms: float | None = None,
+                                expected_interval_seconds: float | None = None, rows_observed: int = 0,
+                                error_message: str | None = None, run_id: str | None = None,
+                                connection=None) -> dict[str, Any]:
+    """Persist one provider poll outcome and derive the observed gap since the prior attempt."""
+    if not source or not scope:
+        raise ValueError("observation source and scope are required")
+    if status not in _PROVIDER_OBSERVATION_STATUSES:
+        raise ValueError(f"unsupported provider observation status: {status!r}")
+    observed_at = observed_at or datetime.now()
+    conn, owned = _connection(db_path, connection)
+    try:
+        conn.execute("BEGIN TRANSACTION")
+        previous = conn.execute(
+            "SELECT MAX(observed_at) FROM provider_observation_log WHERE source = ? AND scope = ?",
+            [source, scope],
+        ).fetchone()[0]
+        naive_observed_at = observed_at.replace(tzinfo=None) if observed_at.tzinfo is not None else observed_at
+        observed_interval_seconds = (
+            (naive_observed_at - previous).total_seconds() if previous is not None else None
+        )
+        conn.execute(
+            "INSERT INTO provider_observation_log VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            [source, scope, observed_at, status, latency_ms, expected_interval_seconds,
+             observed_interval_seconds, rows_observed, error_message, run_id],
+        )
+        conn.execute("COMMIT")
+        return {"source": source, "scope": scope, "observed_at": observed_at, "status": status,
+                "latency_ms": latency_ms, "expected_interval_seconds": expected_interval_seconds,
+                "observed_interval_seconds": observed_interval_seconds, "rows_observed": rows_observed,
+                "error_message": error_message, "run_id": run_id}
+    except Exception:
+        conn.execute("ROLLBACK")
+        raise
+    finally:
+        _finish(conn, owned)
+
+
+def provider_quality_summary(db_path: str | Path | None = None, *, connection=None) -> list[dict[str, Any]]:
+    """Aggregate offline provider quality facts by source/scope for research eligibility checks."""
+    conn, owned = _connection(db_path, connection)
+    try:
+        cursor = conn.execute(
+            """SELECT source, scope,
+                      COUNT(*) AS total_observations,
+                      SUM(CASE WHEN status = 'success' THEN 1 ELSE 0 END) AS success_count,
+                      SUM(CASE WHEN status = 'failure' THEN 1 ELSE 0 END) AS failure_count,
+                      SUM(CASE WHEN status = 'rate_limited' THEN 1 ELSE 0 END) AS rate_limited_count,
+                      AVG(latency_ms) AS avg_latency_ms,
+                      MAX(observed_interval_seconds) AS max_observed_gap_seconds,
+                      arg_max(expected_interval_seconds, observed_at) AS expected_interval_seconds,
+                      arg_max(status, observed_at) AS last_status,
+                      MAX(observed_at) AS last_observed_at
+               FROM provider_observation_log
+               GROUP BY source, scope
+               ORDER BY source, scope"""
+        )
+        rows = [dict(zip([column[0] for column in cursor.description], row)) for row in cursor.fetchall()]
+        for row in rows:
+            row["completeness_ratio"] = (
+                row["success_count"] / row["total_observations"] if row["total_observations"] else None
+            )
+        return rows
+    finally:
+        _finish(conn, owned)
+
+
 def _read(table: str, db_path: str | Path | None = None, *, connection=None) -> list[dict[str, Any]]:
     conn, owned = _connection(db_path, connection)
     try:
@@ -497,6 +575,16 @@ def read_price_observations(db_path=None, *, connection=None):
     try:
         cursor = conn.execute("""SELECT * FROM price_observations
                                ORDER BY observed_at, asset_canonical_id, market_canonical_id, source""")
+        return [dict(zip([column[0] for column in cursor.description], row)) for row in cursor.fetchall()]
+    finally:
+        _finish(conn, owned)
+
+
+def read_provider_observation_log(db_path=None, *, connection=None):
+    conn, owned = _connection(db_path, connection)
+    try:
+        cursor = conn.execute("""SELECT * FROM provider_observation_log
+                               ORDER BY source, scope, observed_at""")
         return [dict(zip([column[0] for column in cursor.description], row)) for row in cursor.fetchall()]
     finally:
         _finish(conn, owned)

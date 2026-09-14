@@ -512,6 +512,40 @@ Track expected/observed intervals, provider failures, rate-limit gaps, source la
 
 Research eligibility must be able to consume these quality facts without live provider calls.
 
+Progress so far (this slice remains ACTIVE; per-source/chain granularity below the
+scheduled-job boundary is still open):
+
+- Schema version 11 adds a `provider_observation_log` table keyed by
+  `(source, scope, observed_at)` recording status (`success`, `failure`,
+  `rate_limited`), latency, the configured expected poll interval, the
+  observed gap since the prior attempt for that source/scope, rows observed,
+  and error/run linkage.
+- `storage/db.py` adds `record_provider_observation` (computes the observed
+  gap from the last durable attempt), `classify_provider_failure` (rate-limit
+  message heuristic consistent with the existing `safe_error_message`
+  pattern), `read_provider_observation_log`, and `provider_quality_summary`
+  (an offline, network-free aggregate of completeness ratio, average latency,
+  worst observed gap, and last status per source/scope).
+- `scheduler/pipeline.py` wires every scheduled job (`cex_refresh`,
+  `tier0_poll`, `evm_listeners`, `solana_listener`, `normalization`) through
+  `Pipeline.run_job`, which now times each attempt, records success/failure/
+  rate-limit outcomes, and compares against `Pipeline.expected_job_intervals()`
+  (derived from the same configured cadence used by `build_scheduler`).
+- `tests/test_storage.py` covers the v10-to-v11 migration preserving existing
+  cursor rows, fresh/repeated initialization, gap computation, the offline
+  quality summary aggregate, unsupported-status rejection, and the rate-limit
+  classifier. `tests/test_scheduler.py` covers a full cycle populating the
+  ledger with the configured expected intervals and a rate-limited failure
+  being classified and persisted distinctly from a generic failure. The
+  locked full suite passed with 105 tests; the storage migration guard
+  reported the fresh and migrated schemas as converged.
+- Remaining for this slice: today's ledger entries are scoped to the
+  scheduler's job boundary (e.g. all EVM chains share the `evm_listeners`
+  scope). Per-chain/per-program granularity inside `evm_listeners` and
+  `solana_listener`, and a documented research-eligibility gate that consumes
+  `provider_quality_summary` before a source/chain is treated as eligible for
+  Phase 3 cohort construction, remain open before this slice can close.
+
 ## Slice 5.5 — Two-store recovery protocol
 
 Make DuckDB authoritative/cache semantics mechanically recoverable when Parquet publication diverges after a committed DB write.
@@ -699,3 +733,10 @@ SLOs**. Phase 5.3 establishes durable signature-based Solana replay after an
 explicit bounded bootstrap; credentialed live Helius compatibility remains
 unverified runtime evidence and is separate from the fixture-proven local
 contract.
+
+Slice 5.4 has landed a schema-backed provider observation ledger and an
+offline quality-summary query wired through the scheduler's job boundary
+(see the Slice 5.4 evidence above). The next eligible increment inside 5.4 is
+per-source/chain granularity inside the `evm_listeners` and `solana_listener`
+jobs plus a documented research-eligibility gate over `provider_quality_summary`,
+before moving on to Slice 5.5.

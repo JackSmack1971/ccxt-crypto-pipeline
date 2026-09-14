@@ -4,6 +4,7 @@ from storage.db import (
     SCHEMA_VERSION,
     advance_ingestion_continuation,
     advance_ingestion_cursor,
+    classify_provider_failure,
     get_ingestion_continuation,
     get_ingestion_cursor,
     init_db,
@@ -11,6 +12,7 @@ from storage.db import (
     insert_ohlcv_batch,
     log_run_end,
     log_run_start,
+    provider_quality_summary,
     read_assets,
     read_asset_relationships,
     read_events,
@@ -21,7 +23,9 @@ from storage.db import (
     read_ohlcv,
     read_price_observations,
     read_lineage,
+    read_provider_observation_log,
     read_runs,
+    record_provider_observation,
     safe_error_message,
     upsert_asset,
     upsert_asset_relationship,
@@ -59,7 +63,7 @@ def test_storage_round_trip_and_idempotent_init(tmp_path):
     run_id = log_run_start("fixture_job", db_path, started_at=timestamp, run_id="run-1")
     log_run_end(run_id, "success", db_path, finished_at=timestamp, rows_written=1)
 
-    assert SCHEMA_VERSION == 10
+    assert SCHEMA_VERSION == 11
     asset = read_assets(db_path)[0]
     assert (asset["canonical_id"], asset["source_type"], asset["chain_or_exchange"],
             asset["symbol_or_contract"]) == ("kraken:BTC/USDT", "cex", "kraken", "BTC/USDT")
@@ -282,6 +286,33 @@ def test_v9_store_adds_opaque_continuations_without_losing_numeric_cursors(tmp_p
     assert read_ingestion_continuations(db_path) == []
 
 
+def test_v10_store_adds_provider_observation_log_without_losing_cursors(tmp_path):
+    db_path = tmp_path / "v10.duckdb"
+    connection = duckdb.connect(str(db_path))
+    connection.execute("CREATE TABLE schema_version (version INTEGER NOT NULL)")
+    connection.execute("INSERT INTO schema_version VALUES (10)")
+    from storage.schema import SCHEMA_SQL
+    for statement in SCHEMA_SQL.split(";"):
+        if statement.strip() and "provider_observation_log" not in statement:
+            connection.execute(statement)
+    connection.execute(
+        "INSERT INTO ingestion_cursors VALUES ('evm_rpc', 'ethereum', 42, ?, 'run-old')",
+        [datetime(2025, 1, 1)],
+    )
+    connection.close()
+
+    init_db(db_path)
+    connection = duckdb.connect(str(db_path))
+    assert connection.execute("SELECT version FROM schema_version").fetchone() == (SCHEMA_VERSION,)
+    assert connection.execute("SELECT source, scope, position FROM ingestion_cursors").fetchone() == (
+        "evm_rpc", "ethereum", 42)
+    assert connection.execute("SELECT COUNT(*) FROM provider_observation_log").fetchone() == (0,)
+    connection.close()
+
+    init_db(db_path)
+    assert read_provider_observation_log(db_path) == []
+
+
 def test_ingestion_cursor_is_scoped_monotonic_and_continuity_checked(tmp_path):
     db_path = tmp_path / "cursors.duckdb"
     observed = datetime(2025, 1, 1, tzinfo=timezone.utc)
@@ -341,6 +372,65 @@ def test_price_observation_round_trip_is_idempotent_and_ordered(tmp_path):
     assert (rows[0]["asset_canonical_id"], rows[0]["market_canonical_id"], rows[0]["price"],
             rows[0]["quote_asset"], rows[0]["cadence"], rows[0]["evidence_json"]) == (
                 "ethereum:0xbase", "ethereum:0xpool", 1.5, "USD", "20m", '{"fixture": true}')
+
+def test_provider_observation_log_tracks_gaps_and_offline_quality_summary(tmp_path):
+    db_path = tmp_path / "provider-quality.duckdb"
+    first = datetime(2025, 1, 1, 0, 0, 0, tzinfo=timezone.utc)
+    second = datetime(2025, 1, 1, 0, 1, 0, tzinfo=timezone.utc)
+    third = datetime(2025, 1, 1, 0, 2, 0, tzinfo=timezone.utc)
+
+    first_row = record_provider_observation(
+        "evm_listeners", "evm_listeners", "success", db_path,
+        observed_at=first, latency_ms=120.0, expected_interval_seconds=60.0,
+        rows_observed=3, run_id="run-1",
+    )
+    assert first_row["observed_interval_seconds"] is None
+
+    second_row = record_provider_observation(
+        "evm_listeners", "evm_listeners", classify_provider_failure("HTTP 429 too many requests"),
+        db_path, observed_at=second, latency_ms=50.0, expected_interval_seconds=60.0,
+        error_message="HTTP 429 too many requests", run_id="run-2",
+    )
+    assert second_row["status"] == "rate_limited"
+    assert second_row["observed_interval_seconds"] == 60.0
+
+    record_provider_observation(
+        "evm_listeners", "evm_listeners", classify_provider_failure("boom"), db_path,
+        observed_at=third, latency_ms=80.0, expected_interval_seconds=60.0,
+        error_message="boom", run_id="run-3",
+    )
+
+    rows = read_provider_observation_log(db_path)
+    assert [row["status"] for row in rows] == ["success", "rate_limited", "failure"]
+
+    summary = provider_quality_summary(db_path)
+    assert len(summary) == 1
+    entry = summary[0]
+    assert (entry["source"], entry["scope"]) == ("evm_listeners", "evm_listeners")
+    assert entry["total_observations"] == 3
+    assert entry["success_count"] == 1
+    assert entry["failure_count"] == 1
+    assert entry["rate_limited_count"] == 1
+    assert entry["completeness_ratio"] == 1 / 3
+    assert entry["max_observed_gap_seconds"] == 60.0
+    assert entry["last_status"] == "failure"
+    assert entry["last_observed_at"] == third.replace(tzinfo=None)
+
+    for bad_status in ("running", "ok"):
+        try:
+            record_provider_observation("evm_listeners", "evm_listeners", bad_status, db_path)
+        except ValueError as exc:
+            assert "unsupported provider observation status" in str(exc)
+        else:
+            raise AssertionError("unsupported status should fail")
+
+
+def test_classify_provider_failure_distinguishes_rate_limits_from_other_failures():
+    assert classify_provider_failure("429 Too Many Requests") == "rate_limited"
+    assert classify_provider_failure("rate limit exceeded") == "rate_limited"
+    assert classify_provider_failure("connection reset by peer") == "failure"
+    assert classify_provider_failure(None) == "failure"
+
 
 def test_asset_relationships_round_trip_point_in_time_evidence(tmp_path):
     db_path = tmp_path / "relationships.duckdb"
