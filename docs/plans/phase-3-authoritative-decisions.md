@@ -16,10 +16,14 @@ This companion decision record resolves the open decisions in
   censored; missing values are never forward-filled.
 - Quote-to-USD normalization uses versioned `ConversionPolicy` rules. Native USD
   quotes and policy-listed stablecoins record explicit endpoint-time parity;
-  every other quote requires one unambiguous local conversion observation at or
-  before each label endpoint. Missing, stale, or ambiguous conversion evidence
-  produces data censoring, and label provenance retains the raw quote plus each
-  conversion's timestamp, rate, source, and policy version.
+  every other quote requires one unambiguous conversion observation at or
+  before each label endpoint. That evidence may be supplied explicitly by the
+  caller or read from the local persisted `reference_series` store (schema
+  version 12) via `DatasetSnapshot.reference_series_at(f"{quote}/USD", point)`,
+  a reusable point-in-time series contract not limited to label-boundary USD
+  conversion. Missing, stale, or ambiguous conversion evidence produces data
+  censoring, and label provenance retains the raw quote plus each conversion's
+  timestamp, rate, source, and policy version.
 - The first implementation is baseline-first and does not require complex model
   training. Discovery uses Benjamini-Hochberg FDR at q=0.05; confirmatory holdout
   testing uses Holm-Bonferroni at alpha=0.05. The chronological split is 60/20/20

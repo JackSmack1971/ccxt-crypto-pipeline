@@ -93,7 +93,8 @@ class DatasetSnapshot:
     def __init__(self, assets: tuple[Asset, ...], bars: tuple[Bar, ...],
                  metadata: tuple[Metadata, ...], events: tuple[dict[str, Any], ...],
                  lineage: tuple[dict[str, Any], ...], policy: DatasetPolicy,
-                 dataset_identity: str, asset_relationships: tuple[dict[str, Any], ...] = ()):
+                 dataset_identity: str, asset_relationships: tuple[dict[str, Any], ...] = (),
+                 reference_series: tuple[dict[str, Any], ...] = ()):
         self.assets = tuple(sorted(assets, key=lambda item: item.canonical_id))
         self.bars = tuple(sorted((bar for bar in bars if policy.allows(bar)),
                                  key=lambda item: (item.timestamp, item.canonical_id,
@@ -118,6 +119,17 @@ class DatasetSnapshot:
         self.asset_relationships = tuple(sorted(asset_relationships, key=lambda item: (
             str(item.get("market_canonical_id", "")), str(item.get("asset_canonical_id", "")),
             str(item.get("relationship_type", "")), _time(item["observed_at"]), str(item.get("source", "")))))
+        self.reference_series = tuple(sorted(reference_series, key=lambda item: (
+            str(item.get("series_id", "")), _time(item["observed_at"]), str(item.get("source", "")))))
+        reference_keys = [(item.get("series_id"), _time(item["observed_at"]), item.get("source"))
+                          for item in self.reference_series]
+        if len(set(reference_keys)) != len(reference_keys):
+            raise ValueError("duplicate reference series observation")
+        self._reference_series_by_id: dict[str, tuple[dict[str, Any], ...]] = {}
+        for item in self.reference_series:
+            key = item["series_id"]
+            self._reference_series_by_id.setdefault(key, tuple())
+            self._reference_series_by_id[key] += (item,)
         self.policy = policy
         self.dataset_identity = dataset_identity
         self._asset_ids = {item.canonical_id for item in assets}
@@ -139,7 +151,7 @@ class DatasetSnapshot:
             tables = {row[0] for row in conn.execute(
                 "SELECT table_name FROM information_schema.tables WHERE table_schema = 'main'"
             ).fetchall()}
-            required = {"assets", "ohlcv", "metadata", "events", "lineage", "asset_relationships"}
+            required = {"assets", "ohlcv", "metadata", "events", "lineage", "asset_relationships", "reference_series"}
             missing = sorted(required - tables)
             if missing:
                 raise ValueError(f"dataset is missing required tables: {', '.join(missing)}")
@@ -201,6 +213,13 @@ class DatasetSnapshot:
             ).fetchall())
             for relationship in relationships:
                 relationship["observed_at"] = _time(relationship["observed_at"])
+            reference_series = tuple(dict(zip(("series_id", "observed_at", "value", "source", "evidence_json"), row))
+                                     for row in conn.execute(
+                "SELECT series_id, observed_at, value, source, evidence_json FROM reference_series "
+                "ORDER BY series_id, observed_at, source"
+            ).fetchall())
+            for point in reference_series:
+                point["observed_at"] = _time(point["observed_at"])
             asset_ids = {asset.canonical_id for asset in assets}
             unknown_metadata = sorted(item.canonical_id for item in metadata if item.canonical_id not in asset_ids)
             unknown_events = sorted(item["canonical_id"] for item in events if item["canonical_id"] not in asset_ids)
@@ -216,10 +235,10 @@ class DatasetSnapshot:
             conn.close()
         payload = {"assets": [asdict(x) for x in assets], "bars": [asdict(x) for x in bars],
                    "metadata": [asdict(x) for x in metadata], "events": list(events), "lineage": list(lineage),
-                   "asset_relationships": list(relationships),
+                   "asset_relationships": list(relationships), "reference_series": list(reference_series),
                    "policy": asdict(policy)}
         identity = hashlib.sha256(json.dumps(payload, default=str, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
-        return cls(assets, tuple(bars), metadata, events, lineage, policy, identity, relationships)
+        return cls(assets, tuple(bars), metadata, events, lineage, policy, identity, relationships, reference_series)
 
     def bars_for(self, canonical_id: str) -> tuple[Bar, ...]:
         if canonical_id not in self._asset_ids:
@@ -249,6 +268,12 @@ class DatasetSnapshot:
     def events_at(self, canonical_id: str, decision_time: datetime) -> tuple[dict[str, Any], ...]:
         point = _time(decision_time)
         return tuple(event for event in self.events if event["canonical_id"] == canonical_id and _time(event["timestamp"]) <= point)
+
+    def reference_series_at(self, series_id: str, decision_time: datetime) -> tuple[dict[str, Any], ...]:
+        """Return a point-in-time reference series (e.g. a quote/USD rate) visible no later than the decision."""
+        point = _time(decision_time)
+        return tuple(item for item in self._reference_series_by_id.get(series_id, ())
+                     if _time(item["observed_at"]) <= point)
 
     def all_bars(self) -> tuple[Bar, ...]:
         return self.bars
