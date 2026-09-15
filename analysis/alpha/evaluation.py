@@ -138,7 +138,7 @@ class PromotionPolicy:
             raise ValueError("minimum independent launches must be a positive integer")
         if not (0 < self.minimum_coverage <= 1):
             raise ValueError("minimum coverage must be in (0, 1]")
-        if not isinstance(self.minimum_effect_size, (int, float)) or not math.isfinite(self.minimum_effect_size) \
+        if type(self.minimum_effect_size) not in (int, float) or not math.isfinite(self.minimum_effect_size) \
                 or self.minimum_effect_size <= 0:
             raise ValueError("minimum effect size must be a positive finite number")
 
@@ -218,6 +218,10 @@ def evaluate_candidate_promotion(candidate: CandidateResult, evidence: Promotion
     missing = [reason for reason, value in required.items() if value is None]
     if missing:
         return _promotion_decision("insufficient_evidence", missing, policy, evidence)
+    measured_effect = candidate.baseline_comparison.get("difference")
+    if (type(measured_effect) not in (int, float) or not math.isfinite(measured_effect)
+            or not math.isclose(valid_effect_size, measured_effect, rel_tol=0.0, abs_tol=1e-12)):
+        return _promotion_decision("rejected", ["EFFECT_SIZE_MISMATCH"], policy, evidence)
     failed = []
     if evidence.discovery_adjusted_p_value > policy.discovery_q:
         failed.append("DISCOVERY_CORRECTION_FAILED")

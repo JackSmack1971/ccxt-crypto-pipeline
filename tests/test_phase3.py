@@ -445,12 +445,18 @@ def test_candidate_promotion_separates_practical_effect_from_uncertainty():
     assert invalid.state == "insufficient_evidence"
     assert "MISSING_EFFECT_SIZE" in invalid.reasons
 
+    contradictory = evaluate_candidate_promotion(candidate, replace(evidence, effect_size=.10))
+    assert contradictory.state == "rejected"
+    assert contradictory.reasons == ("EFFECT_SIZE_MISMATCH",)
+
 
 def test_promotion_policy_requires_a_positive_finite_effect_floor():
     with pytest.raises(ValueError, match="minimum effect size"):
         PromotionPolicy(minimum_effect_size=0)
     with pytest.raises(ValueError, match="minimum effect size"):
         PromotionPolicy(minimum_effect_size=float("inf"))
+    with pytest.raises(ValueError, match="minimum effect size"):
+        PromotionPolicy(minimum_effect_size=True)
 
 def test_temporal_alignment_rejects_permuted_labels_and_artifacts_replay_identically(tmp_path):
     data = snapshot()
