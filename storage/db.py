@@ -46,6 +46,7 @@ def classify_provider_failure(error_message: str | None) -> str:
 def connect(db_path: str | Path) -> duckdb.DuckDBPyConnection:
     """Open a database and ensure the canonical schema exists."""
     connection = duckdb.connect(str(db_path))
+    connection.execute("SET TimeZone='UTC'")
     initialize(connection)
     return connection
 
