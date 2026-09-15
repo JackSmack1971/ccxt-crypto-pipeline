@@ -1,6 +1,9 @@
 from datetime import datetime, timezone
 
+import pytest
+
 from ingestion.cex import backfill, universe
+from ingestion.cex import common
 from ingestion.cex.common import contract_address
 from storage.db import read_ohlcv, read_runs
 
@@ -67,3 +70,58 @@ def test_universe_filters_spot_markets_by_quote_volume(tmp_path, monkeypatch):
 
 def test_contract_address_reads_exchange_raw_metadata():
     assert contract_address({"info": {"baseAsset": {"contractAddress": "0xUSDC"}}}) == "0xUSDC"
+
+
+@pytest.mark.parametrize(
+    ("contents", "expected"),
+    [("database_path: data.duckdb\n", {"database_path": "data.duckdb"}),
+     ("", {})],
+)
+def test_load_config_accepts_mapping_and_empty_yaml(tmp_path, contents, expected):
+    path = tmp_path / "cex.yaml"
+    path.write_text(contents, encoding="utf-8")
+
+    assert common.load_config(path) == expected
+
+
+def test_load_config_rejects_non_mapping_yaml(tmp_path):
+    path = tmp_path / "cex.yaml"
+    path.write_text("- not-a-mapping\n", encoding="utf-8")
+
+    with pytest.raises(ValueError, match="must be a mapping"):
+        common.load_config(path)
+
+
+def test_create_exchange_rejects_unsupported_id():
+    with pytest.raises(ValueError, match="unsupported ccxt exchange: missing_exchange"):
+        common.create_exchange("missing_exchange")
+
+
+def test_create_exchange_enables_rate_limit(monkeypatch):
+    received = []
+
+    class FakeExchange:
+        def __init__(self, options):
+            received.append(options)
+
+    monkeypatch.setattr(common.ccxt, "fake_exchange", FakeExchange, raising=False)
+
+    common.create_exchange("fake_exchange")
+
+    assert received == [{"enableRateLimit": True}]
+
+
+@pytest.mark.parametrize(
+    ("value", "expected"),
+    [("2025-01-01", int(datetime(2025, 1, 1).timestamp() * 1000)),
+     ("2025-01-01T00:00:00+00:00", 1735689600000),
+     ("2024-12-31T19:00:00-05:00", 1735689600000)],
+)
+def test_parse_since_converts_iso_values_to_utc_milliseconds(value, expected):
+    assert backfill._parse_since(value) == expected
+
+
+@pytest.mark.parametrize("value", ["1735689600", "not-a-date", ""])
+def test_parse_since_rejects_epoch_like_and_malformed_values(value):
+    with pytest.raises((TypeError, ValueError)):
+        backfill._parse_since(value)

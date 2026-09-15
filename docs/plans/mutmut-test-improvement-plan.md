@@ -1,6 +1,6 @@
 # Mutmut test-improvement plan
 
-Status: U1 and U2 implemented; U3 is the next active remediation slice. The campaign evidence
+Status: U1–U3 implemented; U4 is the next active remediation slice. The campaign evidence
 below remains partial and is not a complete mutation score.
 
 ## Execution update — 2026-09-14
@@ -18,6 +18,23 @@ conservation, invalid and short targets, insufficient cash, all stale-signal pol
 final pending orders. The focused suite passed 64 tests; the full suite passed 211 tests with
 the same five pre-existing Phase 5/storage failures. U3 is complete for this test-only slice;
 the next planned work is U4 unless refreshed mutation evidence changes prioritization.
+
+## Execution update — 2026-09-14 (U4 active)
+
+U4 is the active test-only slice. It targets the meaningful pure/helper contracts in
+`ingestion/cex/common.py` and `ingestion/cex/backfill.py`: YAML configuration shape validation,
+clear unsupported-exchange errors, rate-limit construction, and `_parse_since` handling for
+ISO dates, timezone-aware timestamps, epoch-like values, and malformed input. Tests remain
+offline and provider construction is mocked. No production behavior or mutmut configuration
+is changed by this slice.
+
+U4 was implemented in `tests/test_cex.py`: mapping and empty/non-mapping YAML cases, unsupported
+exchange rejection, rate-limit construction, three ISO/timezone parsing cases, and rejection of
+epoch-like or malformed values. The focused suite passed 14 tests with
+`uv run --no-sync python -m pytest tests/test_cex.py -q`. A full-suite attempt reached 206 passed
+tests but also reported existing failures and pytest setup/storage errors after the local temp
+volume exhausted its space; that run is not treated as a clean full-suite gate. No production
+files or mutmut configuration were changed.
 
 ## Evidence boundary
 
