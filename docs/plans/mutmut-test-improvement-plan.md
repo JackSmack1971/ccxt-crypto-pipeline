@@ -1,7 +1,18 @@
 # Mutmut test-improvement plan
 
-Status: U1–U13 implemented; a fresh complete mutation campaign remains blocked by the local
+Status: U1–U14 implemented; a fresh complete mutation campaign remains blocked by the local
 WSL environment and is not claimed as a mutation-score result.
+
+## Execution update — 2026-09-15 (U14 complete)
+
+U14 added focused Phase 6 deterministic-runner helper coverage in `tests/test_phase6.py`:
+selection-rule operators and percentile boundaries, malformed rules, partition-local token
+selection with missing/non-finite values, unsupported selection features, and manifest secret
+redaction for fields and credential-bearing URLs. The focused suite passed 82 tests with
+`uv run --no-sync python -m pytest tests/test_phase6.py -q`; the complete suite passed 341
+tests. This remains test-only and does not claim refreshed mutation results. The replacement
+Ubuntu WSL distribution starts successfully, but its Python/mutmut environment is not yet
+installed, so the complete POSIX campaign and terminal-mutant reconciliation remain pending.
 
 ## Environment recovery update — 2026-09-15
 
