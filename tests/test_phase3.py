@@ -12,6 +12,7 @@ from analysis.alpha import (CohortConfig, FeatureDefinition, FeatureRegistry, HO
                             PromotionEvidence, evaluate_candidate_promotion,
                             ConversionObservation, ConversionPolicy,
                             EligibilityPolicy, evaluate_chain_eligibility)
+from analysis.alpha.features import close_return_feature, launch_liquidity_feature
 from analysis.datasets import Asset, Bar, DatasetPolicy, DatasetSnapshot
 from storage.db import connect, insert_event, insert_ohlcv_batch, upsert_asset
 
@@ -115,6 +116,66 @@ def test_feature_registry_carries_temporal_contract_and_rejects_future_definitio
     bad.register(FeatureDefinition("future", ("future.column",), "future", timedelta(0)))
     with pytest.raises(ValueError, match="effective timestamp"):
         compute_features(snapshot(), cohort, bad)
+
+
+def test_feature_factories_preserve_launch_liquidity_and_include_both_lookback_endpoints():
+    data = snapshot()
+    t0 = datetime(2025, 1, 1, 2)
+    member = type("Member", (), {
+        "token_id": "ethereum:0xaaa", "canonical_id": "ethereum:0xaaa",
+        "t0": t0, "liquidity_usd": 12_000,
+    })()
+    registry = FeatureRegistry()
+    registry.register(launch_liquidity_feature())
+    registry.register(close_return_feature(timedelta(hours=2)))
+
+    row = compute_features(data, (member,), registry)[0]
+
+    assert row["launch_liquidity_usd"] == 12_000
+    assert row["lookback_return"] == pytest.approx(__import__("math").log(12 / 10))
+    assert row["feature_provenance"]["lookback_return"]["observation_count"] == 3
+
+
+@pytest.mark.parametrize("close", [None, "not-a-number", 0, -1])
+def test_close_return_feature_ignores_invalid_and_non_positive_closes(close):
+    definition = close_return_feature(timedelta(hours=2))
+    bars = (
+        Bar("ethereum:0xaaa", datetime(2025, 1, 1), close, close, close, close, 1, "1h", "fixture"),
+        Bar("ethereum:0xaaa", datetime(2025, 1, 1, 1), 10, 10, 10, 10, 1, "1h", "fixture"),
+    )
+
+    assert definition.compute(None, bars) is None
+
+
+def test_close_return_feature_requires_two_valid_bars_and_preserves_log_direction():
+    definition = close_return_feature(timedelta(hours=3))
+    bars = (
+        Bar("ethereum:0xaaa", datetime(2025, 1, 1), 10, 10, 10, 10, 1, "1h", "fixture"),
+        Bar("ethereum:0xaaa", datetime(2025, 1, 1, 1), 0, 0, 0, 0, 1, "1h", "fixture"),
+        Bar("ethereum:0xaaa", datetime(2025, 1, 1, 2), 5, 5, 5, 5, 1, "1h", "fixture"),
+    )
+
+    assert definition.compute(None, bars) == pytest.approx(__import__("math").log(5 / 10))
+
+
+def test_events_at_matches_canonical_identity_and_excludes_future_or_other_assets():
+    t0 = datetime(2025, 1, 1)
+    assets = (
+        Asset("ethereum:0xaaa", "dex", "ethereum", "SAME", t0, "0xaaa"),
+        Asset("solana:SAME", "dex", "solana", "SAME", t0, "SAME"),
+    )
+    events = (
+        {"canonical_id": "ethereum:0xaaa", "event_type": "at-boundary", "timestamp": t0,
+         "payload_json": {}, "source": "fixture"},
+        {"canonical_id": "ethereum:0xaaa", "event_type": "future", "timestamp": t0 + timedelta(seconds=1),
+         "payload_json": {}, "source": "fixture"},
+        {"canonical_id": "solana:SAME", "event_type": "other-identity", "timestamp": t0,
+         "payload_json": {}, "source": "fixture"},
+    )
+    data = DatasetSnapshot(assets, (), (), events, (), DatasetPolicy(), "events-fixture")
+
+    assert data.events_at("ethereum:0xaaa", t0) == (events[0],)
+    assert data.events_at("ethereum:SAME", t0) == ()
 
 
 def test_labels_use_fixed_horizon_and_report_right_censoring():

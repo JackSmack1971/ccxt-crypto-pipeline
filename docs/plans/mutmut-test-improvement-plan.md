@@ -55,6 +55,20 @@ not runnable because the system interpreter lacks repository dependencies such a
 production files or mutmut configuration were changed. U5 is complete for this test-only slice;
 the next planned work is U6 unless refreshed mutation evidence changes prioritization.
 
+## Execution update — 2026-09-14 (U6 complete)
+
+U6 was implemented in `tests/test_phase3.py`. The added cases cover launch-liquidity propagation,
+two-point logarithmic returns, inclusive lookback endpoints, insufficient valid bars, invalid and
+non-positive closes, and `DatasetSnapshot.events_at` exact canonical-identity matching with
+boundary inclusion and future/other-identity exclusion. The focused suite passed 29 tests with
+`uv run --no-sync python -m pytest tests/test_phase3.py -q`. This remains a test-only slice: no
+production files, persistence schema, or mutmut configuration were changed. Refreshed campaign
+evidence is not claimed because the prior WSL campaign was incomplete; these tests are the
+targeted remediation for the U6 historical no-test seams. The provisioned full suite completed
+with 235 passed and the same five pre-existing Phase 5/storage failures; bare `python -m pytest`
+could not collect because the system interpreter lacks repository dependencies including DuckDB
+and APScheduler.
+
 ## Evidence boundary
 
 The artifact inspected was `/mutants`, especially `mutants/mutmut-stats.json` and the
