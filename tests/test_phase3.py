@@ -267,6 +267,95 @@ def test_split_purges_feature_and_label_windows_at_fixed_boundaries():
     assert split.boundaries[1]["first_later_token_id"] == "8"
 
 
+def test_evaluation_baselines_filter_horizon_and_report_even_median_and_censoring():
+    class Label:
+        def __init__(self, token_id, horizon, status, value):
+            self.token_id = token_id
+            self.horizon = horizon
+            self.status = status
+            self.value = value
+
+    labels = (
+        Label("ethereum:a", "1h", "COMPLETE", .10),
+        Label("ethereum:b", "1h", "COMPLETE", .30),
+        Label("solana:c", "1h", "ECONOMIC_FAILURE", None),
+        Label("solana:d", "1h", "RIGHT_CENSORED", None),
+        Label("ethereum:e", "2h", "COMPLETE", 99),
+    )
+
+    baseline = descriptive_baseline(labels, horizon="1h")
+
+    assert baseline["sample_count"] == 2
+    assert baseline["coverage"] == .5
+    assert baseline["mean_return"] == pytest.approx(.2)
+    assert baseline["median_return"] == pytest.approx(.2)
+    assert baseline["failure_rate"] == .25
+    assert baseline["chain_breakdown"] == {"ethereum": 2}
+    assert baseline["censoring"] == {
+        "ECONOMIC_FAILURE": 1, "DATA_CENSORED": 0, "RIGHT_CENSORED": 1,
+    }
+
+    comparison = baseline_comparison(labels, horizon="1h", candidate_mean=.25)
+    assert comparison["candidate_minus_baseline"] == pytest.approx(.05)
+    assert comparison["families"]["market_chain"]["ethereum"]["mean_return"] == pytest.approx(.2)
+
+
+def test_score_candidate_preserves_missingness_and_applies_turnover_costs():
+    class Label:
+        def __init__(self, token_id, status, value):
+            self.token_id = token_id
+            self.horizon = "1h"
+            self.status = status
+            self.value = value
+
+    labels = (Label("ethereum:a", "COMPLETE", .10),
+              Label("ethereum:b", "COMPLETE", .30),
+              Label("solana:c", "DATA_CENSORED", None))
+    result = score_candidate("costed", labels, horizon="1h", turnover=2.0,
+                             costs=(0.0, .01), baseline_mean=.05)
+
+    assert result.sample_size == 2
+    assert result.coverage == pytest.approx(2 / 3)
+    assert result.missingness == pytest.approx(1 / 3)
+    assert result.mean_return == pytest.approx(.2)
+    assert result.baseline_comparison["difference"] == pytest.approx(.15)
+    assert result.cost_sensitivity == {"0.0": pytest.approx(.2), "0.01": pytest.approx(.18)}
+
+
+def test_rank_candidates_prioritizes_governed_state_then_return_then_identity():
+    class Label:
+        def __init__(self, token_id, value):
+            self.token_id = token_id
+            self.horizon = "1h"
+            self.status = "COMPLETE"
+            self.value = value
+
+    labels = tuple(Label(str(i), value) for i, value in enumerate((.1, .2, .3)))
+    discovered = score_candidate("zeta", labels, horizon="1h")
+    confirmed = replace(discovered, promotion=replace(discovered.promotion, state="holdout_confirmed"))
+    validation = replace(discovered, promotion=replace(discovered.promotion, state="validation_confirmed"),
+                         mean_return=.2)
+    ranked = rank_candidates((discovered, validation, confirmed))
+
+    assert [candidate.promotion.state for candidate in ranked] == [
+        "holdout_confirmed", "validation_confirmed", "discovered",
+    ]
+
+
+@pytest.mark.parametrize("kwargs", [
+    {"embargo_days": -1},
+    {"feature_lookback": timedelta(seconds=-1)},
+    {"label_horizon": timedelta(seconds=-1)},
+])
+def test_build_split_rejects_negative_temporal_configuration(kwargs):
+    class Row:
+        t0 = datetime(2025, 1, 1)
+        token_id = "one"
+
+    with pytest.raises(ValueError):
+        build_split((Row(),), **kwargs)
+
+
 def test_candidate_low_coverage_is_not_validated_alpha_and_handoff_is_phase2_compatible():
     class Label:
         def __init__(self, i): self.token_id = str(i); self.horizon = "1h"; self.status = "COMPLETE"; self.value = .1

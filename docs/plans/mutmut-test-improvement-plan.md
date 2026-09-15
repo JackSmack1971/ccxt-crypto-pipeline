@@ -1,7 +1,16 @@
 # Mutmut test-improvement plan
 
-Status: U1–U7 implemented; a fresh complete mutation campaign remains blocked by the local
+Status: U1–U8 implemented; a fresh complete mutation campaign remains blocked by the local
 WSL environment and is not claimed as a mutation-score result.
+
+## Execution update — 2026-09-14 (U8 complete)
+
+U8 added focused Phase 3 evaluation-contract coverage in `tests/test_phase3.py`: baseline
+horizon filtering, even-sample median and censoring breakdowns, baseline comparison arithmetic,
+candidate missingness and turnover-cost sensitivity, governed candidate ranking, and rejection
+of negative split temporal configuration. This remains test-only and does not claim refreshed
+mutation results. The next action remains restoring the POSIX environment and running a complete
+current campaign before assigning dispositions to active survivors, no-test results, or timeouts.
 
 ## Execution update — 2026-09-14
 
