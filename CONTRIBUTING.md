@@ -143,6 +143,38 @@ For `uv run --no-sync` on POSIX, use
 The shared environment is for read-only verification only. Provision the
 linked worktree itself before commands that may synchronize dependencies.
 
+### Mutation testing on Windows
+
+Mutmut 3.x requires POSIX `fork`, so run a complete mutation campaign from a
+WSL 2 Linux distribution rather than native Windows. The supported local
+mutation runner uses Ubuntu:
+
+```powershell
+wsl --install -d Ubuntu
+```
+
+For a storage-constrained mutation runner, place this in
+`%UserProfile%\.wslconfig` and run `wsl --shutdown` before starting the
+distribution:
+
+```ini
+[wsl2]
+memory=4GB
+processors=2
+swap=0
+```
+
+Run from the existing mounted working tree rather than cloning the repository
+into the distribution:
+
+```bash
+cd "/mnt/c/TEST repos/ccxt-crypto-pipeline"
+```
+
+Mutmut's generated `mutants/` directory can be large. Preserve the campaign
+evidence required by the active plan before removing it; never delete it only
+to make a mutation result appear clean.
+
 For Python changes, also run the relevant focused tests first and, when the
 scope warrants it:
 
