@@ -136,6 +136,36 @@ def test_feature_factories_preserve_launch_liquidity_and_include_both_lookback_e
     assert row["feature_provenance"]["lookback_return"]["observation_count"] == 3
 
 
+@pytest.mark.parametrize(
+    ("missing_value_policy", "expected", "rejected"),
+    [("unknown", None, False), ("zero", 0.0, False), ("reject", None, True)],
+)
+def test_launch_liquidity_feature_preserves_unknown_values_by_policy(missing_value_policy, expected, rejected):
+    member = type("Member", (), {
+        "token_id": "ethereum:0xaaa", "canonical_id": "ethereum:0xaaa",
+        "t0": datetime(2025, 1, 1), "liquidity_usd": None,
+    })()
+    definition = replace(launch_liquidity_feature(), missing_value_policy=missing_value_policy)
+
+    registry = FeatureRegistry()
+    registry.register(definition)
+    values = compute_features(snapshot(), (member,), registry)[0]
+    assert values["launch_liquidity_usd"] == expected
+    assert ("launch_liquidity_usd" in values.get("rejected_features", [])) is rejected
+
+
+def test_close_return_feature_keeps_custom_name_and_uses_valid_observations():
+    definition = close_return_feature(timedelta(hours=3), name="custom_return")
+    bars = (
+        Bar("ethereum:0xaaa", datetime(2025, 1, 1), 10, 10, 10, 10, 1, "1h", "fixture"),
+        Bar("ethereum:0xaaa", datetime(2025, 1, 1, 1), "invalid", "invalid", "invalid", "invalid", 1, "1h", "fixture"),
+        Bar("ethereum:0xaaa", datetime(2025, 1, 1, 2), 20, 20, 20, 20, 1, "1h", "fixture"),
+    )
+
+    assert definition.name == "custom_return"
+    assert definition.compute(None, bars) == pytest.approx(__import__("math").log(2))
+
+
 @pytest.mark.parametrize("close", [None, "not-a-number", 0, -1])
 def test_close_return_feature_ignores_invalid_and_non_positive_closes(close):
     definition = close_return_feature(timedelta(hours=2))
@@ -176,6 +206,18 @@ def test_events_at_matches_canonical_identity_and_excludes_future_or_other_asset
 
     assert data.events_at("ethereum:0xaaa", t0) == (events[0],)
     assert data.events_at("ethereum:SAME", t0) == ()
+
+
+def test_events_at_returns_deterministic_time_order_for_unsorted_input():
+    t0 = datetime(2025, 1, 1)
+    assets = (Asset("ethereum:0xaaa", "dex", "ethereum", "0xaaa", t0, "0xaaa"),)
+    later = {"canonical_id": "ethereum:0xaaa", "event_type": "later", "timestamp": t0 + timedelta(hours=1),
+             "payload_json": {}, "source": "fixture"}
+    earlier = {"canonical_id": "ethereum:0xaaa", "event_type": "earlier", "timestamp": t0,
+               "payload_json": {}, "source": "fixture"}
+    data = DatasetSnapshot(assets, (), (), (later, earlier), (), DatasetPolicy(), "ordered-events")
+
+    assert data.events_at("ethereum:0xaaa", t0 + timedelta(hours=1)) == (earlier, later)
 
 
 def test_labels_use_fixed_horizon_and_report_right_censoring():

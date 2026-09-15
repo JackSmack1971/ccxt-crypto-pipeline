@@ -1,7 +1,7 @@
 # Mutmut test-improvement plan
 
-Status: U1–U4 implemented; U5 is the next active remediation slice. The campaign evidence
-below remains partial and is not a complete mutation score.
+Status: U1–U7 implemented; a fresh complete mutation campaign remains blocked by the local
+WSL environment and is not claimed as a mutation-score result.
 
 ## Execution update — 2026-09-14
 
@@ -68,6 +68,20 @@ targeted remediation for the U6 historical no-test seams. The provisioned full s
 with 235 passed and the same five pre-existing Phase 5/storage failures; bare `python -m pytest`
 could not collect because the system interpreter lacks repository dependencies including DuckDB
 and APScheduler.
+
+## Execution update — 2026-09-14 (U7 complete)
+
+U7 added the next narrow Phase 3 contract coverage in `tests/test_phase3.py`: launch-liquidity
+unknown/zero/reject policy behavior, custom close-return naming with invalid observations ignored,
+and deterministic chronological ordering from `DatasetSnapshot.events_at` when input events are
+unsorted. The focused suite passed 34 tests with
+`uv run --no-sync python -m pytest tests/test_phase3.py -q`. This remains test-only and does not
+claim refreshed mutation results. The system interpreter still cannot collect because DuckDB and
+APScheduler are unavailable, and WSL cannot start because its virtual disk is missing; therefore
+the fresh POSIX mutmut campaign required by the execution contract remains blocked. The
+provisioned full-suite result remains 235 passed with the same five pre-existing Phase 5/storage
+failures. The next action is to restore the POSIX environment, run the complete current campaign,
+and reconcile terminal survivors/no-test/timeout results before claiming any score change.
 
 ## Evidence boundary
 
