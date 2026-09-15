@@ -111,6 +111,38 @@ this prevents a verification command from unexpectedly accessing PyPI. When
 package-index access is unavailable, do not add an ad hoc `--with pytest`
 dependency: use the wrapper with the already-provisioned environment instead.
 
+### Linked worktrees
+
+Each linked worktree has its own ignored `.venv`, so `uv run --no-sync` is not
+valid in a fresh worktree until `uv sync --locked --extra test` has provisioned
+it. To run tests without creating another environment or accessing a package
+index, point the wrapper at a compatible, already-provisioned project venv:
+
+```powershell
+$env:CCXT_PROJECT_VENV = 'C:\path\to\primary-worktree\.venv'
+.\scripts\run-tests.ps1 tests/test_phase2.py -q
+```
+
+If a workflow specifically requires `uv run --no-sync`, point uv at the same
+environment explicitly:
+
+```powershell
+$env:UV_PROJECT_ENVIRONMENT = 'C:\path\to\primary-worktree\.venv'
+uv run --locked --no-sync python -m pytest tests/test_phase2.py -q
+```
+
+On POSIX shells, use:
+
+```bash
+CCXT_PROJECT_VENV=/path/to/primary-worktree/.venv ./scripts/run-tests tests/test_phase2.py -q
+```
+
+For `uv run --no-sync` on POSIX, use
+`UV_PROJECT_ENVIRONMENT=/path/to/primary-worktree/.venv uv run --locked --no-sync python -m pytest`.
+
+The shared environment is for read-only verification only. Provision the
+linked worktree itself before commands that may synchronize dependencies.
+
 For Python changes, also run the relevant focused tests first and, when the
 scope warrants it:
 
