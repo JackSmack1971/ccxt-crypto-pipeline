@@ -3,7 +3,7 @@
 **Status:** Active execution authority for forward work  
 **Current phase:** Phase 6 governed experiment control plane
 **Baseline:** `main` at `23dbd389af88cade4584cb5fdc10b60dc17fcc3b`
-**Last reconciled:** 2026-09-14 (Slice 6.3 closed; Slice 6.4 active)
+**Last reconciled:** 2026-09-15 (Slice 6.4 closed; Slice 6.5 active)
 
 This file is the durable forward roadmap for `ccxt-crypto-pipeline`. It exists so a new agent can determine the repository's actual execution frontier without reconstructing intent from chat history, stale phase prose, or commit messages.
 
@@ -888,11 +888,36 @@ Evidence:
 
 ## Slice 6.4 — Hypothesis-family governance
 
-**Status:** ACTIVE
+**Status:** DONE
 
 Freeze multiplicity families before evaluation and prevent post-result silent redefinition.
 
+Evidence:
+
+- `analysis/experiments/hypotheses.py` expands every declared
+  feature/threshold/horizon/subgroup cell into a deterministic frozen family
+  manifest whose content identity is bound to the complete grid, correction
+  policies, thresholds, and experiment-spec identity.
+- Family evaluation verifies that the frozen content still matches its identity
+  and requires an exact key match between the predeclared grid and submitted raw
+  p-values. Missing or extra cells fail closed, while explicit unavailable
+  (`None`) results remain present and rejected rather than disappearing from the
+  correction denominator.
+- Discovery applies the declared Benjamini-Hochberg policy and confirmation
+  applies the declared Holm-Bonferroni policy, with every corrected result bound
+  to the frozen `family_id`. The experiment runner freezes this manifest before
+  inspecting cohort or result data and persists it as
+  `hypothesis_family.json`; it still does not invent unavailable raw p-values.
+- `ExperimentSpec` now also rejects hypothesis features outside its declared
+  feature set. `tests/test_phase6.py` covers deterministic grid expansion,
+  identity changes, narrowed/widened submissions, modified frozen content,
+  correction binding, explicit unavailable results, spec cross-validation, and
+  the runner artifact. The locked full suite passed with 362 tests; the storage
+  migration guard, byte-compilation, and whitespace validation also passed.
+
 ## Slice 6.5 — Run catalog and comparison contract
+
+**Status:** ACTIVE
 
 Index immutable local research runs without mutating them; enable apples-to-apples comparisons only when methodology compatibility is proven.
 
@@ -1036,7 +1061,7 @@ For a fresh agent, the intended pickup sequence is:
 
 `AGENTS.md` → `ROADMAP.md` → active `docs/plans/phase-*.md` → relevant code/tests → Git history/status.
 
-The current frontier is **Slice 6.4 — Hypothesis-family governance**.
+The current frontier is **Slice 6.5 — Run catalog and comparison contract**.
 
 Phase 5 is DONE. Slice 5.7 closed the phase with
 `docs/plans/phase-5-data-plane-closure-matrix.md` and
@@ -1089,8 +1114,15 @@ against this catalog at construction time, and every experiment run writes
 a `definitions.json` artifact recording the resolved version and
 content-addressed identity of every feature/label the run actually used.
 
-Slice 6.4 has not started. It needs to freeze each experiment's
-`HypothesisFamily` grid (already declared and content-identified by Slice
-6.1, but not yet enforced against post-hoc redefinition) before evaluation,
-so a discovery/confirmation correction cannot be recomputed over a silently
-widened or narrowed hypothesis set after results are seen.
+Slice 6.4 is DONE. `analysis/experiments/hypotheses.py` expands the complete
+declared grid into a content-addressed `FrozenHypothesisFamily`, verifies its
+identity at evaluation, and accepts raw results only when their keys exactly
+match that frozen grid. Discovery and confirmation corrections are therefore
+bound to the same immutable family rather than a post-result narrowed or
+widened set. `run_experiment` creates and persists the family commitment before
+inspecting research results while continuing to leave unavailable significance
+evidence explicit rather than fabricating it.
+
+Slice 6.5 has not started. It needs to index immutable local experiment runs
+without mutating them and permit comparisons only after the feature/label and
+methodology compatibility contracts prove they are apples-to-apples.

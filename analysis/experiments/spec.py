@@ -188,6 +188,9 @@ class ExperimentSpec:
         unresolved_features = sorted(set(self.feature_set) - set(catalog_versions))
         if unresolved_features:
             raise ValueError(f"unsupported experiment feature identity: {', '.join(unresolved_features)}")
+        family_features = sorted(set(self.hypothesis_family.features) - set(self.feature_set))
+        if family_features:
+            raise ValueError(f"hypothesis family references undeclared experiment features: {', '.join(family_features)}")
         if not self.labels:
             raise ValueError("experiment spec requires at least one label definition")
         label_horizons = tuple(label.horizon for label in self.labels)

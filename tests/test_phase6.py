@@ -12,6 +12,7 @@ from analysis.alpha import (CohortConfig, FeatureDefinition, LabelDefinition, Pr
 from analysis.datasets import Asset, Bar, DatasetPolicy, DatasetSnapshot
 from analysis.experiments import (BaselinePolicy, CandidateDefinition, CostPolicy,
                                   ExperimentSpec, HypothesisFamily, SPEC_VERSION, SplitPolicy,
+                                  evaluate_hypothesis_family, freeze_hypothesis_family,
                                   experiment_spec_dict, experiment_spec_id, resolve_feature_registry,
                                   run_experiment)
 from analysis.experiments.runner import (_dump, _parse_selection_rule, _percentile,
@@ -317,6 +318,7 @@ def test_runner_executes_the_declared_sequence_and_honestly_withholds_significan
         "spec.json", "cohort.json", "features.json", "labels.json",
         "split.json", "baselines.json", "candidate.json", "promotion.json",
         "definitions.json",
+        "hypothesis_family.json",
     }
 
     definitions = json.loads((run / "definitions.json").read_text())
@@ -536,3 +538,67 @@ def test_baseline_policy_rejects_duplicate_families():
 def test_experiment_spec_rejects_blank_required_identity(kwargs, message):
     with pytest.raises(ValueError, match=message):
         build_spec(**kwargs)
+
+
+# --- Slice 6.4: hypothesis-family governance -------------------------------
+
+def test_frozen_hypothesis_family_expands_the_exact_grid_deterministically():
+    family = freeze_hypothesis_family(build_spec())
+    replay = freeze_hypothesis_family(build_spec())
+    assert family == replay
+    assert family.family_id == replay.family_id
+    assert len(family.hypotheses) == build_spec().hypothesis_family.size == 2
+    assert len({item.key for item in family.hypotheses}) == 2
+
+
+def test_family_identity_changes_when_the_predeclared_grid_changes():
+    original = freeze_hypothesis_family(build_spec())
+    changed_spec = build_spec(hypothesis_family=replace(
+        build_spec().hypothesis_family, thresholds=(">=p75", ">=p90")))
+    assert freeze_hypothesis_family(changed_spec).family_id != original.family_id
+
+
+def test_family_evaluation_rejects_post_result_narrowing_or_widening():
+    family = freeze_hypothesis_family(build_spec())
+    complete = {item.key: 0.01 for item in family.hypotheses}
+    narrowed = dict(complete)
+    narrowed.pop(next(iter(narrowed)))
+    with pytest.raises(ValueError, match="do not match frozen family.*missing=1, extra=0"):
+        evaluate_hypothesis_family(family, narrowed, stage="discovery",
+                                   dataset_version="fixture", date_tested="2025-01-01")
+    with pytest.raises(ValueError, match="do not match frozen family.*missing=0, extra=1"):
+        evaluate_hypothesis_family(family, {**complete, "post-hoc": 0.01}, stage="discovery",
+                                   dataset_version="fixture", date_tested="2025-01-01")
+
+
+def test_family_evaluation_binds_correction_results_to_frozen_family():
+    family = freeze_hypothesis_family(build_spec())
+    raw = {item.key: value for item, value in zip(family.hypotheses, (0.01, 0.8))}
+    result = evaluate_hypothesis_family(family, raw, stage="discovery",
+                                        dataset_version="fixture", date_tested="2025-01-01")
+    assert result.family_id == family.family_id
+    assert result.correction == "benjamini-hochberg"
+    assert [item.adjusted_value for item in result.hypotheses] == pytest.approx((0.02, 0.8))
+
+
+def test_family_evaluation_preserves_explicit_unavailable_result():
+    family = freeze_hypothesis_family(build_spec())
+    raw = {item.key: None for item in family.hypotheses}
+    result = evaluate_hypothesis_family(family, raw, stage="confirmation",
+                                        dataset_version="fixture", date_tested="2025-01-01")
+    assert all(item.adjusted_value is None and item.decision == "rejected"
+               for item in result.hypotheses)
+
+
+def test_family_evaluation_rejects_family_content_changed_after_freeze():
+    family = freeze_hypothesis_family(build_spec())
+    changed = replace(family, hypotheses=family.hypotheses[:-1])
+    with pytest.raises(ValueError, match="content does not match its frozen identity"):
+        evaluate_hypothesis_family(changed, {}, stage="discovery",
+                                   dataset_version="fixture", date_tested="2025-01-01")
+
+
+def test_hypothesis_family_features_must_be_declared_by_the_experiment():
+    with pytest.raises(ValueError, match="undeclared experiment features"):
+        build_spec(hypothesis_family=replace(build_spec().hypothesis_family,
+                                             features=("launch_liquidity_usd", "undeclared")))
