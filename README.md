@@ -150,6 +150,13 @@ holdout contract. Set it to `walk_forward` and declare `walk_forward_folds`
 records its training and validation membership plus purge/embargo removals;
 the final 20 percent remains sealed and is never included in a fold.
 
+Promotion also requires a declared practical-effect floor
+(`promotion_policy.minimum_effect_size`) and records the measured
+candidate-vs-baseline effect in its evidence. Statistical uncertainty and
+practical effect are separate gates: a statistically supported result below
+the effect floor is rejected, while missing effect evidence remains
+unavailable.
+
 ## Configuration
 
 Safe examples are provided in [`.env.example`](.env.example). YAML settings live in `config/cex.yaml`, `config/chains.yaml`, `config/evm.yaml`, and `config/solana.yaml`. The complete variable and credential setup is in [`docs/RUNBOOK.md`](docs/RUNBOOK.md).

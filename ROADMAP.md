@@ -3,7 +3,7 @@
 **Status:** Active execution authority for forward work  
 **Current phase:** Phase 7 robust validation and research scaling
 **Baseline:** `main` at `23dbd389af88cade4584cb5fdc10b60dc17fcc3b`
-**Last reconciled:** 2026-09-15 (Slice 7.2 closed; Slice 7.3 active)
+**Last reconciled:** 2026-09-15 (Slice 7.3 closed; Slice 7.4 active)
 
 This file is the durable forward roadmap for `ccxt-crypto-pipeline`. It exists so a new agent can determine the repository's actual execution frontier without reconstructing intent from chat history, stale phase prose, or commit messages.
 
@@ -1041,11 +1041,26 @@ Evidence:
 
 ## Slice 7.3 — Effect-size and minimum-evidence gates
 
-**Status:** ACTIVE
+**Status:** DONE
 
 Separate statistical significance from practical effect and require declared minimum evidence for promotion.
 
+Evidence:
+
+- `PromotionPolicy.minimum_effect_size` declares the practical-effect floor;
+  `PromotionEvidence.effect_size` records the measured candidate-minus-baseline
+  effect separately from uncertainty/significance evidence.
+- Missing effect evidence remains `insufficient_evidence`, while a finite effect
+  below the declared floor is rejected with `PRACTICAL_EFFECT_TOO_SMALL`.
+  Existing sample-size, independent-launch, and coverage gates remain mandatory.
+- `tests/test_phase3.py` covers missing and below-floor effect evidence, and the
+  runner/README preserve the contract in deterministic experiment outputs.
+- Focused and repository-wide fixture verification for this slice passed; live
+  provider behavior remains outside scope and unverified.
+
 ## Slice 7.4 — Cost/liquidity stress matrix
+
+**Status:** ACTIVE
 
 Evaluate candidate robustness across approved fee, slippage, liquidity, and missingness scenarios without changing the underlying candidate after holdout exposure.
 
@@ -1157,7 +1172,7 @@ For a fresh agent, the intended pickup sequence is:
 
 `AGENTS.md` → `ROADMAP.md` → active `docs/plans/phase-*.md` → relevant code/tests → Git history/status.
 
-The current frontier is **Slice 7.3 — Effect-size and minimum-evidence gates**.
+The current frontier is **Slice 7.4 — Cost/liquidity stress matrix**.
 
 Phase 5 is DONE. Slice 5.7 closed the phase with
 `docs/plans/phase-5-data-plane-closure-matrix.md` and

@@ -125,10 +125,22 @@ class PromotionPolicy:
     minimum_sample_size: int = 10
     minimum_independent_launches: int = 10
     minimum_coverage: float = .8
+    minimum_effect_size: float = .01
     discovery_correction: str = "benjamini-hochberg"
     discovery_q: float = .05
     confirmation_correction: str = "holm-bonferroni"
     confirmation_alpha: float = .05
+
+    def __post_init__(self):
+        if type(self.minimum_sample_size) is not int or self.minimum_sample_size < 1:
+            raise ValueError("minimum sample size must be a positive integer")
+        if type(self.minimum_independent_launches) is not int or self.minimum_independent_launches < 1:
+            raise ValueError("minimum independent launches must be a positive integer")
+        if not (0 < self.minimum_coverage <= 1):
+            raise ValueError("minimum coverage must be in (0, 1]")
+        if not isinstance(self.minimum_effect_size, (int, float)) or not math.isfinite(self.minimum_effect_size) \
+                or self.minimum_effect_size <= 0:
+            raise ValueError("minimum effect size must be a positive finite number")
 
 
 @dataclass(frozen=True)
@@ -137,6 +149,7 @@ class PromotionEvidence:
 
     target_stage: str = "discovery"
     discovery_adjusted_p_value: float | None = None
+    effect_size: float | None = None
     validation_replicated: bool | None = None
     validation_semantics_frozen: bool | None = None
     holdout_adjusted_p_value: float | None = None
@@ -193,8 +206,11 @@ def evaluate_candidate_promotion(candidate: CandidateResult, evidence: Promotion
     if candidate.coverage < policy.minimum_coverage:
         return _promotion_decision("insufficient_coverage", ["MINIMUM_COVERAGE"], policy, evidence)
 
+    valid_effect_size = (evidence.effect_size if isinstance(evidence.effect_size, (int, float))
+                         and math.isfinite(evidence.effect_size) else None)
     required = {
         "MISSING_DISCOVERY_CORRECTION": evidence.discovery_adjusted_p_value,
+        "MISSING_EFFECT_SIZE": valid_effect_size,
         "MISSING_BASELINE_COMPARISON": evidence.baseline_superior,
         "MISSING_UNCERTAINTY_EFFECT_EVIDENCE": evidence.uncertainty_supports_effect,
         "MISSING_COST_SENSITIVITY": evidence.cost_sensitivity_passed,
@@ -205,6 +221,8 @@ def evaluate_candidate_promotion(candidate: CandidateResult, evidence: Promotion
     failed = []
     if evidence.discovery_adjusted_p_value > policy.discovery_q:
         failed.append("DISCOVERY_CORRECTION_FAILED")
+    if valid_effect_size < policy.minimum_effect_size:
+        failed.append("PRACTICAL_EFFECT_TOO_SMALL")
     if not evidence.baseline_superior: failed.append("BASELINE_COMPARISON_FAILED")
     if not evidence.uncertainty_supports_effect: failed.append("UNCERTAINTY_EFFECT_FAILED")
     if not evidence.cost_sensitivity_passed: failed.append("COST_SENSITIVITY_FAILED")
