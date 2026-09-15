@@ -3,6 +3,18 @@
 Status: U1–U13 implemented; a fresh complete mutation campaign remains blocked by the local
 WSL environment and is not claimed as a mutation-score result.
 
+## Execution update — 2026-09-15 (baseline repair before fresh campaign)
+
+The current provisioned baseline initially reached 224 passed tests and then exposed the known
+Phase 5 closure failure. A direct reproduction showed that an aware UTC timestamp passed to
+DuckDB's naive `TIMESTAMP` storage was round-tripped in the local offset, placing the event before
+the UTC fixture boundary. The canonical storage connection now pins DuckDB's session timezone to
+UTC, restoring the existing naive-UTC dataset contract for all ingestion paths; a focused Solana
+test asserts that exact boundary. This is a narrow production correction required to restore the
+documented point-in-time closure, not a mutation-score claim. The fresh complete campaign remains
+blocked because WSL cannot attach Ubuntu's missing `ext4.vhdx`; native Windows cannot run mutmut
+3.x because it does not provide POSIX `fork`.
+
 ## Execution update — 2026-09-15 (U13 complete)
 
 U13 added focused Phase 2 metrics-contract coverage in `tests/test_phase2.py`:
