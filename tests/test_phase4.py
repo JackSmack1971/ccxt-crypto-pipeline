@@ -7,7 +7,7 @@ import pytest
 
 from reporting.package import build_approved_handoff, generate_package
 from reporting.package.handoff import _dump
-from reporting.claims.model import Claim, Derivation, Evidence, _derived_value
+from reporting.claims.model import Claim, Derivation, Evidence, _derived_value, validate_claims
 from reporting.render.static import render_svg, validate_accessibility
 from analysis.alpha import (CohortConfig, FeatureDefinition, FeatureRegistry, LabelDefinition,
                             PromotionEvidence, build_split, compute_features,
@@ -113,6 +113,63 @@ def test_phase4_claim_derivations_reject_invalid_inputs(operation, values, messa
     with pytest.raises(ValueError, match=message):
         _derived_value(_claim_for_derivation(operation, values),
                        {"results": [{"value": value} for value in values]})
+
+
+def _claim_manifest_and_rows(*, text, operation, values, sides=("left", "right")):
+    evidence = tuple(Evidence("results", index, "fixture-dataset", "fixture-config",
+                              {"start": "2025-01-01", "end": "2025-01-02"}, "fixture", side)
+                     for index, side in enumerate(sides[:len(values)]))
+    claim = Claim("comparison", text + " ratio", evidence=evidence,
+                  derivation=Derivation("value", operation, "ratio", "ratio", 1,
+                                        sides[0], sides[1]))
+    manifest = {"dataset_identity": "fixture-dataset", "query_config_identity": "fixture-config",
+                "time_range": {"start": "2025-01-01", "end": "2025-01-02"}}
+    return claim, manifest, {"results": [{"value": value} for value in values]}
+
+
+def test_phase4_claim_ledger_accepts_and_checks_comparative_provenance():
+    claim, manifest, staged = _claim_manifest_and_rows(
+        text="left was twice right: left versus right.", operation="ratio", values=(4.0, 2.0))
+    validated = validate_claims((claim,), manifest, staged)
+    assert validated[0]["evidence"][0]["side"] == "left"
+    assert validated[0]["derivation"]["right_label"] == "right"
+
+    mismatched, _, _ = _claim_manifest_and_rows(
+        text="left was twice right: left versus right.", operation="ratio", values=(4.0, 2.0),
+        sides=("other", "right"))
+    mismatched = replace(mismatched, derivation=replace(mismatched.derivation, left_label="left"))
+    with pytest.raises(ValueError, match="comparative evidence sides"):
+        validate_claims((mismatched,), manifest, staged)
+
+
+@pytest.mark.parametrize(("text", "values", "message"), [
+    ("left was twice right: left versus right.", (3.0, 2.0), "twice comparison disagrees"),
+    ("left was higher than right: left versus right.", (1.0, 2.0), "direction disagrees"),
+    ("left was lower than right: left versus right.", (2.0, 1.0), "direction disagrees"),
+])
+def test_phase4_claim_ledger_rejects_comparative_semantic_mismatches(text, values, message):
+    claim, manifest, staged = _claim_manifest_and_rows(text=text, operation="ratio", values=values)
+    with pytest.raises(ValueError, match=message):
+        validate_claims((claim,), manifest, staged)
+
+
+_CLAIM_TIME_RANGE = {"start": "2025-01-01", "end": "2025-01-02"}
+_CLAIM_MANIFEST = {"dataset_identity": "fixture-dataset", "query_config_identity": "fixture-config",
+                   "time_range": _CLAIM_TIME_RANGE}
+_MISSING_ROW_CLAIM = Claim(
+    "missing", "A fact.",
+    evidence=(Evidence("results", 1, "fixture-dataset", "fixture-config", _CLAIM_TIME_RANGE, "fixture"),),
+)
+
+
+@pytest.mark.parametrize("claims, staged, message", [
+    pytest.param((Claim("duplicate", "A fact.", kind="interpretation"),
+                  Claim("duplicate", "Another fact.", kind="interpretation")), {}, "duplicate claim"),
+    pytest.param((_MISSING_ROW_CLAIM,), {"results": [{"value": 1.0}]}, "missing row"),
+])
+def test_phase4_claim_ledger_rejects_duplicate_ids_and_missing_rows(claims, staged, message):
+    with pytest.raises(ValueError, match=message):
+        validate_claims(claims, _CLAIM_MANIFEST, staged)
 
 
 def test_phase4_static_renderer_sorts_declared_x_values_before_plotting():

@@ -1,7 +1,18 @@
 # Mutmut test-improvement plan
 
-Status: U1–U10 implemented; a fresh complete mutation campaign remains blocked by the local
+Status: U1–U11 implemented; a fresh complete mutation campaign remains blocked by the local
 WSL environment and is not claimed as a mutation-score result.
+
+## Execution update — 2026-09-14 (U11 complete)
+
+U11 added focused Phase 4 claim-ledger tests in `tests/test_phase4.py`: comparative evidence
+side provenance, valid ratio comparisons, twice/direction semantic mismatches, duplicate claim
+IDs, and missing staged rows. The focused suite passed 57 tests with
+`uv run --no-sync python -m pytest tests/test_phase4.py -q`. This remains test-only and does
+not claim refreshed mutation results. WSL is still unavailable because the Ubuntu virtual disk
+cannot be attached, so the complete POSIX campaign and terminal-mutant reconciliation remain
+blocked. The full-suite baseline remains 267 passed with the same five pre-existing Phase 5/storage
+failures.
 
 ## Execution update — 2026-09-14 (U10 complete)
 
