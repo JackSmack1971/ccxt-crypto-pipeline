@@ -3,7 +3,7 @@
 **Status:** Active execution authority for forward work  
 **Current phase:** Phase 7 robust validation and research scaling
 **Baseline:** `main` at `23dbd389af88cade4584cb5fdc10b60dc17fcc3b`
-**Last reconciled:** 2026-09-15 (Slice 7.1 closed; Slice 7.2 active)
+**Last reconciled:** 2026-09-15 (Slice 7.2 closed; Slice 7.3 active)
 
 This file is the durable forward roadmap for `ccxt-crypto-pipeline`. It exists so a new agent can determine the repository's actual execution frontier without reconstructing intent from chat history, stale phase prose, or commit messages.
 
@@ -1020,11 +1020,28 @@ Evidence:
 
 ## Slice 7.2 — Robust uncertainty
 
-**Status:** ACTIVE
+**Status:** DONE
 
 Add approved bootstrap/resampling methods where dependence structure permits them; retain method/config identity in artifacts.
 
+Evidence:
+
+- `analysis/experiments/uncertainty.py` adds the versioned, fail-closed
+  `moving_block_bootstrap` estimator for ordered dependent observations with
+  deterministic resampling and percentile intervals. Empty or undersized
+  evidence remains explicitly unavailable.
+- `UncertaintyPolicy` is part of the content-addressed experiment spec, and
+  every run emits hash-bound `uncertainty.json` containing the complete method
+  and configuration identity. `tests/test_phase7.py` covers deterministic
+  replay, unsupported dependence, explicit missingness, and manifest linkage.
+- The locked full suite, byte compilation, and whitespace checks passed for
+  this slice. The storage migration guard was not applicable because storage
+  schema/accessor files were unchanged. Live-provider behavior remains
+  outside the slice and unverified.
+
 ## Slice 7.3 — Effect-size and minimum-evidence gates
+
+**Status:** ACTIVE
 
 Separate statistical significance from practical effect and require declared minimum evidence for promotion.
 
@@ -1140,7 +1157,7 @@ For a fresh agent, the intended pickup sequence is:
 
 `AGENTS.md` → `ROADMAP.md` → active `docs/plans/phase-*.md` → relevant code/tests → Git history/status.
 
-The current frontier is **Slice 7.1 — Walk-forward / purged evaluation**.
+The current frontier is **Slice 7.3 — Effect-size and minimum-evidence gates**.
 
 Phase 5 is DONE. Slice 5.7 closed the phase with
 `docs/plans/phase-5-data-plane-closure-matrix.md` and
@@ -1229,6 +1246,8 @@ expanding training window, scores the following non-overlapping validation
 window, retains every fold's membership/removal/result evidence, and never
 passes the final sealed holdout into fold scoring.
 
-Slice 7.2 is ACTIVE. It should add approved bootstrap/resampling methods only
-where the declared dependence structure permits them, retaining complete method
-and configuration identity in immutable run artifacts.
+Slice 7.2 is DONE. `UncertaintyPolicy` now declares the approved deterministic
+moving-block bootstrap, and each run retains method/configuration identity plus
+the selected-candidate observation scope in `uncertainty.json`. Unsupported
+dependence structures and insufficient observations remain explicit rather than
+being imputed.

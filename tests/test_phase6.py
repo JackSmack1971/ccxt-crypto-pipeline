@@ -328,6 +328,7 @@ def test_runner_executes_the_declared_sequence_and_honestly_withholds_significan
         "split.json", "baselines.json", "candidate.json", "promotion.json",
         "definitions.json",
         "hypothesis_family.json",
+        "uncertainty.json",
     }
 
     definitions = json.loads((run / "definitions.json").read_text())

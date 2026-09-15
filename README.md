@@ -137,6 +137,12 @@ artifact and writes outside the immutable run directory. Approval attests to
 human review only: it does not change the candidate's promotion state, unseal a
 holdout, authorize trading, or publish a result.
 
+Experiment runs also emit deterministic `uncertainty.json` evidence using the
+configured moving-block bootstrap policy. The policy records its method,
+dependence structure, resample count, block size, and seed; unsupported
+dependence structures fail validation and unavailable observations remain
+explicit rather than being imputed.
+
 Experiment specs select evaluation behavior through `split.evaluation_mode`.
 The default `single_split` preserves the chronological discovery/validation/
 holdout contract. Set it to `walk_forward` and declare `walk_forward_folds`

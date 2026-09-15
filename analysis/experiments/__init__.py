@@ -22,6 +22,7 @@ from .control import (APPROVAL_VERSION, approve_experiment_run, execute_experime
                       inspect_experiment_run, load_experiment_spec, validate_experiment_spec)
 from .walk_forward import (WalkForwardEvaluation, WalkForwardFold,
                            build_walk_forward_evaluation)
+from .uncertainty import UncertaintyPolicy, bootstrap_mean
 
 __all__ = [
     "BaselinePolicy", "CandidateDefinition", "CostPolicy", "ExperimentSpec",
@@ -35,4 +36,5 @@ __all__ = [
     "APPROVAL_VERSION", "approve_experiment_run", "execute_experiment",
     "inspect_experiment_run", "load_experiment_spec", "validate_experiment_spec",
     "WalkForwardEvaluation", "WalkForwardFold", "build_walk_forward_evaluation",
+    "UncertaintyPolicy", "bootstrap_mean",
 ]

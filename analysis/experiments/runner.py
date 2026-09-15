@@ -17,7 +17,7 @@ import hashlib
 import json
 import math
 import re
-from dataclasses import asdict, is_dataclass
+from dataclasses import asdict, is_dataclass, replace
 from datetime import timedelta
 from pathlib import Path
 from typing import Any, Callable
@@ -32,6 +32,7 @@ from analysis.datasets.snapshot import DatasetSnapshot
 from .spec import ExperimentSpec, experiment_spec_dict, experiment_spec_id
 from .hypotheses import freeze_hypothesis_family
 from .walk_forward import build_walk_forward_evaluation
+from .uncertainty import bootstrap_mean
 
 MANIFEST_VERSION = "phase6-run-v1"
 
@@ -217,6 +218,19 @@ def run_experiment(spec: ExperimentSpec, snapshot: DatasetSnapshot, output_dir: 
                                 baseline_mean=baselines["no_trade"]["mean_return"],
                                 turnover=spec.costs.turnover, costs=spec.costs.scenarios,
                                 min_coverage=spec.candidate.min_coverage)
+    selected_labels = tuple(label for label in discovery_labels if label.token_id in selected_ids
+                            and label.status == "COMPLETE" and label.value is not None)
+    uncertainty = {**bootstrap_mean((label.value for label in selected_labels), spec.uncertainty),
+                   "scope": "selected_candidate_observations",
+                   "candidate": {"name": spec.candidate.name, "horizon": spec.candidate.horizon,
+                                 "selected_token_ids": sorted(label.token_id for label in selected_labels)}}
+    candidate = replace(candidate, uncertainty={
+        **candidate.uncertainty,
+        "standard_ci95_low": candidate.uncertainty["ci95_low"],
+        "standard_ci95_high": candidate.uncertainty["ci95_high"],
+        "ci95_low": uncertainty["ci95_low"], "ci95_high": uncertainty["ci95_high"],
+        "method": uncertainty["method"], "policy": uncertainty["config"],
+    })
 
     difference = candidate.baseline_comparison.get("difference")
     ci95_low = candidate.uncertainty.get("ci95_low")
@@ -254,6 +268,7 @@ def run_experiment(spec: ExperimentSpec, snapshot: DatasetSnapshot, output_dir: 
         "promotion.json": decision,
         "definitions.json": definitions,
         "hypothesis_family.json": hypothesis_family,
+        "uncertainty.json": uncertainty,
     }
     if walk_forward is not None:
         artifacts["walk_forward.json"] = _walk_forward_results(
