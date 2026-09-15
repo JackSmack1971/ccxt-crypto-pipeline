@@ -78,6 +78,8 @@ The status command prints JSON derived from the `runs` table. A live cycle can s
 - A local governed-experiment interface that validates declarative specs, runs
   them against read-only persisted snapshots, verifies immutable results, and
   records separate human approval attestations.
+- Optional, explicitly configured purged walk-forward folds with expanding
+  training windows, non-overlapping validation windows, and a sealed holdout.
 
 ## Architecture
 
@@ -134,6 +136,13 @@ source with repeatable `--source` options. `approve` first verifies every run
 artifact and writes outside the immutable run directory. Approval attests to
 human review only: it does not change the candidate's promotion state, unseal a
 holdout, authorize trading, or publish a result.
+
+Experiment specs select evaluation behavior through `split.evaluation_mode`.
+The default `single_split` preserves the chronological discovery/validation/
+holdout contract. Set it to `walk_forward` and declare `walk_forward_folds`
+(at least two) to emit a hash-bound `walk_forward.json` artifact. Every fold
+records its training and validation membership plus purge/embargo removals;
+the final 20 percent remains sealed and is never included in a fold.
 
 ## Configuration
 
@@ -200,11 +209,9 @@ Read [`CONTRIBUTING.md`](CONTRIBUTING.md) before opening an issue or pull reques
 
 The canonical forward execution roadmap is [`ROADMAP.md`](ROADMAP.md). It records the current phase frontier, dependency-ordered implementation slices, per-slice acceptance gates, phase exit criteria, deferred boundaries, and the maintenance contract agents must follow as work lands.
 
-The current frontier is Phase 6 governed experiment control. Phase 5 data
-reliability is complete, and Phase 6 now provides declarative specifications,
-deterministic immutable runs, frozen hypothesis families, verified run
-comparison, and a narrow local control interface. Experiment-control closure
-acceptance remains the next roadmap slice.
+The current frontier is Phase 7 robust validation. Phase 6 governed experiment
+control is complete, and Phase 7.1 adds explicitly configured, deterministic
+purged walk-forward fold evidence while preserving a sealed holdout.
 
 ## License
 

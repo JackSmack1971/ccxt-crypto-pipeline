@@ -20,6 +20,8 @@ from .spec import (BaselinePolicy, CandidateDefinition, CostPolicy, ExperimentSp
                    experiment_spec_id)
 from .control import (APPROVAL_VERSION, approve_experiment_run, execute_experiment,
                       inspect_experiment_run, load_experiment_spec, validate_experiment_spec)
+from .walk_forward import (WalkForwardEvaluation, WalkForwardFold,
+                           build_walk_forward_evaluation)
 
 __all__ = [
     "BaselinePolicy", "CandidateDefinition", "CostPolicy", "ExperimentSpec",
@@ -32,4 +34,5 @@ __all__ = [
     "RunComparison", "RunRecord", "catalog_runs", "compare_runs", "load_run",
     "APPROVAL_VERSION", "approve_experiment_run", "execute_experiment",
     "inspect_experiment_run", "load_experiment_spec", "validate_experiment_spec",
+    "WalkForwardEvaluation", "WalkForwardFold", "build_walk_forward_evaluation",
 ]
