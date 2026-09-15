@@ -389,6 +389,70 @@ def test_metrics_report_irregular_timestamp_spacing():
     assert metrics["observation_interval_seconds"] == pytest.approx(5400)
 
 
+def test_metrics_report_equity_drawdown_costs_and_observation_contract():
+    metrics = compute_metrics(
+        [{"timestamp": "2025-01-01T00:00:00", "equity": 100},
+         {"timestamp": "2025-01-02T00:00:00", "equity": 120},
+         {"timestamp": "2025-01-03T00:00:00", "equity": 90}],
+        trades=[{"fee": 1.25, "slippage": 0.5}, {"fee": 0.75, "slippage": 0.25}],
+        observation_frequency="1d",
+    )
+    assert metrics["initial_equity"] == 100
+    assert metrics["final_equity"] == 90
+    assert metrics["total_return"] == pytest.approx(-0.1)
+    assert metrics["max_drawdown"] == pytest.approx(-0.25)
+    assert metrics["total_fees"] == pytest.approx(2)
+    assert metrics["total_slippage"] == pytest.approx(0.75)
+    assert metrics["observations"] == 3
+    assert metrics["annualization_periods"] == 365
+    assert metrics["observation_interval_seconds"] == 86400
+    assert metrics["irregular_intervals"] is False
+
+
+def test_metrics_single_observation_and_zero_initial_equity_remain_explicit():
+    single = compute_metrics([{"timestamp": "2025-01-01T00:00:00", "equity": 0}])
+    assert single["total_return"] is None
+    assert single["max_drawdown"] == 0
+    assert single["volatility_annualized"] is None
+    assert single["sharpe_annualized"] is None
+    assert single["observation_interval_seconds"] is None
+    assert single["annualization_periods"] is None
+
+
+@pytest.mark.parametrize(
+    ("equity", "kwargs", "message"),
+    [
+        ([], {}, "empty equity ledger"),
+        ([{"timestamp": "2025-01-01T00:00:00", "equity": 100}], {"annualization_days": 0}, "annualization_days"),
+        ([{"timestamp": "2025-01-01T00:00:00", "equity": float("nan")}], {}, "non-finite"),
+        ([{"timestamp": "2025-01-01T00:00:00", "equity": float("inf")}], {}, "non-finite"),
+        ([{"timestamp": "2025-01-01T00:00:00", "equity": 100},
+          {"timestamp": "2025-01-01T00:00:00", "equity": 101}], {}, "strictly increasing"),
+        ([{"timestamp": "2025-01-02T00:00:00", "equity": 100},
+          {"timestamp": "2025-01-01T00:00:00", "equity": 101}], {}, "strictly increasing"),
+    ],
+)
+def test_metrics_reject_invalid_ledger_inputs(equity, kwargs, message):
+    with pytest.raises(ValueError, match=message):
+        compute_metrics(equity, **kwargs)
+
+
+def test_metrics_empty_observation_frequency_uses_timestamp_spacing():
+    equity = [{"timestamp": "2025-01-01T00:00:00", "equity": 100},
+              {"timestamp": "2025-01-01T02:00:00", "equity": 101}]
+    metrics = compute_metrics(equity, observation_frequency="")
+    assert metrics["observation_frequency"] == ""
+    assert metrics["observation_interval_seconds"] == 7200
+
+
+@pytest.mark.parametrize("frequency", ("0h", "-1h", "1H", "xh", "1.5h"))
+def test_metrics_reject_invalid_declared_observation_frequency(frequency):
+    equity = [{"timestamp": "2025-01-01T00:00:00", "equity": 100},
+              {"timestamp": "2025-01-01T01:00:00", "equity": 101}]
+    with pytest.raises(ValueError, match="unsupported observation frequency"):
+        compute_metrics(equity, observation_frequency=frequency)
+
+
 def test_stale_signal_policy_is_explicit_for_missing_gap(tmp_path):
     db = _fixture(tmp_path / "stale")
     conn = connect(db)
