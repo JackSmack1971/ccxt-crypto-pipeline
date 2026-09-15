@@ -7,9 +7,8 @@ It composes only the already-governed Phase 3 helpers
 in the sequence the spec declares, against one local, already-loaded
 ``DatasetSnapshot``. It never redefines cohort, feature, label, split, or
 candidate-evaluation semantics, and it never fabricates statistical
-significance evidence: hypothesis-family multiplicity testing remains
-Slice 6.4's job, so ``discovery_adjusted_p_value`` and
-``holdout_adjusted_p_value`` are left unset here rather than invented.
+significance evidence. It freezes the complete multiplicity family before
+evaluation, while unavailable raw p-values remain explicitly unavailable.
 """
 
 from __future__ import annotations
@@ -31,6 +30,7 @@ from analysis.alpha import (FeatureRegistry, PromotionEvidence, baseline_familie
 from analysis.datasets.snapshot import DatasetSnapshot
 
 from .spec import ExperimentSpec, experiment_spec_dict, experiment_spec_id
+from .hypotheses import freeze_hypothesis_family
 
 MANIFEST_VERSION = "phase6-run-v1"
 
@@ -147,6 +147,8 @@ def run_experiment(spec: ExperimentSpec, snapshot: DatasetSnapshot, output_dir: 
     resolve to the same run and a changed spec, dataset, or code version
     always produces a distinct one.
     """
+    # Commit the family before any research result is inspected.
+    hypothesis_family = freeze_hypothesis_family(spec)
     cohort = extract_cohort(snapshot, spec.cohort)
     registry = resolve_feature_registry(spec)
     feature_rows = compute_features(snapshot, cohort, registry)
@@ -206,6 +208,7 @@ def run_experiment(spec: ExperimentSpec, snapshot: DatasetSnapshot, output_dir: 
         "candidate.json": candidate,
         "promotion.json": decision,
         "definitions.json": definitions,
+        "hypothesis_family.json": hypothesis_family,
     }
     manifest = {"manifest_version": MANIFEST_VERSION, "run_id": run_id, "immutable": True,
                 "inputs": inputs, "artifacts": {name: hashlib.sha256(_dump(value)).hexdigest()

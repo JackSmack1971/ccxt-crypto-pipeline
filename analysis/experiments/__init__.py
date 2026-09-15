@@ -9,6 +9,9 @@ sequence the spec declares and writes one immutable run directory/manifest.
 """
 
 from .runner import MANIFEST_VERSION, resolve_feature_registry, run_experiment
+from .hypotheses import (FAMILY_MANIFEST_VERSION, FamilyEvaluation, FrozenHypothesisFamily,
+                         HypothesisIdentity, evaluate_hypothesis_family,
+                         freeze_hypothesis_family)
 from .spec import (BaselinePolicy, CandidateDefinition, CostPolicy, ExperimentSpec,
                    HypothesisFamily, SPEC_VERSION, SplitPolicy,
                    SUPPORTED_BASELINE_FAMILIES, SUPPORTED_CONFIRMATION_CORRECTIONS,
@@ -20,4 +23,6 @@ __all__ = [
     "SUPPORTED_BASELINE_FAMILIES", "SUPPORTED_CONFIRMATION_CORRECTIONS",
     "SUPPORTED_DISCOVERY_CORRECTIONS", "experiment_spec_dict", "experiment_spec_id",
     "MANIFEST_VERSION", "resolve_feature_registry", "run_experiment",
+    "FAMILY_MANIFEST_VERSION", "FamilyEvaluation", "FrozenHypothesisFamily",
+    "HypothesisIdentity", "evaluate_hypothesis_family", "freeze_hypothesis_family",
 ]
