@@ -1,9 +1,9 @@
 # Engineering Roadmap
 
 **Status:** Active execution authority for forward work  
-**Current phase:** Phase 6 governed experiment control plane
+**Current phase:** Phase 7 robust validation and research scaling
 **Baseline:** `main` at `23dbd389af88cade4584cb5fdc10b60dc17fcc3b`
-**Last reconciled:** 2026-09-15 (Slice 6.6 closed; Slice 6.7 active)
+**Last reconciled:** 2026-09-15 (Slice 6.7 closed; Slice 7.1 active)
 
 This file is the durable forward roadmap for `ccxt-crypto-pipeline`. It exists so a new agent can determine the repository's actual execution frontier without reconstructing intent from chat history, stale phase prose, or commit messages.
 
@@ -735,7 +735,7 @@ explicitly out of scope and separately blocked, per the closure matrix doc.
 
 # Phase 6 — Governed Experiment Control Plane
 
-**Status:** ACTIVE
+**Status:** DONE
 **Depends on:** Phase 5 data contracts stable (DONE -- see Phase 5 above).
 **Goal:** Make a complete research experiment a first-class, versioned, reproducible object rather than a composition of manually invoked helpers.
 
@@ -964,19 +964,36 @@ Evidence:
 
 ## Slice 6.7 — Experiment-control acceptance matrix
 
-**Status:** ACTIVE
+**Status:** DONE
 
 Prove identical spec+data replay, rejected incompatible comparisons, sealed holdout behavior, and complete manifest reconstruction.
+
+Evidence:
+
+- `docs/plans/phase-6-experiment-control-closure-matrix.md` maps every Phase 6
+  control-plane criterion to executable offline evidence and preserves the
+  boundary between deterministic fixture acceptance and claims of alpha,
+  profitability, live-provider readiness, or production-scale adequacy.
+- `tests/test_phase6_closure.py` composes the public spec loader, sole runner,
+  immutable manifest, verified inspector, and comparison boundary. It proves
+  identical spec+data reconstruction resolves to the same byte-verified run,
+  every run artifact is declared and hash-valid, and the path remains offline.
+- The closure fixture changes only sealed-holdout price evidence and observes
+  changed label output while discovery-derived candidate and promotion output
+  remains byte-identical. A changed cost methodology is rejected by the
+  comparison boundary rather than presented as an apples-to-apples result.
 
 ---
 
 # Phase 7 — Robust Validation & Research Scaling
 
-**Status:** PLANNED  
+**Status:** ACTIVE
 **Depends on:** Phase 6.  
 **Goal:** Broaden statistical confidence without turning the repository into an automated optimizer that rewards overfitting.
 
 ## Slice 7.1 — Walk-forward / purged evaluation
+
+**Status:** ACTIVE
 
 Add explicitly configured walk-forward or purged evaluation for experiments that require repeated temporal validation.
 
@@ -1100,7 +1117,7 @@ For a fresh agent, the intended pickup sequence is:
 
 `AGENTS.md` → `ROADMAP.md` → active `docs/plans/phase-*.md` → relevant code/tests → Git history/status.
 
-The current frontier is **Slice 6.7 — Experiment-control acceptance matrix**.
+The current frontier is **Slice 7.1 — Walk-forward / purged evaluation**.
 
 Phase 5 is DONE. Slice 5.7 closed the phase with
 `docs/plans/phase-5-data-plane-closure-matrix.md` and
@@ -1175,6 +1192,14 @@ explicit approval operations by composing the existing spec, runner, and catalog
 contracts. Approval is a separate immutable human attestation over a hash-verified
 run and cannot alter promotion or holdout state.
 
-Slice 6.7 has not started. It needs a phase closure matrix proving the complete
-experiment-control contract across replay, comparison rejection, sealed holdout
-behavior, and manifest reconstruction.
+Slice 6.7 is DONE. `docs/plans/phase-6-experiment-control-closure-matrix.md`
+and `tests/test_phase6_closure.py` close Phase 6 with composed offline evidence:
+public-spec reconstruction and identical replay, complete manifest/hash
+verification, frozen-family retention, sealed holdout isolation from discovery
+scoring/promotion, and rejection of a methodologically incompatible comparison.
+This evidence does not claim alpha, profitability, live-provider acceptance, or
+production-scale sample adequacy.
+
+Slice 7.1 is ACTIVE. It should add explicitly configured walk-forward or purged
+evaluation for experiments that require repeated temporal validation, without
+turning the experiment control plane into an automated optimizer.
