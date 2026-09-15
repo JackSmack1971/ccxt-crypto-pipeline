@@ -16,15 +16,20 @@ from .hypotheses import (FAMILY_MANIFEST_VERSION, FamilyEvaluation, FrozenHypoth
 from .spec import (BaselinePolicy, CandidateDefinition, CostPolicy, ExperimentSpec,
                    HypothesisFamily, SPEC_VERSION, SplitPolicy,
                    SUPPORTED_BASELINE_FAMILIES, SUPPORTED_CONFIRMATION_CORRECTIONS,
-                   SUPPORTED_DISCOVERY_CORRECTIONS, experiment_spec_dict, experiment_spec_id)
+                   SUPPORTED_DISCOVERY_CORRECTIONS, experiment_spec_dict, experiment_spec_from_dict,
+                   experiment_spec_id)
+from .control import (APPROVAL_VERSION, approve_experiment_run, execute_experiment,
+                      inspect_experiment_run, load_experiment_spec, validate_experiment_spec)
 
 __all__ = [
     "BaselinePolicy", "CandidateDefinition", "CostPolicy", "ExperimentSpec",
     "HypothesisFamily", "SPEC_VERSION", "SplitPolicy",
     "SUPPORTED_BASELINE_FAMILIES", "SUPPORTED_CONFIRMATION_CORRECTIONS",
-    "SUPPORTED_DISCOVERY_CORRECTIONS", "experiment_spec_dict", "experiment_spec_id",
+    "SUPPORTED_DISCOVERY_CORRECTIONS", "experiment_spec_dict", "experiment_spec_from_dict", "experiment_spec_id",
     "MANIFEST_VERSION", "resolve_feature_registry", "run_experiment",
     "FAMILY_MANIFEST_VERSION", "FamilyEvaluation", "FrozenHypothesisFamily",
     "HypothesisIdentity", "evaluate_hypothesis_family", "freeze_hypothesis_family",
     "RunComparison", "RunRecord", "catalog_runs", "compare_runs", "load_run",
+    "APPROVAL_VERSION", "approve_experiment_run", "execute_experiment",
+    "inspect_experiment_run", "load_experiment_spec", "validate_experiment_spec",
 ]

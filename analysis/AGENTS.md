@@ -52,7 +52,9 @@ Experiment specs/runs MUST remain declarative, local, deterministic, validated a
 
 Do not invent unavailable statistical evidence or hidden executable selection behavior.
 
-There is no repository-supported experiment CLI in the current codebase; do not fabricate one.
+The repository-supported experiment CLI is limited to `python -m analysis.experiments`
+validate/run/inspect/approve operations. It MUST delegate to the canonical spec,
+runner, catalog, and approval boundaries rather than creating another execution engine.
 
 ## Change boundaries
 

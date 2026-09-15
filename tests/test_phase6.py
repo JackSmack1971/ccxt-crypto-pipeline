@@ -1,4 +1,6 @@
 import json
+import subprocess
+import sys
 from dataclasses import replace
 from datetime import datetime, timedelta
 
@@ -14,7 +16,9 @@ from analysis.experiments import (BaselinePolicy, CandidateDefinition, CostPolic
                                   ExperimentSpec, HypothesisFamily, SPEC_VERSION, SplitPolicy,
                                   evaluate_hypothesis_family, freeze_hypothesis_family,
                                   experiment_spec_dict, experiment_spec_id, resolve_feature_registry,
-                                  run_experiment, catalog_runs, compare_runs, load_run)
+                                  run_experiment, catalog_runs, compare_runs, load_run,
+                                  approve_experiment_run, execute_experiment, inspect_experiment_run,
+                                  load_experiment_spec, validate_experiment_spec)
 from analysis.experiments.runner import (_dump, _parse_selection_rule, _percentile,
                                          _safe, _selected_token_ids)
 
@@ -293,6 +297,11 @@ def runner_spec(**overrides) -> ExperimentSpec:
     }
     fields.update(overrides)
     return ExperimentSpec(**fields)
+
+
+def write_spec(path, spec=None):
+    path.write_text(json.dumps(experiment_spec_dict(spec or runner_spec()), default=str))
+    return path
 
 
 def test_runner_executes_the_declared_sequence_and_honestly_withholds_significance(tmp_path):
@@ -652,3 +661,66 @@ def test_hypothesis_family_features_must_be_declared_by_the_experiment():
     with pytest.raises(ValueError, match="undeclared experiment features"):
         build_spec(hypothesis_family=replace(build_spec().hypothesis_family,
                                              features=("launch_liquidity_usd", "undeclared")))
+
+
+# --- Slice 6.6: narrow experiment control API/CLI --------------------------
+
+def test_control_api_round_trips_validation_and_uses_existing_runner(tmp_path):
+    spec_path = write_spec(tmp_path / "spec.json")
+    loaded = load_experiment_spec(spec_path)
+    assert experiment_spec_dict(loaded) == experiment_spec_dict(runner_spec())
+    assert validate_experiment_spec(spec_path) == experiment_spec_id(runner_spec())
+    run = execute_experiment(spec_path, runner_snapshot(), tmp_path / "runs")
+    assert inspect_experiment_run(run) == load_run(run)
+
+
+def test_spec_file_rejects_unknown_fields(tmp_path):
+    payload = experiment_spec_dict(runner_spec())
+    payload["unreviewed_override"] = True
+    path = tmp_path / "spec.json"
+    path.write_text(json.dumps(payload, default=str))
+    with pytest.raises(ValueError, match="fields do not match schema"):
+        load_experiment_spec(path)
+
+
+def test_approval_is_separate_immutable_attestation_over_verified_run(tmp_path):
+    run = run_experiment(runner_spec(), runner_snapshot(), tmp_path / "runs")
+    before = {path.name: path.read_bytes() for path in run.iterdir()}
+    approval = approve_experiment_run(
+        run, tmp_path / "approvals", reviewer="Research Reviewer",
+        reviewed_at="2026-09-15T12:00:00Z", rationale="Reviewed the immutable local result.")
+    payload = json.loads(approval.read_text())
+    assert payload["decision"] == "approved"
+    assert payload["run_id"] == run.name
+    assert {path.name: path.read_bytes() for path in run.iterdir()} == before
+    assert approve_experiment_run(
+        run, tmp_path / "approvals", reviewer="Research Reviewer",
+        reviewed_at="2026-09-15T12:00:00Z", rationale="Reviewed the immutable local result.") == approval
+
+
+def test_approval_rejects_unattributed_or_tampered_run(tmp_path):
+    run = run_experiment(runner_spec(), runner_snapshot(), tmp_path / "runs")
+    with pytest.raises(ValueError, match="reviewer and rationale"):
+        approve_experiment_run(run, tmp_path / "approvals", reviewer="", reviewed_at="2026-09-15T12:00:00Z",
+                               rationale="reviewed")
+    (run / "candidate.json").write_text("{}")
+    with pytest.raises(ValueError, match="artifact hash mismatch"):
+        approve_experiment_run(run, tmp_path / "approvals", reviewer="Reviewer",
+                               reviewed_at="2026-09-15T12:00:00Z", rationale="reviewed")
+
+
+def test_cli_validate_inspect_and_approve_delegate_to_control_boundaries(tmp_path):
+    spec_path = write_spec(tmp_path / "spec.json")
+    validated = subprocess.run([sys.executable, "-m", "analysis.experiments", "validate", str(spec_path)],
+                               check=True, capture_output=True, text=True)
+    assert json.loads(validated.stdout)["experiment_spec_id"] == experiment_spec_id(runner_spec())
+    run = run_experiment(runner_spec(), runner_snapshot(), tmp_path / "runs")
+    inspected = subprocess.run([sys.executable, "-m", "analysis.experiments", "inspect", str(run)],
+                               check=True, capture_output=True, text=True)
+    assert json.loads(inspected.stdout)["run_id"] == run.name
+    approved = subprocess.run([
+        sys.executable, "-m", "analysis.experiments", "approve", str(run),
+        "--approval-dir", str(tmp_path / "approvals"), "--reviewer", "Reviewer",
+        "--reviewed-at", "2026-09-15T12:00:00Z", "--rationale", "Reviewed immutable output",
+    ], check=True, capture_output=True, text=True)
+    assert (tmp_path / "approvals" / run.name / (json.loads(approved.stdout)["approval_id"] + ".json")).is_file()
