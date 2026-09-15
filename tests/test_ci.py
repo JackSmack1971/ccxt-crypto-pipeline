@@ -53,7 +53,8 @@ def test_fixture_ci_has_no_provider_credentials_or_live_commands():
 def test_local_test_runner_reuses_provisioned_dependencies_without_uv_sync():
     runner = TEST_RUNNER_PATH.read_text(encoding="utf-8")
 
-    assert ".venv/bin/python -m pytest" in runner
+    assert 'CCXT_PROJECT_VENV:-$repo_root/.venv' in runner
+    assert '"$venv_root/bin/python" -m pytest' in runner
     assert "sysconfig.get_path(\"purelib\")" in runner
     assert "exec python -m pytest \"$@\"" in runner
     assert "uv run" not in runner
