@@ -3,6 +3,16 @@
 Status: U1–U13 implemented; a fresh complete mutation campaign remains blocked by the local
 WSL environment and is not claimed as a mutation-score result.
 
+## Environment recovery update — 2026-09-15
+
+The missing Ubuntu `ext4.vhdx` cannot be recovered as a runnable distribution.
+To keep a replacement mutation runner within laptop storage limits, the Windows
+WSL configuration now caps the VM at 4 GB memory, two processors, and no
+disk-backed swap. The replacement is a minimal Ubuntu WSL 2 distribution that
+runs the existing mounted working tree rather than a second clone. Ubuntu is
+installed, but this does not establish a mutation environment until it can run
+`mutmut`; no campaign or score is claimed by this update.
+
 ## Execution update — 2026-09-15 (baseline repair before fresh campaign)
 
 The current provisioned baseline initially reached 224 passed tests and then exposed the known
