@@ -12,6 +12,7 @@ from analysis.alpha import (CohortConfig, FeatureDefinition, FeatureRegistry, HO
                             PromotionEvidence, evaluate_candidate_promotion,
                             ConversionObservation, ConversionPolicy,
                             EligibilityPolicy, evaluate_chain_eligibility)
+from analysis.alpha.features import close_return_feature, launch_liquidity_feature
 from analysis.datasets import Asset, Bar, DatasetPolicy, DatasetSnapshot
 from ingestion.dex.tier0.poller import poll_network
 from storage.db import connect, insert_event, insert_ohlcv_batch, upsert_asset
@@ -118,6 +119,108 @@ def test_feature_registry_carries_temporal_contract_and_rejects_future_definitio
         compute_features(snapshot(), cohort, bad)
 
 
+def test_feature_factories_preserve_launch_liquidity_and_include_both_lookback_endpoints():
+    data = snapshot()
+    t0 = datetime(2025, 1, 1, 2)
+    member = type("Member", (), {
+        "token_id": "ethereum:0xaaa", "canonical_id": "ethereum:0xaaa",
+        "t0": t0, "liquidity_usd": 12_000,
+    })()
+    registry = FeatureRegistry()
+    registry.register(launch_liquidity_feature())
+    registry.register(close_return_feature(timedelta(hours=2)))
+
+    row = compute_features(data, (member,), registry)[0]
+
+    assert row["launch_liquidity_usd"] == 12_000
+    assert row["lookback_return"] == pytest.approx(__import__("math").log(12 / 10))
+    assert row["feature_provenance"]["lookback_return"]["observation_count"] == 3
+
+
+@pytest.mark.parametrize(
+    ("missing_value_policy", "expected", "rejected"),
+    [("unknown", None, False), ("zero", 0.0, False), ("reject", None, True)],
+)
+def test_launch_liquidity_feature_preserves_unknown_values_by_policy(missing_value_policy, expected, rejected):
+    member = type("Member", (), {
+        "token_id": "ethereum:0xaaa", "canonical_id": "ethereum:0xaaa",
+        "t0": datetime(2025, 1, 1), "liquidity_usd": None,
+    })()
+    definition = replace(launch_liquidity_feature(), missing_value_policy=missing_value_policy)
+
+    registry = FeatureRegistry()
+    registry.register(definition)
+    values = compute_features(snapshot(), (member,), registry)[0]
+    assert values["launch_liquidity_usd"] == expected
+    assert ("launch_liquidity_usd" in values.get("rejected_features", [])) is rejected
+
+
+def test_close_return_feature_keeps_custom_name_and_uses_valid_observations():
+    definition = close_return_feature(timedelta(hours=3), name="custom_return")
+    bars = (
+        Bar("ethereum:0xaaa", datetime(2025, 1, 1), 10, 10, 10, 10, 1, "1h", "fixture"),
+        Bar("ethereum:0xaaa", datetime(2025, 1, 1, 1), "invalid", "invalid", "invalid", "invalid", 1, "1h", "fixture"),
+        Bar("ethereum:0xaaa", datetime(2025, 1, 1, 2), 20, 20, 20, 20, 1, "1h", "fixture"),
+    )
+
+    assert definition.name == "custom_return"
+    assert definition.compute(None, bars) == pytest.approx(__import__("math").log(2))
+
+
+@pytest.mark.parametrize("close", [None, "not-a-number", 0, -1])
+def test_close_return_feature_ignores_invalid_and_non_positive_closes(close):
+    definition = close_return_feature(timedelta(hours=2))
+    bars = (
+        Bar("ethereum:0xaaa", datetime(2025, 1, 1), close, close, close, close, 1, "1h", "fixture"),
+        Bar("ethereum:0xaaa", datetime(2025, 1, 1, 1), 10, 10, 10, 10, 1, "1h", "fixture"),
+    )
+
+    assert definition.compute(None, bars) is None
+
+
+def test_close_return_feature_requires_two_valid_bars_and_preserves_log_direction():
+    definition = close_return_feature(timedelta(hours=3))
+    bars = (
+        Bar("ethereum:0xaaa", datetime(2025, 1, 1), 10, 10, 10, 10, 1, "1h", "fixture"),
+        Bar("ethereum:0xaaa", datetime(2025, 1, 1, 1), 0, 0, 0, 0, 1, "1h", "fixture"),
+        Bar("ethereum:0xaaa", datetime(2025, 1, 1, 2), 5, 5, 5, 5, 1, "1h", "fixture"),
+    )
+
+    assert definition.compute(None, bars) == pytest.approx(__import__("math").log(5 / 10))
+
+
+def test_events_at_matches_canonical_identity_and_excludes_future_or_other_assets():
+    t0 = datetime(2025, 1, 1)
+    assets = (
+        Asset("ethereum:0xaaa", "dex", "ethereum", "SAME", t0, "0xaaa"),
+        Asset("solana:SAME", "dex", "solana", "SAME", t0, "SAME"),
+    )
+    events = (
+        {"canonical_id": "ethereum:0xaaa", "event_type": "at-boundary", "timestamp": t0,
+         "payload_json": {}, "source": "fixture"},
+        {"canonical_id": "ethereum:0xaaa", "event_type": "future", "timestamp": t0 + timedelta(seconds=1),
+         "payload_json": {}, "source": "fixture"},
+        {"canonical_id": "solana:SAME", "event_type": "other-identity", "timestamp": t0,
+         "payload_json": {}, "source": "fixture"},
+    )
+    data = DatasetSnapshot(assets, (), (), events, (), DatasetPolicy(), "events-fixture")
+
+    assert data.events_at("ethereum:0xaaa", t0) == (events[0],)
+    assert data.events_at("ethereum:SAME", t0) == ()
+
+
+def test_events_at_returns_deterministic_time_order_for_unsorted_input():
+    t0 = datetime(2025, 1, 1)
+    assets = (Asset("ethereum:0xaaa", "dex", "ethereum", "0xaaa", t0, "0xaaa"),)
+    later = {"canonical_id": "ethereum:0xaaa", "event_type": "later", "timestamp": t0 + timedelta(hours=1),
+             "payload_json": {}, "source": "fixture"}
+    earlier = {"canonical_id": "ethereum:0xaaa", "event_type": "earlier", "timestamp": t0,
+               "payload_json": {}, "source": "fixture"}
+    data = DatasetSnapshot(assets, (), (), (later, earlier), (), DatasetPolicy(), "ordered-events")
+
+    assert data.events_at("ethereum:0xaaa", t0 + timedelta(hours=1)) == (earlier, later)
+
+
 def test_labels_use_fixed_horizon_and_report_right_censoring():
     data = snapshot()
     cohort = extract_cohort(data, CohortConfig(datetime(2025, 1, 1), datetime(2025, 1, 2), chains=("ethereum",)))
@@ -163,6 +266,95 @@ def test_split_purges_feature_and_label_windows_at_fixed_boundaries():
         ("9", "FEATURE_WINDOW_OVERLAP", "validation_holdout"),
     ]
     assert split.boundaries[1]["first_later_token_id"] == "8"
+
+
+def test_evaluation_baselines_filter_horizon_and_report_even_median_and_censoring():
+    class Label:
+        def __init__(self, token_id, horizon, status, value):
+            self.token_id = token_id
+            self.horizon = horizon
+            self.status = status
+            self.value = value
+
+    labels = (
+        Label("ethereum:a", "1h", "COMPLETE", .10),
+        Label("ethereum:b", "1h", "COMPLETE", .30),
+        Label("solana:c", "1h", "ECONOMIC_FAILURE", None),
+        Label("solana:d", "1h", "RIGHT_CENSORED", None),
+        Label("ethereum:e", "2h", "COMPLETE", 99),
+    )
+
+    baseline = descriptive_baseline(labels, horizon="1h")
+
+    assert baseline["sample_count"] == 2
+    assert baseline["coverage"] == .5
+    assert baseline["mean_return"] == pytest.approx(.2)
+    assert baseline["median_return"] == pytest.approx(.2)
+    assert baseline["failure_rate"] == .25
+    assert baseline["chain_breakdown"] == {"ethereum": 2}
+    assert baseline["censoring"] == {
+        "ECONOMIC_FAILURE": 1, "DATA_CENSORED": 0, "RIGHT_CENSORED": 1,
+    }
+
+    comparison = baseline_comparison(labels, horizon="1h", candidate_mean=.25)
+    assert comparison["candidate_minus_baseline"] == pytest.approx(.05)
+    assert comparison["families"]["market_chain"]["ethereum"]["mean_return"] == pytest.approx(.2)
+
+
+def test_score_candidate_preserves_missingness_and_applies_turnover_costs():
+    class Label:
+        def __init__(self, token_id, status, value):
+            self.token_id = token_id
+            self.horizon = "1h"
+            self.status = status
+            self.value = value
+
+    labels = (Label("ethereum:a", "COMPLETE", .10),
+              Label("ethereum:b", "COMPLETE", .30),
+              Label("solana:c", "DATA_CENSORED", None))
+    result = score_candidate("costed", labels, horizon="1h", turnover=2.0,
+                             costs=(0.0, .01), baseline_mean=.05)
+
+    assert result.sample_size == 2
+    assert result.coverage == pytest.approx(2 / 3)
+    assert result.missingness == pytest.approx(1 / 3)
+    assert result.mean_return == pytest.approx(.2)
+    assert result.baseline_comparison["difference"] == pytest.approx(.15)
+    assert result.cost_sensitivity == {"0.0": pytest.approx(.2), "0.01": pytest.approx(.18)}
+
+
+def test_rank_candidates_prioritizes_governed_state_then_return_then_identity():
+    class Label:
+        def __init__(self, token_id, value):
+            self.token_id = token_id
+            self.horizon = "1h"
+            self.status = "COMPLETE"
+            self.value = value
+
+    labels = tuple(Label(str(i), value) for i, value in enumerate((.1, .2, .3)))
+    discovered = score_candidate("zeta", labels, horizon="1h")
+    confirmed = replace(discovered, promotion=replace(discovered.promotion, state="holdout_confirmed"))
+    validation = replace(discovered, promotion=replace(discovered.promotion, state="validation_confirmed"),
+                         mean_return=.2)
+    ranked = rank_candidates((discovered, validation, confirmed))
+
+    assert [candidate.promotion.state for candidate in ranked] == [
+        "holdout_confirmed", "validation_confirmed", "discovered",
+    ]
+
+
+@pytest.mark.parametrize("kwargs", [
+    {"embargo_days": -1},
+    {"feature_lookback": timedelta(seconds=-1)},
+    {"label_horizon": timedelta(seconds=-1)},
+])
+def test_build_split_rejects_negative_temporal_configuration(kwargs):
+    class Row:
+        t0 = datetime(2025, 1, 1)
+        token_id = "one"
+
+    with pytest.raises(ValueError):
+        build_split((Row(),), **kwargs)
 
 
 def test_candidate_low_coverage_is_not_validated_alpha_and_handoff_is_phase2_compatible():

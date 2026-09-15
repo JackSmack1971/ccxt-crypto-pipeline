@@ -1,13 +1,14 @@
-from datetime import datetime
+from datetime import datetime, timedelta
 import socket
 
 import pytest
 
 from analysis.backtesting import BacktestConfig, simulate
+from analysis.backtesting.simulator import _bar_interval
 from analysis.datasets import Asset, Bar, DatasetPolicy, DatasetSnapshot
 from analysis.metrics import compute_metrics
 from analysis.runs import write_failed_run, write_run
-from analysis.strategies import BuyAndHoldStrategy
+from analysis.strategies import BuyAndHoldStrategy, TargetPosition
 from storage.db import connect, insert_event, insert_ohlcv_batch, read_ohlcv, upsert_asset, upsert_metadata
 
 
@@ -28,6 +29,36 @@ def _fixture(tmp_path, *, future_metadata=False):
     upsert_metadata({"canonical_id": "kraken:AAA/USD", "last_updated": datetime(2025, 1, 4 if future_metadata else 1)}, connection=conn)
     conn.close()
     return db
+
+
+class _ScriptedStrategy:
+    name = "scripted-test"
+    version = "1"
+
+    def __init__(self, targets, *, canonical_id=None):
+        self.targets = targets
+        self.canonical_id = canonical_id
+
+    def on_bar(self, frame):
+        quantity = self.targets.get(frame.bar.timestamp)
+        if quantity is None:
+            return None
+        canonical_id = self.canonical_id or frame.bar.canonical_id
+        return TargetPosition(canonical_id, quantity)
+
+
+def _memory_dataset(*, venues=("kraken",), bars_per_asset=3):
+    assets = tuple(
+        Asset(f"{venue}:AAA/USD", "cex", venue, "AAA/USD", datetime(2025, 1, 1), None)
+        for venue in venues
+    )
+    bars = tuple(
+        Bar(asset.canonical_id, datetime(2025, 1, day), 10 * day, 10 * day, 10 * day,
+            10 * day, 1, "1d", asset.chain_or_exchange)
+        for asset in assets
+        for day in range(1, bars_per_asset + 1)
+    )
+    return DatasetSnapshot(assets, bars, (), (), (), DatasetPolicy(), "fixture")
 
 
 def test_point_in_time_metadata_and_next_bar_fee_slippage(tmp_path):
@@ -95,6 +126,171 @@ def test_unsupported_execution_is_actionable(tmp_path):
     dataset = DatasetSnapshot.from_duckdb(_fixture(tmp_path))
     with pytest.raises(ValueError, match="unsupported execution assumption"):
         simulate(dataset, BuyAndHoldStrategy(), BacktestConfig(execution="close"))
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("initial_cash", -0.01),
+        ("fee_rate", -0.01),
+        ("slippage_bps", -0.01),
+    ],
+)
+def test_backtest_config_rejects_negative_cost_and_cash_values(field, value):
+    with pytest.raises(ValueError, match="must be non-negative"):
+        BacktestConfig(**{field: value}).validate()
+
+
+@pytest.mark.parametrize(
+    "field", ["execution", "missing_bar_policy", "halted_bar_policy", "stale_signal_policy", "source_type"]
+)
+def test_backtest_config_rejects_unsupported_values(field):
+    values = {
+        "execution": "close",
+        "missing_bar_policy": "execute",
+        "halted_bar_policy": "execute",
+        "stale_signal_policy": "hold",
+        "source_type": "dex",
+    }
+    expected_messages = {
+        "execution": "unsupported execution assumption",
+        "missing_bar_policy": "bar policies",
+        "halted_bar_policy": "bar policies",
+        "stale_signal_policy": "stale_signal_policy",
+        "source_type": "unsupported execution universe",
+    }
+    with pytest.raises(ValueError, match=expected_messages[field]):
+        BacktestConfig(**{field: values[field]}).validate()
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("initial_cash", 0),
+        ("fee_rate", 0),
+        ("slippage_bps", 0),
+        ("execution", "next_bar_open"),
+        ("missing_bar_policy", "skip"),
+        ("missing_bar_policy", "error"),
+        ("halted_bar_policy", "skip"),
+        ("halted_bar_policy", "error"),
+        ("stale_signal_policy", "execute_next_available"),
+        ("stale_signal_policy", "skip"),
+        ("stale_signal_policy", "error"),
+        ("source_type", "cex"),
+    ],
+)
+def test_backtest_config_accepts_documented_values(field, value):
+    BacktestConfig(**{field: value}).validate()
+
+
+@pytest.mark.parametrize(
+    ("timeframe", "expected"),
+    [
+        ("1m", timedelta(minutes=1)),
+        ("1h", timedelta(hours=1)),
+        ("1d", timedelta(days=1)),
+        ("1w", timedelta(weeks=1)),
+        ("15m", timedelta(minutes=15)),
+        ("12h", timedelta(hours=12)),
+        ("365d", timedelta(days=365)),
+    ],
+)
+def test_bar_interval_parses_supported_timeframes(timeframe, expected):
+    assert _bar_interval(timeframe) == expected
+
+
+@pytest.mark.parametrize("timeframe", ["0m", "-1h", "m", "1", "1M", "1x", "abc", "1.5h", ""])
+def test_bar_interval_rejects_unsupported_timeframes(timeframe):
+    with pytest.raises(ValueError, match="unsupported timeframe for gap detection"):
+        _bar_interval(timeframe)
+
+
+def test_empty_dataset_is_rejected_before_simulation():
+    dataset = _memory_dataset(bars_per_asset=0)
+    with pytest.raises(ValueError, match="insufficient bars: dataset contains no eligible bars"):
+        simulate(dataset, BuyAndHoldStrategy())
+
+
+def test_execution_rejects_cross_venue_and_explicit_venue_mismatch():
+    cross_venue = _memory_dataset(venues=("kraken", "coinbase"), bars_per_asset=1)
+    with pytest.raises(ValueError, match="cross-venue execution is unsupported"):
+        simulate(cross_venue, BuyAndHoldStrategy())
+    with pytest.raises(ValueError, match="outside configured venue 'coinbase'"):
+        simulate(_memory_dataset(bars_per_asset=1), BuyAndHoldStrategy(), BacktestConfig(venue="coinbase"))
+
+
+def test_buy_and_sell_ledger_records_transitions_and_cash_accounting():
+    t1, t2, t3 = (datetime(2025, 1, day) for day in (1, 2, 3))
+    strategy = _ScriptedStrategy({t1: 1, t2: 0, t3: 0})
+    result = simulate(_memory_dataset(), strategy, BacktestConfig(fee_rate=0, slippage_bps=0))
+
+    assert [(trade["side"], trade["quantity"], trade["price"], trade["signal_time"], trade["timestamp"])
+            for trade in result.trades] == [
+        ("buy", 1, 20, "2025-01-01T00:00:00", "2025-01-02T00:00:00"),
+        ("sell", 1, 30, "2025-01-02T00:00:00", "2025-01-03T00:00:00"),
+    ]
+    assert [order["status"] for order in result.orders[:2]] == ["filled", "filled"]
+    assert result.trades[0]["cash_after"] == 9_980
+    assert result.trades[1]["cash_after"] == 10_010
+    assert result.equity[-1]["cash"] == 10_010
+    assert result.equity[-1]["positions"] == {"kraken:AAA/USD": 0.0}
+
+
+@pytest.mark.parametrize("quantity", [-1, float("nan"), float("inf")])
+def test_strategy_rejects_invalid_or_short_target(quantity):
+    t1 = datetime(2025, 1, 1)
+    strategy = _ScriptedStrategy({t1: quantity})
+    with pytest.raises(ValueError, match="short positions are unsupported"):
+        simulate(_memory_dataset(bars_per_asset=1), strategy)
+
+
+def test_insufficient_cash_is_recorded_as_rejected_order():
+    t1 = datetime(2025, 1, 1)
+    result = simulate(_memory_dataset(bars_per_asset=2), _ScriptedStrategy({t1: 2}),
+                      BacktestConfig(initial_cash=1, fee_rate=0, slippage_bps=0))
+    assert result.trades == ()
+    assert result.orders[0] == {
+        "canonical_id": "kraken:AAA/USD",
+        "signal_time": "2025-01-01T00:00:00",
+        "execution_time": "2025-01-02T00:00:00",
+        "status": "rejected_insufficient_cash",
+        "requested_quantity": 2,
+    }
+
+
+@pytest.mark.parametrize("policy", ["execute_next_available", "skip"])
+def test_stale_signal_policy_controls_gap_execution(policy, tmp_path):
+    db = _fixture(tmp_path / policy)
+    conn = connect(db)
+    conn.execute("DELETE FROM ohlcv WHERE timestamp = '2025-01-02'")
+    conn.close()
+    result = simulate(DatasetSnapshot.from_duckdb(db), BuyAndHoldStrategy(),
+                      BacktestConfig(stale_signal_policy=policy))
+    if policy == "execute_next_available":
+        assert result.trades[0]["timestamp"] == "2025-01-03T00:00:00"
+    else:
+        assert any(order["status"] == "skipped_stale_signal" for order in result.orders)
+
+
+def test_stale_signal_error_policy_rejects_gap_execution(tmp_path):
+    db = _fixture(tmp_path / "stale-error")
+    conn = connect(db)
+    conn.execute("DELETE FROM ohlcv WHERE timestamp = '2025-01-02'")
+    conn.close()
+    with pytest.raises(ValueError, match="stale signal"):
+        simulate(DatasetSnapshot.from_duckdb(db), BuyAndHoldStrategy(),
+                 BacktestConfig(stale_signal_policy="error"))
+
+
+def test_final_pending_order_is_explicitly_skipped():
+    result = simulate(_memory_dataset(bars_per_asset=1), BuyAndHoldStrategy())
+    assert result.trades == ()
+    assert result.orders[-1] == {
+        "canonical_id": "kraken:AAA/USD",
+        "signal_time": "2025-01-01T00:00:00",
+        "status": "skipped_insufficient_bar",
+    }
 
 
 def test_multi_source_bars_are_preserved_and_unambiguous_selection_is_required(tmp_path):

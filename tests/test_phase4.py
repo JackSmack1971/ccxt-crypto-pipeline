@@ -7,13 +7,25 @@ import pytest
 
 from reporting.package import build_approved_handoff, generate_package
 from reporting.package.handoff import _dump
-from reporting.render.static import render_svg
+from reporting.claims.model import Claim, Derivation, Evidence, _derived_value, validate_claims
+from reporting.render.static import render_svg, validate_accessibility
 from analysis.alpha import (CohortConfig, FeatureDefinition, FeatureRegistry, LabelDefinition,
                             PromotionEvidence, build_split, compute_features,
                             evaluate_candidate_promotion, extract_cohort, generate_labels,
                             score_candidate, write_research_run)
 from analysis.datasets import DatasetPolicy, DatasetSnapshot
 from storage.db import connect, insert_event, insert_ohlcv_batch, upsert_asset
+
+
+def _claim_for_derivation(operation, values):
+    return Claim(
+        id="derived",
+        text="derived value",
+        evidence=tuple(Evidence("results", index, "dataset", "config", {"start": "a", "end": "b"}, "fixture")
+                       for index in range(len(values))),
+        derivation=Derivation(source_field="value", operation=operation,
+                              unit="unitless", source_unit="unitless"),
+    )
 
 
 def approved_input(tmp_path, *, value=1.5, missing=False):
@@ -74,6 +86,152 @@ def test_phase4_replay_is_byte_identical_and_review_gated(tmp_path, monkeypatch)
     }
     assert json.loads((first / "review.json").read_text())['status'] == "pending"
     assert '<title>returns</title>' in (first / "charts" / "returns.svg").read_text()
+
+
+@pytest.mark.parametrize(("operation", "values", "expected"), [
+    ("identity", (3.0,), 3.0),
+    ("mean", (2.0, 4.0), 3.0),
+    ("difference", (7.0, 2.0), 5.0),
+    ("ratio", (6.0, 2.0), 3.0),
+    ("percent_change", (12.0, 8.0), 50.0),
+])
+def test_phase4_claim_derivations_compute_each_supported_operation(operation, values, expected):
+    claim = _claim_for_derivation(operation, values)
+    assert _derived_value(claim, {"results": [{"value": value} for value in values]}) == pytest.approx(expected)
+
+
+@pytest.mark.parametrize(("operation", "values", "message"), [
+    ("unsupported", (1.0,), "unsupported derivation operation"),
+    ("identity", (True,), "source is not numeric"),
+    ("identity", (float("inf"),), "source is non-finite"),
+    ("identity", (1.0, 2.0), "identity derivation requires one"),
+    ("difference", (1.0,), "difference derivation requires two"),
+    ("ratio", (1.0, 0.0), "ratio has a zero denominator"),
+    ("percent_change", (1.0, 0.0), "percent_change has a zero denominator"),
+])
+def test_phase4_claim_derivations_reject_invalid_inputs(operation, values, message):
+    with pytest.raises(ValueError, match=message):
+        _derived_value(_claim_for_derivation(operation, values),
+                       {"results": [{"value": value} for value in values]})
+
+
+def _claim_manifest_and_rows(*, text, operation, values, sides=("left", "right")):
+    evidence = tuple(Evidence("results", index, "fixture-dataset", "fixture-config",
+                              {"start": "2025-01-01", "end": "2025-01-02"}, "fixture", side)
+                     for index, side in enumerate(sides[:len(values)]))
+    claim = Claim("comparison", text + " ratio", evidence=evidence,
+                  derivation=Derivation("value", operation, "ratio", "ratio", 1,
+                                        sides[0], sides[1]))
+    manifest = {"dataset_identity": "fixture-dataset", "query_config_identity": "fixture-config",
+                "time_range": {"start": "2025-01-01", "end": "2025-01-02"}}
+    return claim, manifest, {"results": [{"value": value} for value in values]}
+
+
+def test_phase4_claim_ledger_accepts_and_checks_comparative_provenance():
+    claim, manifest, staged = _claim_manifest_and_rows(
+        text="left was twice right: left versus right.", operation="ratio", values=(4.0, 2.0))
+    validated = validate_claims((claim,), manifest, staged)
+    assert validated[0]["evidence"][0]["side"] == "left"
+    assert validated[0]["derivation"]["right_label"] == "right"
+
+    mismatched, _, _ = _claim_manifest_and_rows(
+        text="left was twice right: left versus right.", operation="ratio", values=(4.0, 2.0),
+        sides=("other", "right"))
+    mismatched = replace(mismatched, derivation=replace(mismatched.derivation, left_label="left"))
+    with pytest.raises(ValueError, match="comparative evidence sides"):
+        validate_claims((mismatched,), manifest, staged)
+
+
+@pytest.mark.parametrize(("text", "values", "message"), [
+    ("left was twice right: left versus right.", (3.0, 2.0), "twice comparison disagrees"),
+    ("left was higher than right: left versus right.", (1.0, 2.0), "direction disagrees"),
+    ("left was lower than right: left versus right.", (2.0, 1.0), "direction disagrees"),
+])
+def test_phase4_claim_ledger_rejects_comparative_semantic_mismatches(text, values, message):
+    claim, manifest, staged = _claim_manifest_and_rows(text=text, operation="ratio", values=values)
+    with pytest.raises(ValueError, match=message):
+        validate_claims((claim,), manifest, staged)
+
+
+_CLAIM_TIME_RANGE = {"start": "2025-01-01", "end": "2025-01-02"}
+_CLAIM_MANIFEST = {"dataset_identity": "fixture-dataset", "query_config_identity": "fixture-config",
+                   "time_range": _CLAIM_TIME_RANGE}
+_MISSING_ROW_CLAIM = Claim(
+    "missing", "A fact.",
+    evidence=(Evidence("results", 1, "fixture-dataset", "fixture-config", _CLAIM_TIME_RANGE, "fixture"),),
+)
+
+
+@pytest.mark.parametrize("claims, staged, message", [
+    pytest.param((Claim("duplicate", "A fact.", kind="interpretation"),
+                  Claim("duplicate", "Another fact.", kind="interpretation")), {}, "duplicate claim"),
+    pytest.param((_MISSING_ROW_CLAIM,), {"results": [{"value": 1.0}]}, "missing row"),
+])
+def test_phase4_claim_ledger_rejects_duplicate_ids_and_missing_rows(claims, staged, message):
+    with pytest.raises(ValueError, match=message):
+        validate_claims(claims, _CLAIM_MANIFEST, staged)
+
+
+def test_phase4_static_renderer_sorts_declared_x_values_before_plotting():
+    spec = {"id": "returns", "x_column": "time", "y_column": "return", "x_unit": "hours",
+            "y_unit": "percent", "missing_behavior": "explicit_state", "source_attribution": "fixture",
+            "alt_text": "Observed return percent over time.", "transformations": ["sort_x"],
+            "width": 800, "height": 450}
+    svg = render_svg(spec, [{"time": 2, "return": 20}, {"time": 1, "return": 10}])
+    assert 'points="60.000,400.000 760.000,50.000"' in svg
+
+
+def test_phase4_static_renderer_preserves_missing_state_and_fail_policy():
+    spec = {"id": "returns", "x_column": "time", "y_column": "return", "x_unit": "hours",
+            "y_unit": "percent", "missing_behavior": "explicit_state", "source_attribution": "fixture",
+            "alt_text": "Observed return percent over time.", "width": 800, "height": 450}
+    svg = render_svg(spec, [{"time": 1, "return": 10}, {"time": 2, "return": None}])
+    assert 'data-missing="true"' in svg
+    assert "Unavailable observations omitted" in svg
+
+    spec["missing_behavior"] = "fail"
+    with pytest.raises(ValueError, match="contains missing values"):
+        render_svg(spec, [{"time": 1, "return": None}])
+
+
+def _renderer_spec(**overrides):
+    spec = {"id": "returns", "x_column": "time", "y_column": "return", "x_unit": "hours",
+            "y_unit": "percent", "missing_behavior": "explicit_state", "source_attribution": "fixture",
+            "alt_text": "Observed return percent over time.", "width": 800, "height": 450}
+    spec.update(overrides)
+    return spec
+
+
+@pytest.mark.parametrize(("rows", "overrides", "message"), [
+    ([{"time": "one", "return": 1}], {"missing_behavior": "fail"}, "contains unsupported values"),
+    ([{"time": 1, "return": float("inf")}], {}, "contains non-finite values"),
+    ([{"time": 1, "return": None}], {"missing_behavior": "fail"}, "contains missing values"),
+    ([{"time": 1, "return": None}], {"annotations": [{"type": "horizontal_line", "value": 1, "label": "x", "source": "fixture"}]},
+     "cannot apply annotations"),
+    ([{"time": 1, "return": 1}], {"width": 319}, "has invalid dimensions"),
+    ([{"time": 1, "return": 1}], {"height": True}, "has invalid dimensions"),
+])
+def test_phase4_renderer_rejects_unsupported_values_and_invalid_layout(rows, overrides, message):
+    with pytest.raises(ValueError, match=message):
+        render_svg(_renderer_spec(**overrides), rows)
+
+
+def test_phase4_renderer_accessibility_validator_rejects_malformed_or_incomplete_svg():
+    spec = _renderer_spec()
+    svg = render_svg(spec, [{"time": 1, "return": 1}])
+    validate_accessibility(svg, spec)
+
+    for malformed in (
+        svg.replace('role="img"', 'role="figure"'),
+        svg.replace("<title>returns</title>", "<title></title>"),
+        svg.replace('data-missing="false"', 'data-missing="maybe"'),
+        svg.replace('points="60.000,400.000"', 'points="not-a-point"'),
+    ):
+        with pytest.raises(ValueError, match="accessibility validation"):
+            validate_accessibility(malformed, spec)
+
+    with pytest.raises(ValueError, match="structure validation"):
+        validate_accessibility("<not-svg>", spec)
 
 
 def test_approved_handoff_is_deterministic_and_does_not_mutate_phase3_run(tmp_path):
