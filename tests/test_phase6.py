@@ -1,12 +1,19 @@
+import json
 from dataclasses import replace
-from datetime import datetime
+from datetime import datetime, timedelta
 
 import pytest
 
-from analysis.alpha import CohortConfig, LabelDefinition, PromotionPolicy
+from analysis.alpha import (CohortConfig, FeatureDefinition, LabelDefinition, PromotionPolicy,
+                            assert_feature_versions_compatible, assert_label_versions_compatible,
+                            compute_features, extract_cohort, feature_definition_id,
+                            feature_policy_versions, generate_labels, label_definition_id,
+                            resolve_feature_definition)
+from analysis.datasets import Asset, Bar, DatasetPolicy, DatasetSnapshot
 from analysis.experiments import (BaselinePolicy, CandidateDefinition, CostPolicy,
                                   ExperimentSpec, HypothesisFamily, SPEC_VERSION, SplitPolicy,
-                                  experiment_spec_dict, experiment_spec_id)
+                                  experiment_spec_dict, experiment_spec_id, resolve_feature_registry,
+                                  run_experiment)
 
 
 def build_spec(**overrides) -> ExperimentSpec:
@@ -168,6 +175,230 @@ def test_feature_set_rejects_duplicate_entries():
 def test_feature_set_rejects_blank_entries():
     with pytest.raises(ValueError, match="non-blank feature"):
         build_spec(feature_set=("launch_liquidity_usd", "  "))
+
+
+# --- Slice 6.2: deterministic experiment runner -----------------------------
+
+def runner_snapshot() -> DatasetSnapshot:
+    """Eight ethereum launches spaced three days apart with full 1h coverage.
+
+    Liquidity increases monotonically with launch order so a top-quartile
+    selection rule deterministically selects exactly one discovery-partition
+    token, and every label horizon has complete bar coverage.
+    """
+    t0 = datetime(2025, 1, 1)
+    liquidities = [20_000, 30_000, 40_000, 50_000, 60_000, 70_000, 80_000, 90_000]
+    assets, events, bars = [], [], []
+    for i, liquidity in enumerate(liquidities):
+        launch = t0 + timedelta(days=3 * i)
+        address = f"0xtok{i}"
+        canonical_id = f"ethereum:{address}"
+        assets.append(Asset(canonical_id, "dex", "ethereum", address, launch, address))
+        events.append({"canonical_id": canonical_id, "event_type": "new_pool_detected", "timestamp": launch,
+                       "payload_json": json.dumps({"reserve_usd": liquidity, "token_address": address}),
+                       "source": "fixture"})
+        for hour in range(26):
+            price = 10 + i + hour * 0.1
+            bars.append(Bar(canonical_id, launch + timedelta(hours=hour), price, price, price, price, 1, "1h", "fixture"))
+    policy = DatasetPolicy(timeframe="1h")
+    return DatasetSnapshot(tuple(assets), tuple(bars), (), tuple(events), (), policy, "runner-fixture")
+
+
+def runner_spec(**overrides) -> ExperimentSpec:
+    t0 = datetime(2025, 1, 1)
+    fields = {
+        "spec_version": SPEC_VERSION,
+        "name": "runner-fixture-experiment",
+        "cohort": CohortConfig(t0, t0 + timedelta(days=25), chains=("ethereum",)),
+        "feature_set": ("launch_liquidity_usd", "lookback_return"),
+        "feature_policy_version": "phase3-feature-v1",
+        "labels": (LabelDefinition("forward_return_24h", "24h"),),
+        "split": SplitPolicy(embargo_days=0, feature_lookback_seconds=0, label_horizon_seconds=24 * 60 * 60),
+        "hypothesis_family": HypothesisFamily(
+            name="runner-fixture-family",
+            features=("launch_liquidity_usd", "lookback_return"),
+            thresholds=(">=p75",),
+            horizons=("24h",),
+        ),
+        "candidate": CandidateDefinition("high_liquidity", "24h", "launch_liquidity_usd>=p75", min_coverage=0.2),
+        "costs": CostPolicy(),
+        "baselines": BaselinePolicy(),
+        "promotion_policy": PromotionPolicy(minimum_sample_size=1, minimum_independent_launches=1, minimum_coverage=0.2),
+        "code_version": "test-code-v1",
+        "config_identity": "test-config-v1",
+    }
+    fields.update(overrides)
+    return ExperimentSpec(**fields)
+
+
+def test_runner_executes_the_declared_sequence_and_honestly_withholds_significance(tmp_path):
+    run = run_experiment(runner_spec(), runner_snapshot(), tmp_path / "runs")
+
+    candidate = json.loads((run / "candidate.json").read_text())
+    assert candidate["sample_size"] == 1
+    assert candidate["independent_launches"] == 1
+    assert candidate["coverage"] == pytest.approx(0.25)
+
+    promotion = json.loads((run / "promotion.json").read_text())
+    # The runner never invents hypothesis-family significance testing (that is
+    # Slice 6.4's job), so promotion must stay honestly unresolved rather than
+    # a fabricated pass.
+    assert promotion["state"] == "insufficient_evidence"
+    assert promotion["reasons"] == ["MISSING_DISCOVERY_CORRECTION"]
+    assert promotion["inputs"]["discovery_adjusted_p_value"] is None
+
+    manifest = json.loads((run / "manifest.json").read_text())
+    assert manifest["manifest_version"] == "phase6-run-v1"
+    assert manifest["inputs"]["dataset_identity"] == "runner-fixture"
+    assert set(manifest["artifacts"]) == {
+        "spec.json", "cohort.json", "features.json", "labels.json",
+        "split.json", "baselines.json", "candidate.json", "promotion.json",
+        "definitions.json",
+    }
+
+    definitions = json.loads((run / "definitions.json").read_text())
+    assert definitions["features"]["launch_liquidity_usd"]["version"] == "v1"
+    assert definitions["features"]["lookback_return"]["version"] == "v1"
+    assert definitions["labels"]["24h"]["version"] == "v1"
+    assert all(len(entry["definition_id"]) == 24
+              for family in definitions.values() for entry in family.values())
+
+
+def test_runner_replay_is_byte_identical(tmp_path):
+    spec, snapshot = runner_spec(), runner_snapshot()
+    first = run_experiment(spec, snapshot, tmp_path / "runs")
+    second = run_experiment(spec, snapshot, tmp_path / "runs")
+    assert first == second
+    for name in ("manifest.json", "candidate.json", "promotion.json"):
+        assert (first / name).read_bytes() == (second / name).read_bytes()
+
+
+def test_runner_run_identity_changes_with_the_spec(tmp_path):
+    baseline = run_experiment(runner_spec(), runner_snapshot(), tmp_path / "runs")
+    changed = run_experiment(runner_spec(code_version="test-code-v2"), runner_snapshot(), tmp_path / "runs")
+    assert baseline != changed
+
+
+def test_runner_rejects_an_unresolved_feature_identity(tmp_path):
+    # ExperimentSpec now fails closed on an unresolved feature identity at
+    # construction time via the durable registry catalog, before a runner
+    # ever gets to resolve it.
+    with pytest.raises(ValueError, match="unsupported experiment feature identity: holder_count_growth"):
+        runner_spec(feature_set=("launch_liquidity_usd", "holder_count_growth"),
+                   hypothesis_family=HypothesisFamily(
+                       name="x", features=("launch_liquidity_usd", "holder_count_growth"),
+                       thresholds=(">=p75",), horizons=("24h",)))
+
+
+def test_runner_rejects_an_unsupported_selection_rule(tmp_path):
+    spec = runner_spec(candidate=CandidateDefinition("bad", "24h", "launch_liquidity_usd>1000"))
+    with pytest.raises(ValueError, match="unsupported candidate selection rule"):
+        run_experiment(spec, runner_snapshot(), tmp_path / "runs")
+
+
+def test_runner_selection_threshold_is_computed_within_the_discovery_partition_only(tmp_path):
+    spec = runner_spec()
+    snapshot = runner_snapshot()
+    run = run_experiment(spec, snapshot, tmp_path / "runs")
+    candidate = json.loads((run / "candidate.json").read_text())
+    # Discovery holds the first 60% of 8 launches (4 tokens, liquidity
+    # 20k/30k/40k/50k); a >=p75 threshold over just that partition selects
+    # only the 50k token, never a validation/holdout launch.
+    assert candidate["independent_launches"] == 1
+
+
+# --- Slice 6.3: feature/label registry versioning ---------------------------
+
+def test_feature_definition_requires_a_version():
+    with pytest.raises(ValueError, match="requires a version"):
+        FeatureDefinition("x", ("col",), "t0", timedelta(0), version=" ")
+
+
+def test_feature_definition_id_is_deterministic_and_changes_with_version():
+    base = FeatureDefinition("x", ("col",), "t0", timedelta(0))
+    same = FeatureDefinition("x", ("col",), "t0", timedelta(0))
+    bumped = FeatureDefinition("x", ("col",), "t0", timedelta(0), version="v2")
+    assert feature_definition_id(base) == feature_definition_id(same)
+    assert feature_definition_id(base) != feature_definition_id(bumped)
+
+
+def test_feature_definition_id_ignores_the_compute_callable():
+    # The catalog, not the raw dataclass, governs compute behavior per
+    # version; two definitions with identical declared metadata but
+    # different compute functions still share an identity, so a version bump
+    # is the only supported way to signal a behavior change.
+    declared = dict(name="x", source_columns=("col",), effective_timestamp="t0", lookback=timedelta(0))
+    a = FeatureDefinition(**declared, compute=lambda member, bars: 1)
+    b = FeatureDefinition(**declared, compute=lambda member, bars: 2)
+    assert feature_definition_id(a) == feature_definition_id(b)
+
+
+def test_label_definition_rejects_unimplemented_version():
+    with pytest.raises(ValueError, match="unsupported label semantic version"):
+        LabelDefinition("return_24h", "24h", version="v2")
+
+
+def test_label_definition_id_is_deterministic_and_changes_with_censoring_policy():
+    base = LabelDefinition("return_24h", "24h")
+    same = LabelDefinition("return_24h", "24h")
+    changed = replace(base, censoring_policy="custom_policy")
+    assert label_definition_id(base) == label_definition_id(same)
+    assert label_definition_id(base) != label_definition_id(changed)
+
+
+def test_feature_policy_versions_resolves_a_known_policy():
+    versions = feature_policy_versions("phase3-feature-v1")
+    assert versions == {"launch_liquidity_usd": "v1", "lookback_return": "v1"}
+
+
+def test_feature_policy_versions_fails_closed_on_an_unknown_policy():
+    with pytest.raises(ValueError, match="unsupported feature policy version"):
+        feature_policy_versions("made-up-policy")
+
+
+def test_resolve_feature_definition_fails_closed_on_an_unknown_pair():
+    with pytest.raises(ValueError, match="unsupported feature identity: launch_liquidity_usd@v9"):
+        resolve_feature_definition("launch_liquidity_usd", "v9")
+
+
+def test_assert_feature_versions_compatible_allows_identical_versions():
+    assert_feature_versions_compatible("launch_liquidity_usd", "v1", "v1")
+
+
+def test_assert_feature_versions_compatible_fails_closed_on_undeclared_pair():
+    with pytest.raises(ValueError, match="incompatible feature versions"):
+        assert_feature_versions_compatible("launch_liquidity_usd", "v1", "v2")
+
+
+def test_assert_label_versions_compatible_allows_identical_versions():
+    assert_label_versions_compatible("24h", "v1", "v1")
+
+
+def test_assert_label_versions_compatible_fails_closed_on_undeclared_pair():
+    with pytest.raises(ValueError, match="incompatible label versions"):
+        assert_label_versions_compatible("24h", "v1", "v2")
+
+
+def test_feature_row_provenance_carries_the_resolved_definition_identity():
+    spec = runner_spec()
+    snapshot = runner_snapshot()
+    registry = resolve_feature_registry(spec)
+    definition = registry.get("launch_liquidity_usd")
+    cohort = extract_cohort(snapshot, spec.cohort)
+    feature_rows = compute_features(snapshot, cohort, registry)
+    provenance = feature_rows[0]["feature_provenance"]["launch_liquidity_usd"]
+    assert provenance["feature_version"] == "v1"
+    assert provenance["feature_definition_id"] == feature_definition_id(definition)
+
+
+def test_label_row_provenance_carries_the_definition_identity():
+    spec = runner_spec()
+    snapshot = runner_snapshot()
+    cohort = extract_cohort(snapshot, spec.cohort)
+    label = spec.labels[0]
+    rows = generate_labels(snapshot, cohort, label)
+    assert rows[0].provenance["label_version"] == "v1"
+    assert rows[0].provenance["label_definition_id"] == label_definition_id(label)
 
 
 @pytest.mark.parametrize(

@@ -7,6 +7,7 @@ from typing import Any
 
 from analysis.alpha import CohortConfig, LabelDefinition, PromotionPolicy
 from analysis.alpha.labels import HORIZONS as LABEL_HORIZONS
+from analysis.alpha.registry import feature_policy_versions
 
 SPEC_VERSION = "phase6-experiment-v1"
 SUPPORTED_DISCOVERY_CORRECTIONS = ("benjamini-hochberg",)
@@ -183,6 +184,10 @@ class ExperimentSpec:
         object.__setattr__(self, "feature_set", tuple(sorted(self.feature_set)))
         if not self.feature_policy_version.strip():
             raise ValueError("experiment spec requires a feature policy version")
+        catalog_versions = feature_policy_versions(self.feature_policy_version)
+        unresolved_features = sorted(set(self.feature_set) - set(catalog_versions))
+        if unresolved_features:
+            raise ValueError(f"unsupported experiment feature identity: {', '.join(unresolved_features)}")
         if not self.labels:
             raise ValueError("experiment spec requires at least one label definition")
         label_horizons = tuple(label.horizon for label in self.labels)

@@ -3,7 +3,7 @@
 **Status:** Active execution authority for forward work  
 **Current phase:** Phase 6 governed experiment control plane
 **Baseline:** `main` at `23dbd389af88cade4584cb5fdc10b60dc17fcc3b`
-**Last reconciled:** 2026-09-14 (Slice 6.1 closed; Slice 6.2 active)
+**Last reconciled:** 2026-09-14 (Slice 6.3 closed; Slice 6.4 active)
 
 This file is the durable forward roadmap for `ccxt-crypto-pipeline`. It exists so a new agent can determine the repository's actual execution frontier without reconstructing intent from chat history, stale phase prose, or commit messages.
 
@@ -284,11 +284,24 @@ Live-provider acceptance, when credentials are available, MUST be reported separ
 
 Evidence:
 
-- Schema version 7 adds an idempotent `price_observations` table with address-scoped asset/market identity, observation time, positive price, quote asset, optional USD liquidity/volume, configured cadence, source, and raw evidence.
-- `storage/db.py` provides deterministic upsert/read accessors; v6-to-v7 and fresh/repeated initialization tests preserve existing rows and converge on the target contract.
-- Tier-0 normalizes GeckoTerminal base/quote USD prices, liquidity, volume, and the configured polling cadence. EVM-shaped and Solana-shaped offline fixtures each persist a launch event plus subsequent observations, and repeated polling updates the same observation identity rather than duplicating it.
-- `tests/test_storage.py` and `tests/test_tier0.py` cover migration, idempotency, deterministic reads, address-scoped identities, optional values, and both network shapes. The complete fixture suite ran with no network access and passed.
-- Live-provider acceptance remains unverified and separate from this fixture evidence.
+- Schema version 13 adds source-scoped, idempotent DEX price/liquidity observations (`dex_price_observations`)
+  plus explicit per-chain/provider capability observations (`observation_capabilities`) without filling
+  absent intervals, alongside an idempotent generic `price_observations` table with address-scoped
+  asset/market identity, observation time, positive price, quote asset, optional USD liquidity/volume,
+  configured cadence, source, and raw evidence.
+- `storage/db.py` provides deterministic upsert/read accessors for both observation contracts; migration
+  and fresh/repeated initialization tests preserve existing rows and converge on the target contract.
+- GeckoTerminal's ingestion-owned adapter normalizes configured minute candles for address-scoped
+  base assets and retains market, quote-asset, source, candle, and observation timestamps; Tier-0 also
+  normalizes GeckoTerminal base/quote USD prices, liquidity, volume, and the configured polling cadence
+  into the generic observation contract.
+- The read-only dataset boundary consumes persisted DEX observations and carries quote identity into
+  Phase 3 label conversion; an offline fixture proves persisted launch-to-1h-label replay.
+- EVM and Solana Tier-0 fixtures cover subsequent observations, gap preservation, capability status,
+  address-scoped identities, and replay-safe storage for both observation contracts. Live provider
+  behavior remains `UNVERIFIED_RUNTIME` without a credentialed or network-enabled smoke check.
+- `tests/test_storage.py` and `tests/test_tier0.py` cover migration, idempotency, deterministic reads,
+  address-scoped identities, optional values, and both network shapes.
 
 ## Slice 4R.7 — Phase 2 metric/time-index hardening
 
@@ -772,15 +785,110 @@ Evidence:
 
 ## Slice 6.2 — Deterministic experiment runner
 
-**Status:** ACTIVE
+**Status:** DONE
 
 Execute the spec from local persisted inputs only and produce one immutable run directory/manifest.
 
+Evidence:
+
+- `analysis/experiments/runner.py` adds `run_experiment(spec, snapshot, output_dir)`,
+  the first code that actually executes an `ExperimentSpec`. It composes only the
+  already-governed Phase 3 helpers (`extract_cohort`, `compute_features`,
+  `generate_labels`, `build_split`, `score_candidate`, `baseline_families`,
+  `evaluate_candidate_promotion`) in the sequence the spec declares, and never
+  redefines cohort, feature, label, split, or candidate-evaluation semantics.
+- `resolve_feature_registry` maps only the spec's declared feature identities that
+  have an implemented, versioned definition (`launch_liquidity_usd`,
+  `lookback_return`) to the canonical `analysis/alpha/features.py` constructors,
+  failing closed on any other declared identity rather than substituting a
+  different computation. A declarative `feature>=pXX` candidate selection rule is
+  resolved to concrete token ids using only feature values observed inside the
+  partition being scored (the discovery split), so no other-partition information
+  can leak into the selection boundary; an unsupported rule fails closed.
+- The runner deliberately does not fabricate hypothesis-family significance
+  testing: `discovery_adjusted_p_value`/`holdout_adjusted_p_value` are left unset
+  because frozen multiplicity-family execution is Slice 6.4's job, so
+  `evaluate_candidate_promotion` honestly returns `insufficient_evidence` with an
+  explicit `MISSING_DISCOVERY_CORRECTION` reason rather than an invented pass.
+  `baseline_superior`, `uncertainty_supports_effect`, and `cost_sensitivity_passed`
+  are derived directly and deterministically from the already-computed
+  `CandidateResult` fields.
+- The run identity is keyed by the spec's own content-addressed
+  `experiment_spec_id` plus the dataset identity and code version (mirroring the
+  existing `analysis/alpha/artifacts.py::write_research_run` and
+  `analysis/runs/artifacts.py::write_run` immutable-write pattern); an identical
+  spec/dataset/code-version replay is byte-identical, and changing any of them
+  produces a distinct run directory. Secret-bearing fields are sanitized before
+  being written, following the same pattern already used by the other two
+  artifact writers.
+- `tests/test_phase6.py` adds a full-coverage eight-launch fixture and covers:
+  end-to-end execution through every declared step producing all eight expected
+  artifacts; byte-identical replay; run-identity change on a spec change; a
+  rejected unresolved feature identity; a rejected unsupported selection rule;
+  and a selection threshold computed strictly within the discovery partition
+  (never a validation/holdout launch). The locked full suite passed with 179
+  tests (154 prior + 25 new); the storage migration guard, byte-compilation, and
+  whitespace validation also passed.
+
 ## Slice 6.3 — Feature/label registry versioning
+
+**Status:** DONE
 
 Give feature and label definitions durable identities, semantic versions, compatibility rules, and provenance hashes.
 
+Evidence:
+
+- `analysis/alpha/features.py` adds a required `version` field to
+  `FeatureDefinition` (fails closed on a blank version) and
+  `feature_definition_id`, a deterministic sha256 content hash over every
+  declared, hashable field (name, version, source columns, effective
+  timestamp, lookback, missing-value policy, allowed horizons, source
+  timestamp). The `compute` callable itself is intentionally excluded from
+  the hash: its behavior per (name, version) is governed by catalog
+  discipline rather than hashed Python code, the same pattern already used
+  for other Phase 3 config objects.
+- `analysis/alpha/labels.py` adds `LABEL_SEMANTIC_VERSIONS` (the currently
+  implemented semantic version of each horizon's tolerance/censoring
+  contract) and a required `version` field on `LabelDefinition` that must
+  match its horizon's implemented version, failing closed on an
+  unimplemented one. `label_definition_id` content-hashes a label's declared
+  semantic fields (name, version, horizon, quote currency, censoring
+  policy, unavailable treatment).
+- Every produced feature value and label row now carries its own resolved
+  `feature_version`/`feature_definition_id` or `label_version`/
+  `label_definition_id` in its provenance, so a value can be traced to the
+  exact versioned definition that produced it, not just a bare name.
+- `analysis/alpha/registry.py` adds the durable catalog layer: `FEATURE_POLICIES`
+  (named bundles of per-feature versions, e.g. `phase3-feature-v1`),
+  `resolve_feature_definition`/`feature_policy_versions` (fail closed on an
+  unknown policy or (name, version) pair), and `FEATURE_COMPATIBILITY`/
+  `LABEL_COMPATIBILITY` with `assert_feature_versions_compatible`/
+  `assert_label_versions_compatible` — compatibility fails closed by default
+  and only an explicit declared entry permits treating two versions of the
+  same name as comparable. Only `v1` of each feature/label exists today, so
+  no compatibility entry is populated yet; the assertions are exercised
+  directly by tests ahead of Slice 6.5's run-comparison consumer.
+- `analysis/experiments/spec.py` resolves `ExperimentSpec.feature_policy_version`
+  against the registry catalog at spec construction time, so an unresolved
+  feature identity now fails closed earlier (spec construction) rather than
+  only at runner resolution; `analysis/experiments/runner.py` resolves
+  features through the same catalog and writes a new `definitions.json` run
+  artifact recording the resolved version and content-addressed identity of
+  every feature and label the run actually used.
+- `tests/test_phase6.py` covers: feature/label version validation
+  (blank/unimplemented versions fail closed), deterministic content-hash
+  replay and change-on-version/change-on-censoring-policy, hash independence
+  from the `compute` callable, policy/catalog resolution success and
+  fail-closed cases, compatibility-assertion identity/undeclared-pair
+  behavior, per-row feature/label provenance carrying the resolved
+  identity, the earlier (spec-construction-time) unresolved-feature
+  rejection, and the new `definitions.json` run artifact. The locked full
+  suite passed with 193 tests (179 prior + 14 new); the storage migration
+  guard, byte-compilation, and whitespace validation also passed.
+
 ## Slice 6.4 — Hypothesis-family governance
+
+**Status:** ACTIVE
 
 Freeze multiplicity families before evaluation and prevent post-result silent redefinition.
 
@@ -928,7 +1036,7 @@ For a fresh agent, the intended pickup sequence is:
 
 `AGENTS.md` → `ROADMAP.md` → active `docs/plans/phase-*.md` → relevant code/tests → Git history/status.
 
-The current frontier is **Phase 6.1 — Experiment specification schema**.
+The current frontier is **Slice 6.4 — Hypothesis-family governance**.
 
 Phase 5 is DONE. Slice 5.7 closed the phase with
 `docs/plans/phase-5-data-plane-closure-matrix.md` and
@@ -951,14 +1059,38 @@ cross-validated, content-addressed object, composing the existing governed
 `analysis/alpha/` types (`CohortConfig`, `LabelDefinition`,
 `PromotionPolicy`) rather than duplicating them.
 
-Slice 6.2 has not started. It needs a deterministic experiment runner that
-takes an `ExperimentSpec` plus a local `DatasetSnapshot` and executes the
+Slice 6.2 is DONE. `analysis/experiments/runner.py::run_experiment` takes an
+`ExperimentSpec` plus a local `DatasetSnapshot` and executes the
 already-governed Phase 3 helpers (`extract_cohort`, `compute_features`,
-`generate_labels`, `build_split`, `score_candidate`,
-`evaluate_candidate_promotion`, `baseline_families`) in the sequence the
-spec declares, producing one immutable run directory/manifest analogous to
-`analysis/alpha/artifacts.py::write_research_run` and
-`analysis/runs/artifacts.py::write_run` -- keyed by `experiment_spec_id` plus
-dataset identity, with no recomputation or redefinition of Phase 3 research
-semantics. The runner is the first slice that actually executes a spec;
-6.1 intentionally stops at the versioned, validated declaration.
+`generate_labels`, `build_split`, `score_candidate`, `baseline_families`,
+`evaluate_candidate_promotion`) in the sequence the spec declares, producing
+one immutable run directory/manifest keyed by `experiment_spec_id` plus
+dataset identity and code version, with no recomputation or redefinition of
+Phase 3 research semantics. It deliberately leaves hypothesis-family
+significance evidence (`discovery_adjusted_p_value`/
+`holdout_adjusted_p_value`) unset rather than fabricating it, so promotion
+honestly reports `insufficient_evidence` until real multiplicity-family
+testing lands.
+
+Slice 6.3 is DONE. `analysis/alpha/features.py` and `analysis/alpha/labels.py`
+now require a `version` on every `FeatureDefinition`/`LabelDefinition` (a
+label's version must match its horizon's implemented semantic version) and
+expose `feature_definition_id`/`label_definition_id`, deterministic
+content hashes of each definition's declared semantic fields, recorded on
+every produced feature/label row's own provenance. `analysis/alpha/registry.py`
+adds the durable catalog (`FEATURE_POLICIES`, `resolve_feature_definition`,
+`feature_policy_versions`) that replaced the ad hoc bare-name-to-constructor
+mapping `resolve_feature_registry` used in Slice 6.2, plus
+`assert_feature_versions_compatible`/`assert_label_versions_compatible`,
+which fail closed on any undeclared cross-version comparison so Slice 6.5's
+run-comparison contract has a compatibility rule to enforce rather than
+having to invent one. `ExperimentSpec` now resolves `feature_policy_version`
+against this catalog at construction time, and every experiment run writes
+a `definitions.json` artifact recording the resolved version and
+content-addressed identity of every feature/label the run actually used.
+
+Slice 6.4 has not started. It needs to freeze each experiment's
+`HypothesisFamily` grid (already declared and content-identified by Slice
+6.1, but not yet enforced against post-hoc redefinition) before evaluation,
+so a discovery/confirmation correction cannot be recomputed over a silently
+widened or narrowed hypothesis set after results are seen.

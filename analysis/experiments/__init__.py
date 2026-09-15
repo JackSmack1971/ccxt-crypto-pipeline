@@ -1,12 +1,14 @@
-"""Phase 6 governed experiment specification.
+"""Phase 6 governed experiment specification and deterministic execution.
 
-A versioned, declarative composition of the governed Phase 2-3 configuration
-objects that together define one reproducible research experiment. This
-module only versions, cross-validates, and content-identifies configuration;
-it does not execute cohort extraction, feature computation, labeling,
-splitting, or candidate evaluation (that remains Slice 6.2).
+``spec.py`` versions, cross-validates, and content-identifies a declarative
+composition of the governed Phase 2-3 configuration objects; it never
+executes cohort extraction, feature computation, labeling, splitting, or
+candidate evaluation itself. ``runner.py`` is the first slice that actually
+executes a spec: it composes the already-governed Phase 3 helpers in the
+sequence the spec declares and writes one immutable run directory/manifest.
 """
 
+from .runner import MANIFEST_VERSION, resolve_feature_registry, run_experiment
 from .spec import (BaselinePolicy, CandidateDefinition, CostPolicy, ExperimentSpec,
                    HypothesisFamily, SPEC_VERSION, SplitPolicy,
                    SUPPORTED_BASELINE_FAMILIES, SUPPORTED_CONFIRMATION_CORRECTIONS,
@@ -17,4 +19,5 @@ __all__ = [
     "HypothesisFamily", "SPEC_VERSION", "SplitPolicy",
     "SUPPORTED_BASELINE_FAMILIES", "SUPPORTED_CONFIRMATION_CORRECTIONS",
     "SUPPORTED_DISCOVERY_CORRECTIONS", "experiment_spec_dict", "experiment_spec_id",
+    "MANIFEST_VERSION", "resolve_feature_registry", "run_experiment",
 ]

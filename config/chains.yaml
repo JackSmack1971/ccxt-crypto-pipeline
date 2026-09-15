@@ -46,3 +46,9 @@ confirmation_depth: 12
 reorg_lookback_blocks: 20
 request_timeout_seconds: 20
 max_pools_per_network: 20
+price_observations:
+  enabled: true
+  timeframe: minute
+  aggregate: 1
+  limit: 1000
+  supported_label_horizons: [1h, 6h, 24h, 7d]

@@ -11,6 +11,7 @@ from storage.db import (
     get_ingestion_cursor,
     init_db,
     insert_event,
+    insert_dex_price_observations,
     insert_ohlcv_batch,
     list_ohlcv_partitions,
     log_run_end,
@@ -19,6 +20,7 @@ from storage.db import (
     read_assets,
     read_asset_relationships,
     read_events,
+    read_dex_price_observations,
     read_evm_block_observations,
     read_ingestion_cursors,
     read_ingestion_continuations,
@@ -71,7 +73,7 @@ def test_storage_round_trip_and_idempotent_init(tmp_path):
     run_id = log_run_start("fixture_job", db_path, started_at=timestamp, run_id="run-1")
     log_run_end(run_id, "success", db_path, finished_at=timestamp, rows_written=1)
 
-    assert SCHEMA_VERSION == 12
+    assert SCHEMA_VERSION == 13
     asset = read_assets(db_path)[0]
     assert (asset["canonical_id"], asset["source_type"], asset["chain_or_exchange"],
             asset["symbol_or_contract"]) == ("kraken:BTC/USDT", "cex", "kraken", "BTC/USDT")
@@ -174,7 +176,6 @@ def test_v5_store_adds_identity_relationship_contract_without_losing_rows(tmp_pa
     connection.execute("INSERT INTO assets VALUES ('ethereum:0xpool', 'dex', 'ethereum', '0xpool', ?, NULL)",
                        [datetime(2025, 1, 1)])
     connection.close()
-
     init_db(db_path)
     connection = duckdb.connect(str(db_path))
     assert connection.execute("SELECT version FROM schema_version").fetchone() == (SCHEMA_VERSION,)
@@ -508,6 +509,26 @@ def test_classify_provider_failure_distinguishes_rate_limits_from_other_failures
     assert classify_provider_failure(None) == "failure"
 
 
+def test_v6_store_adds_dex_observation_contract_without_losing_rows(tmp_path):
+    db_path = tmp_path / "v6.duckdb"
+    connection = duckdb.connect(str(db_path))
+    connection.execute("CREATE TABLE schema_version (version INTEGER NOT NULL)")
+    connection.execute("INSERT INTO schema_version VALUES (6)")
+    from storage.schema import SCHEMA_SQL
+    for statement in SCHEMA_SQL.split(";"):
+        if statement.strip() and "dex_price_observations" not in statement and "observation_capabilities" not in statement:
+            connection.execute(statement)
+    connection.execute("INSERT INTO assets VALUES ('ethereum:0xbase', 'dex', 'ethereum', '0xbase', ?, NULL)",
+                       [datetime(2025, 1, 1)])
+    connection.close()
+    init_db(db_path)
+    connection = duckdb.connect(str(db_path))
+    assert connection.execute("SELECT version FROM schema_version").fetchone() == (SCHEMA_VERSION,)
+    assert connection.execute("SELECT canonical_id FROM assets").fetchone() == ("ethereum:0xbase",)
+    assert connection.execute("SELECT COUNT(*) FROM dex_price_observations").fetchone() == (0,)
+    connection.close()
+
+
 def test_asset_relationships_round_trip_point_in_time_evidence(tmp_path):
     db_path = tmp_path / "relationships.duckdb"
     observed = datetime(2025, 1, 1)
@@ -525,6 +546,19 @@ def test_asset_relationships_round_trip_point_in_time_evidence(tmp_path):
     assert [(row["relationship_type"], row["asset_canonical_id"]) for row in rows] == [
         ("base", "ethereum:0xbase"), ("quote", "ethereum:0xquote")]
     assert rows[0]["evidence_json"] == '{"role": "base"}'
+
+
+def test_dex_price_observation_round_trip_is_source_scoped_and_idempotent(tmp_path):
+    db_path = tmp_path / "dex-prices.duckdb"
+    timestamp = datetime(2025, 1, 1)
+    row = {"asset_canonical_id": "ethereum:0xbase", "market_canonical_id": "ethereum:0xpool",
+           "quote_asset_canonical_id": "ethereum:0xquote", "timestamp": timestamp,
+           "observed_at": timestamp, "open": 1, "high": 2, "low": .5, "close": 1.5,
+           "volume": 10, "liquidity_usd": 12000, "timeframe": "1m", "source": "fixture"}
+    insert_dex_price_observations([row], db_path)
+    insert_dex_price_observations([{**row, "close": 1.75}], db_path)
+    assert len(read_dex_price_observations(db_path)) == 1
+    assert read_dex_price_observations(db_path)[0]["close"] == 1.75
 
 
 def test_metadata_observations_preserve_point_in_time_history_and_are_idempotent(tmp_path):

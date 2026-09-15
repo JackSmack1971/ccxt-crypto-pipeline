@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import hashlib
+import json
 import math
 from dataclasses import dataclass
 from datetime import datetime, timedelta
@@ -10,6 +12,13 @@ from ._common import as_time, coverage_report
 
 HORIZONS = {"1h": (timedelta(hours=1), timedelta(minutes=5)), "6h": (timedelta(hours=6), timedelta(minutes=15)),
             "24h": (timedelta(days=1), timedelta(minutes=30)), "7d": (timedelta(days=7), timedelta(hours=2))}
+
+# The currently implemented semantic version of each horizon's label
+# contract (tolerance window plus the censoring/unavailable-treatment rules
+# in `generate_labels`). A `LabelDefinition` must declare the version that
+# matches its horizon's implemented semantics; bumping an entry here is the
+# only supported way to change what a horizon's label means.
+LABEL_SEMANTIC_VERSIONS: dict[str, str] = {horizon: "v1" for horizon in HORIZONS}
 
 
 @dataclass(frozen=True)
@@ -51,9 +60,22 @@ class LabelDefinition:
     quote_currency: str = "USD"
     censoring_policy: str = "economic_failure/data_censored/right_censored"
     unavailable_treatment: str = "explicit_censoring"
+    version: str = "v1"
 
     def __post_init__(self):
         if self.horizon not in HORIZONS or self.quote_currency != "USD": raise ValueError("labels require canonical USD horizon")
+        if self.version != LABEL_SEMANTIC_VERSIONS[self.horizon]:
+            raise ValueError(f"unsupported label semantic version for horizon {self.horizon}: {self.version}")
+
+
+def label_definition_id(definition: LabelDefinition) -> str:
+    """Content-addressed identity for a label definition's declared semantic contract."""
+    payload = {
+        "name": definition.name, "version": definition.version, "horizon": definition.horizon,
+        "quote_currency": definition.quote_currency, "censoring_policy": definition.censoring_policy,
+        "unavailable_treatment": definition.unavailable_treatment,
+    }
+    return hashlib.sha256((json.dumps(payload, sort_keys=True, separators=(",", ":")) + "\n").encode()).hexdigest()[:24]
 
 @dataclass(frozen=True)
 class LabelRow:
@@ -121,7 +143,7 @@ def generate_labels(snapshot: DatasetSnapshot, cohort: tuple[Any, ...], definiti
                     conversion_observations: tuple[ConversionObservation, ...] = (),
                     conversion_policy: ConversionPolicy | None = None) -> tuple[LabelRow, ...]:
     duration, tolerance = HORIZONS[definition.horizon]; result = []
-    quote_assets = quote_assets or {}
+    quote_assets = quote_assets if quote_assets is not None else getattr(snapshot, "quote_assets", {})
     conversion_policy = conversion_policy or ConversionPolicy()
     for member in cohort:
         start = as_time(member.t0); target = start + duration
@@ -151,6 +173,8 @@ def generate_labels(snapshot: DatasetSnapshot, cohort: tuple[Any, ...], definiti
                                begin_price, end_price,
                                {"dataset_identity": snapshot.dataset_identity, "raw_quote": quote_asset,
                                 "quote_currency": definition.quote_currency,
+                                "label_version": definition.version,
+                                "label_definition_id": label_definition_id(definition),
                                 "conversion_policy": conversion_policy.version,
                                 "start_conversion": begin_provenance, "end_conversion": end_provenance,
                                 **({"conversion_unavailable": conversion_error} if conversion_error else {}),

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 from datetime import datetime, timezone
 from typing import Any
 
@@ -101,6 +102,30 @@ class GeckoTerminalClient:
 
     def trending_pools(self, network: str):
         return self._pools(network, "trending_pools")
+
+    def pool_ohlcv(self, network: str, pool_address: str, *, timeframe: str = "minute",
+                   aggregate: int = 1, limit: int = 1000) -> list[dict[str, Any]]:
+        """Return only provider candles actually present in the response."""
+        body = _get(self.session,
+                    f"{self.base_url}/networks/{network}/pools/{pool_address}/ohlcv/{timeframe}"
+                    f"?aggregate={aggregate}&limit={limit}",
+                    limiter=self.throttles.geckoterminal, timeout=self.timeout)
+        attributes = (((body.get("data") or {}).get("attributes") or {})
+                      if isinstance(body, dict) else {})
+        candles = attributes.get("ohlcv_list", [])
+        result = []
+        for candle in candles if isinstance(candles, list) else []:
+            if not isinstance(candle, list) or len(candle) < 6:
+                raise ProviderError("GeckoTerminal returned a malformed OHLCV candle")
+            timestamp = _timestamp(candle[0])
+            values = candle[1:6]
+            if (timestamp is None or any(not isinstance(value, (int, float)) or not math.isfinite(value)
+                                         for value in values) or any(value <= 0 for value in values[:4])
+                    or values[4] < 0):
+                raise ProviderError("GeckoTerminal returned an invalid OHLCV candle")
+            result.append({"timestamp": timestamp, "open": float(candle[1]), "high": float(candle[2]),
+                           "low": float(candle[3]), "close": float(candle[4]), "volume": float(candle[5])})
+        return sorted(result, key=lambda row: row["timestamp"])
 
 
 class DefiLlamaClient:
