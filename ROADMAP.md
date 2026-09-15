@@ -3,7 +3,7 @@
 **Status:** Active execution authority for forward work  
 **Current phase:** Phase 6 governed experiment control plane
 **Baseline:** `main` at `23dbd389af88cade4584cb5fdc10b60dc17fcc3b`
-**Last reconciled:** 2026-09-15 (Slice 6.4 closed; Slice 6.5 active)
+**Last reconciled:** 2026-09-15 (Slice 6.5 closed; Slice 6.6 active)
 
 This file is the durable forward roadmap for `ccxt-crypto-pipeline`. It exists so a new agent can determine the repository's actual execution frontier without reconstructing intent from chat history, stale phase prose, or commit messages.
 
@@ -917,11 +917,30 @@ Evidence:
 
 ## Slice 6.5 — Run catalog and comparison contract
 
-**Status:** ACTIVE
+**Status:** DONE
 
 Index immutable local research runs without mutating them; enable apples-to-apples comparisons only when methodology compatibility is proven.
 
+Evidence:
+
+- `analysis/experiments/catalog.py` adds a read-only catalog loader that verifies
+  the manifest version and immutable marker, run identity, required artifact
+  presence, and every declared artifact hash before exposing run metadata.
+  Deterministic directory indexing reads immediate immutable runs without
+  creating or modifying catalog state.
+- The comparison boundary first verifies both runs, then requires identical
+  feature and label sets, applies the registry's explicit cross-version
+  compatibility rules, and requires all remaining methodology fields to match.
+  It exposes only deterministic candidate summary deltas after those gates pass;
+  incompatible cost or other methodology changes fail closed.
+- `tests/test_phase6.py` covers deterministic non-mutating indexing, artifact and
+  identity tamper rejection, compatible comparison, and fail-closed methodology
+  mismatch. The locked full suite passed with 366 tests; the storage migration
+  guard, byte-compilation, and whitespace validation also passed.
+
 ## Slice 6.6 — Experiment CLI/API boundary
+
+**Status:** ACTIVE
 
 Expose a narrow local interface for validate → run → inspect → approve without creating a second execution engine.
 
@@ -1061,7 +1080,7 @@ For a fresh agent, the intended pickup sequence is:
 
 `AGENTS.md` → `ROADMAP.md` → active `docs/plans/phase-*.md` → relevant code/tests → Git history/status.
 
-The current frontier is **Slice 6.5 — Run catalog and comparison contract**.
+The current frontier is **Slice 6.6 — Experiment CLI/API boundary**.
 
 Phase 5 is DONE. Slice 5.7 closed the phase with
 `docs/plans/phase-5-data-plane-closure-matrix.md` and
@@ -1123,6 +1142,13 @@ widened set. `run_experiment` creates and persists the family commitment before
 inspecting research results while continuing to leave unavailable significance
 evidence explicit rather than fabricating it.
 
-Slice 6.5 has not started. It needs to index immutable local experiment runs
-without mutating them and permit comparisons only after the feature/label and
-methodology compatibility contracts prove they are apples-to-apples.
+Slice 6.5 is DONE. `analysis/experiments/catalog.py` verifies immutable run
+manifests, identities, and artifact hashes before returning deterministic
+read-only catalog records. Its comparison boundary requires matching feature
+and label sets, explicit registry-approved version compatibility, and equality
+of all other methodology fields before it returns candidate summary deltas;
+invalid, tampered, and methodologically incompatible runs fail closed.
+
+Slice 6.6 has not started. It needs to expose the existing spec validation,
+runner, catalog inspection, and explicit approval boundaries through one narrow
+local CLI/API without introducing a second execution engine.

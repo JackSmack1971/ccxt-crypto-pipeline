@@ -14,7 +14,7 @@ from analysis.experiments import (BaselinePolicy, CandidateDefinition, CostPolic
                                   ExperimentSpec, HypothesisFamily, SPEC_VERSION, SplitPolicy,
                                   evaluate_hypothesis_family, freeze_hypothesis_family,
                                   experiment_spec_dict, experiment_spec_id, resolve_feature_registry,
-                                  run_experiment)
+                                  run_experiment, catalog_runs, compare_runs, load_run)
 from analysis.experiments.runner import (_dump, _parse_selection_rule, _percentile,
                                          _safe, _selected_token_ids)
 
@@ -370,6 +370,56 @@ def test_runner_selection_threshold_is_computed_within_the_discovery_partition_o
     # 20k/30k/40k/50k); a >=p75 threshold over just that partition selects
     # only the 50k token, never a validation/holdout launch.
     assert candidate["independent_launches"] == 1
+
+
+# --- Slice 6.5: verified run catalog and comparisons -----------------------
+
+def test_catalog_indexes_verified_runs_deterministically_without_writing(tmp_path):
+    root = tmp_path / "runs"
+    second = run_experiment(runner_spec(code_version="test-code-v2"), runner_snapshot(), root)
+    first = run_experiment(runner_spec(), runner_snapshot(), root)
+    before = {path: path.read_bytes() for path in root.glob("*/*")}
+
+    records = catalog_runs(root)
+
+    assert [record.run_id for record in records] == sorted((first.name, second.name))
+    assert records[0].dataset_identity == "runner-fixture"
+    assert records[0].promotion_state == "insufficient_evidence"
+    assert {path: path.read_bytes() for path in root.glob("*/*")} == before
+
+
+def test_catalog_rejects_tampered_artifact_and_run_identity(tmp_path):
+    run = run_experiment(runner_spec(), runner_snapshot(), tmp_path / "runs")
+    (run / "candidate.json").write_text("{}\n")
+    with pytest.raises(ValueError, match="artifact hash mismatch"):
+        load_run(run)
+
+    intact = run_experiment(runner_spec(code_version="other"), runner_snapshot(), tmp_path / "runs")
+    renamed = intact.with_name("not-the-run-id")
+    intact.rename(renamed)
+    with pytest.raises(ValueError, match="manifest structure"):
+        load_run(renamed)
+
+
+def test_compatible_runs_can_be_compared(tmp_path):
+    left = run_experiment(runner_spec(name="left"), runner_snapshot(), tmp_path / "runs")
+    right = run_experiment(runner_spec(name="right"), runner_snapshot(), tmp_path / "runs")
+
+    comparison = compare_runs(left, right)
+
+    assert comparison.candidate_name == "high_liquidity"
+    assert comparison.horizon == "24h"
+    assert comparison.mean_return_delta == pytest.approx(0.0)
+    assert comparison.sample_size_delta == 0
+
+
+def test_comparison_rejects_incompatible_methodology(tmp_path):
+    left = run_experiment(runner_spec(), runner_snapshot(), tmp_path / "runs")
+    changed = runner_spec(costs=CostPolicy(scenarios=(0.0, 0.002)))
+    right = run_experiment(changed, runner_snapshot(), tmp_path / "runs")
+
+    with pytest.raises(ValueError, match="incompatible experiment methodology"):
+        compare_runs(left, right)
 
 
 # --- Slice 6.3: feature/label registry versioning ---------------------------
