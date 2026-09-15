@@ -168,3 +168,77 @@ def test_feature_set_rejects_duplicate_entries():
 def test_feature_set_rejects_blank_entries():
     with pytest.raises(ValueError, match="non-blank feature"):
         build_spec(feature_set=("launch_liquidity_usd", "  "))
+
+
+@pytest.mark.parametrize(
+    ("field", "value", "message"),
+    [
+        ("version", "  ", "requires a version"),
+        ("embargo_days", -1, "non-negative"),
+        ("feature_lookback_seconds", -1, "non-negative"),
+        ("label_horizon_seconds", -1, "non-negative"),
+    ],
+)
+def test_split_policy_rejects_invalid_identity_and_windows(field, value, message):
+    with pytest.raises(ValueError, match=message):
+        SplitPolicy(**{field: value})
+
+
+@pytest.mark.parametrize(
+    ("field", "value", "message"),
+    [
+        ("name", "  ", "requires a name"),
+        ("features", (), "at least one non-blank feature"),
+        ("thresholds", (), "at least one non-blank threshold"),
+        ("horizons", (), "at least one non-blank horizon"),
+        ("subgroups", (), "at least one subgroup declaration"),
+        ("features", ("a", "a"), "features must be unique"),
+        ("thresholds", ("t", "t"), "thresholds must be unique"),
+        ("horizons", ("24h", "24h"), "horizons must be unique"),
+        ("subgroups", (None, None), "subgroups must be unique"),
+        ("discovery_q", 0.0, "thresholds must be in"),
+        ("confirmation_alpha", 1.1, "thresholds must be in"),
+    ],
+)
+def test_hypothesis_family_rejects_invalid_grid_and_correction_contract(field, value, message):
+    kwargs = {"name": "family", "features": ("a",), "thresholds": ("t",), "horizons": ("24h",)}
+    kwargs[field] = value
+    with pytest.raises(ValueError, match=message):
+        HypothesisFamily(**kwargs)
+
+
+@pytest.mark.parametrize("kwargs", [{"name": "  "}, {"selection_rule": "  "}])
+def test_candidate_definition_rejects_blank_identity_parts(kwargs):
+    with pytest.raises(ValueError, match="requires a name and selection rule"):
+        CandidateDefinition(**{"name": "candidate", "horizon": "24h", "selection_rule": "rule", **kwargs})
+
+
+@pytest.mark.parametrize(
+    ("kwargs", "message"),
+    [
+        ({"version": "  "}, "requires a version"),
+        ({"scenarios": ()}, "at least one scenario"),
+        ({"scenarios": (-0.001,)}, "non-negative"),
+    ],
+)
+def test_cost_policy_rejects_invalid_identity_and_scenarios(kwargs, message):
+    with pytest.raises(ValueError, match=message):
+        CostPolicy(**kwargs)
+
+
+def test_baseline_policy_rejects_duplicate_families():
+    with pytest.raises(ValueError, match="must be unique"):
+        BaselinePolicy(families=("no_trade", "no_trade"))
+
+
+@pytest.mark.parametrize(
+    ("kwargs", "message"),
+    [
+        ({"feature_policy_version": "  "}, "feature policy version"),
+        ({"code_version": "  "}, "code and config identities"),
+        ({"config_identity": "  "}, "code and config identities"),
+    ],
+)
+def test_experiment_spec_rejects_blank_required_identity(kwargs, message):
+    with pytest.raises(ValueError, match=message):
+        build_spec(**kwargs)

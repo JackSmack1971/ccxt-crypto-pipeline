@@ -1,7 +1,18 @@
 # Mutmut test-improvement plan
 
-Status: U1–U11 implemented; a fresh complete mutation campaign remains blocked by the local
+Status: U1–U12 implemented; a fresh complete mutation campaign remains blocked by the local
 WSL environment and is not claimed as a mutation-score result.
+
+## Execution update — 2026-09-15 (U12 complete)
+
+U12 added focused Phase 6 experiment-spec boundary coverage in `tests/test_phase6.py`:
+invalid split identities and windows, empty/duplicate hypothesis-grid declarations,
+correction-threshold boundaries, blank candidate identities, invalid cost scenarios,
+duplicate baseline families, and blank required experiment identities. The focused suite
+ passed 48 tests with `uv run --no-sync python -m pytest tests/test_phase6.py -q`.
+This remains test-only and does not claim refreshed mutation results. The complete POSIX
+campaign and terminal-mutant reconciliation remain blocked by the unavailable WSL
+environment; the existing five Phase 5/storage baseline failures remain unchanged.
 
 ## Execution update — 2026-09-14 (U11 complete)
 
