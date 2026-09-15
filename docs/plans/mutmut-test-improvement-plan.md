@@ -1,6 +1,6 @@
 # Mutmut test-improvement plan
 
-Status: U1–U3 implemented; U4 is the next active remediation slice. The campaign evidence
+Status: U1–U4 implemented; U5 is the next active remediation slice. The campaign evidence
 below remains partial and is not a complete mutation score.
 
 ## Execution update — 2026-09-14
@@ -35,6 +35,25 @@ epoch-like or malformed values. The focused suite passed 14 tests with
 tests but also reported existing failures and pytest setup/storage errors after the local temp
 volume exhausted its space; that run is not treated as a clean full-suite gate. No production
 files or mutmut configuration were changed.
+
+## Execution update — 2026-09-14 (U5 active)
+
+U5 is the next test-only slice. It will exercise the public CEX refresh, universe, and backfill
+orchestration seams with mocked collaborators and temporary local storage. The cases will cover
+CLI/config path precedence, refresh ticker and candle requests, checkpoint-plus-timeframe resume,
+empty/short candle filtering, run success/failure logging, exchange cleanup, and exception
+propagation. Parser boilerplate without independent repository behavior remains out of scope.
+
+U5 was implemented in `tests/test_cex.py`: refresh now has assertions for one exchange-wide
+ticker snapshot, checkpoint-plus-timeframe resume, short-candle filtering, successful ledger
+logging, failure propagation, and cleanup; backfill has exact persisted-checkpoint arithmetic,
+short-candle filtering, and cleanup coverage; and the three public CLI wrappers have config/path
+precedence checks where their orchestration is observable. The focused suite passed 20 tests with
+`uv run --no-sync python -m pytest tests/test_cex.py -q`. The provisioned full suite passed 228
+tests and retained the five pre-existing Phase 5/storage failures; bare `python -m pytest` was
+not runnable because the system interpreter lacks repository dependencies such as DuckDB. No
+production files or mutmut configuration were changed. U5 is complete for this test-only slice;
+the next planned work is U6 unless refreshed mutation evidence changes prioritization.
 
 ## Evidence boundary
 
