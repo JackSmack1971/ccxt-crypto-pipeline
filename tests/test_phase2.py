@@ -1,9 +1,10 @@
-from datetime import datetime
+from datetime import datetime, timedelta
 import socket
 
 import pytest
 
 from analysis.backtesting import BacktestConfig, simulate
+from analysis.backtesting.simulator import _bar_interval
 from analysis.datasets import Asset, Bar, DatasetPolicy, DatasetSnapshot
 from analysis.metrics import compute_metrics
 from analysis.runs import write_failed_run, write_run
@@ -95,6 +96,84 @@ def test_unsupported_execution_is_actionable(tmp_path):
     dataset = DatasetSnapshot.from_duckdb(_fixture(tmp_path))
     with pytest.raises(ValueError, match="unsupported execution assumption"):
         simulate(dataset, BuyAndHoldStrategy(), BacktestConfig(execution="close"))
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("initial_cash", -0.01),
+        ("fee_rate", -0.01),
+        ("slippage_bps", -0.01),
+    ],
+)
+def test_backtest_config_rejects_negative_cost_and_cash_values(field, value):
+    with pytest.raises(ValueError, match="must be non-negative"):
+        BacktestConfig(**{field: value}).validate()
+
+
+@pytest.mark.parametrize(
+    "field", ["execution", "missing_bar_policy", "halted_bar_policy", "stale_signal_policy", "source_type"]
+)
+def test_backtest_config_rejects_unsupported_values(field):
+    values = {
+        "execution": "close",
+        "missing_bar_policy": "execute",
+        "halted_bar_policy": "execute",
+        "stale_signal_policy": "hold",
+        "source_type": "dex",
+    }
+    expected_messages = {
+        "execution": "unsupported execution assumption",
+        "missing_bar_policy": "bar policies",
+        "halted_bar_policy": "bar policies",
+        "stale_signal_policy": "stale_signal_policy",
+        "source_type": "unsupported execution universe",
+    }
+    with pytest.raises(ValueError, match=expected_messages[field]):
+        BacktestConfig(**{field: values[field]}).validate()
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("initial_cash", 0),
+        ("fee_rate", 0),
+        ("slippage_bps", 0),
+        ("execution", "next_bar_open"),
+        ("missing_bar_policy", "skip"),
+        ("missing_bar_policy", "error"),
+        ("halted_bar_policy", "skip"),
+        ("halted_bar_policy", "error"),
+        ("stale_signal_policy", "execute_next_available"),
+        ("stale_signal_policy", "skip"),
+        ("stale_signal_policy", "error"),
+        ("source_type", "cex"),
+    ],
+)
+def test_backtest_config_accepts_documented_values(field, value):
+    BacktestConfig(**{field: value}).validate()
+
+
+@pytest.mark.parametrize(
+    ("timeframe", "expected"),
+    [
+        ("1m", timedelta(minutes=1)),
+        ("1h", timedelta(hours=1)),
+        ("1d", timedelta(days=1)),
+        ("1w", timedelta(weeks=1)),
+        ("15m", timedelta(minutes=15)),
+        ("12h", timedelta(hours=12)),
+        ("365d", timedelta(days=365)),
+    ],
+)
+def test_bar_interval_parses_supported_timeframes(timeframe, expected):
+    assert _bar_interval(timeframe) == expected
+
+
+@pytest.mark.parametrize("timeframe", ["0m", "-1h", "m", "1", "1M", "1x", "abc", "1.5h", ""])
+def test_bar_interval_rejects_unsupported_timeframes(timeframe):
+    with pytest.raises(ValueError, match="unsupported timeframe for gap detection"):
+        _bar_interval(timeframe)
 
 
 def test_multi_source_bars_are_preserved_and_unambiguous_selection_is_required(tmp_path):
