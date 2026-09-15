@@ -3,7 +3,7 @@
 **Status:** Active execution authority for forward work  
 **Current phase:** Phase 7 robust validation and research scaling
 **Baseline:** `main` at `23dbd389af88cade4584cb5fdc10b60dc17fcc3b`
-**Last reconciled:** 2026-09-15 (Slice 6.7 closed; Slice 7.1 active)
+**Last reconciled:** 2026-09-15 (Slice 7.1 closed; Slice 7.2 active)
 
 This file is the durable forward roadmap for `ccxt-crypto-pipeline`. It exists so a new agent can determine the repository's actual execution frontier without reconstructing intent from chat history, stale phase prose, or commit messages.
 
@@ -993,11 +993,34 @@ Evidence:
 
 ## Slice 7.1 — Walk-forward / purged evaluation
 
-**Status:** ACTIVE
+**Status:** DONE
 
 Add explicitly configured walk-forward or purged evaluation for experiments that require repeated temporal validation.
 
+Evidence:
+
+- `SplitPolicy` now declares either the existing `single_split` behavior or a
+  content-addressed `walk_forward` mode with an explicit fold count; invalid
+  modes, fewer than two folds, and undersized cohorts fail closed.
+- `analysis/experiments/walk_forward.py` deterministically reserves the final
+  20 percent as sealed holdout evidence and constructs expanding training plus
+  non-overlapping validation folds. Each boundary applies the declared label
+  purge, feature-lookback purge, and embargo rules while retaining row-level
+  removal reasons.
+- The sole experiment runner learns each selection threshold from that fold's
+  training rows, evaluates only its validation rows, and emits the fold
+  membership, thresholds, baselines, candidate summaries, temporal policy, and
+  sealed holdout in hash-bound `walk_forward.json`. It never scores holdout rows
+  through this path.
+- `tests/test_phase7.py` covers expanding/non-overlapping membership, holdout
+  isolation, purge/embargo evidence, deterministic input-order replay,
+  insufficient data, configuration validation, and runner/manifest integration.
+  The locked full suite passed with 378 tests; the version-1 storage migration
+  guard, byte-compilation, and whitespace validation also passed.
+
 ## Slice 7.2 — Robust uncertainty
+
+**Status:** ACTIVE
 
 Add approved bootstrap/resampling methods where dependence structure permits them; retain method/config identity in artifacts.
 
@@ -1200,6 +1223,12 @@ scoring/promotion, and rejection of a methodologically incompatible comparison.
 This evidence does not claim alpha, profitability, live-provider acceptance, or
 production-scale sample adequacy.
 
-Slice 7.1 is ACTIVE. It should add explicitly configured walk-forward or purged
-evaluation for experiments that require repeated temporal validation, without
-turning the experiment control plane into an automated optimizer.
+Slice 7.1 is DONE. `SplitPolicy` now opts explicitly into deterministic purged
+walk-forward evaluation; the runner learns selection thresholds only from each
+expanding training window, scores the following non-overlapping validation
+window, retains every fold's membership/removal/result evidence, and never
+passes the final sealed holdout into fold scoring.
+
+Slice 7.2 is ACTIVE. It should add approved bootstrap/resampling methods only
+where the declared dependence structure permits them, retaining complete method
+and configuration identity in immutable run artifacts.

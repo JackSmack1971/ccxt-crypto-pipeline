@@ -31,6 +31,7 @@ from analysis.datasets.snapshot import DatasetSnapshot
 
 from .spec import ExperimentSpec, experiment_spec_dict, experiment_spec_id
 from .hypotheses import freeze_hypothesis_family
+from .walk_forward import build_walk_forward_evaluation
 
 MANIFEST_VERSION = "phase6-run-v1"
 
@@ -107,6 +108,44 @@ def _selected_token_ids(feature_rows: tuple[dict[str, Any], ...], rule: str) -> 
                      if isinstance(value, (int, float)) and math.isfinite(value) and compare(value, threshold))
 
 
+def _walk_forward_results(evaluation: Any, feature_rows: tuple[dict[str, Any], ...],
+                          labels: tuple[Any, ...], spec: ExperimentSpec) -> dict[str, Any]:
+    """Score each fold using a threshold learned from that fold's training data.
+
+    Only validation labels are scored. Sealed-holdout rows are retained as
+    membership evidence and are deliberately never passed to candidate or
+    baseline evaluation here.
+    """
+    feature_name, operator, pct = _parse_selection_rule(spec.candidate.selection_rule)
+    compare = _OPERATORS[operator]
+    fold_results = []
+    for fold in evaluation.folds:
+        train_ids, validation_ids = frozenset(fold.train), frozenset(fold.validation)
+        train_features = tuple(row for row in feature_rows if row["token_id"] in train_ids)
+        numeric = [row.get(feature_name) for row in train_features
+                   if isinstance(row.get(feature_name), (int, float))
+                   and math.isfinite(row[feature_name])]
+        threshold = _percentile(numeric, pct) if numeric else None
+        validation_features = tuple(row for row in feature_rows if row["token_id"] in validation_ids)
+        selected = frozenset(row["token_id"] for row in validation_features
+                             if threshold is not None
+                             and isinstance(row.get(feature_name), (int, float))
+                             and math.isfinite(row[feature_name])
+                             and compare(row[feature_name], threshold))
+        validation_labels = tuple(row for row in labels if row.token_id in validation_ids)
+        baselines = baseline_families(validation_labels, horizon=spec.candidate.horizon,
+                                      feature_rows=validation_features)
+        candidate = score_candidate(
+            spec.candidate.name, validation_labels, horizon=spec.candidate.horizon,
+            selected=lambda row: row.token_id in selected,
+            baseline_mean=baselines["no_trade"]["mean_return"], turnover=spec.costs.turnover,
+            costs=spec.costs.scenarios, min_coverage=spec.candidate.min_coverage)
+        fold_results.append({"fold": fold.fold, "selection_threshold": threshold,
+                             "selection_feature": feature_name, "baselines": baselines,
+                             "candidate": candidate})
+    return {**evaluation.as_dict(), "results": fold_results}
+
+
 def _plain(value: Any) -> Any:
     if hasattr(value, "as_artifact"):
         return _plain(value.as_artifact())
@@ -160,6 +199,12 @@ def run_experiment(spec: ExperimentSpec, snapshot: DatasetSnapshot, output_dir: 
     split = build_split(cohort, embargo_days=spec.split.embargo_days,
                         feature_lookback=timedelta(seconds=spec.split.feature_lookback_seconds),
                         label_horizon=timedelta(seconds=spec.split.label_horizon_seconds))
+    walk_forward = None
+    if spec.split.evaluation_mode == "walk_forward":
+        walk_forward = build_walk_forward_evaluation(
+            cohort, folds=spec.split.walk_forward_folds, embargo_days=spec.split.embargo_days,
+            feature_lookback=timedelta(seconds=spec.split.feature_lookback_seconds),
+            label_horizon=timedelta(seconds=spec.split.label_horizon_seconds))
 
     discovery_ids = frozenset(split.discovery)
     discovery_features = tuple(row for row in feature_rows if row["token_id"] in discovery_ids)
@@ -210,6 +255,9 @@ def run_experiment(spec: ExperimentSpec, snapshot: DatasetSnapshot, output_dir: 
         "definitions.json": definitions,
         "hypothesis_family.json": hypothesis_family,
     }
+    if walk_forward is not None:
+        artifacts["walk_forward.json"] = _walk_forward_results(
+            walk_forward, feature_rows, candidate_labels, spec)
     manifest = {"manifest_version": MANIFEST_VERSION, "run_id": run_id, "immutable": True,
                 "inputs": inputs, "artifacts": {name: hashlib.sha256(_dump(value)).hexdigest()
                                                 for name, value in artifacts.items()}}

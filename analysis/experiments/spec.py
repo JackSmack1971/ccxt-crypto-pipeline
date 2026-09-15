@@ -24,6 +24,8 @@ class SplitPolicy:
     embargo_days: int = 7
     feature_lookback_seconds: int = 0
     label_horizon_seconds: int = 7 * 24 * 60 * 60
+    evaluation_mode: str = "single_split"
+    walk_forward_folds: int = 3
 
     def __post_init__(self):
         if not self.version.strip():
@@ -32,6 +34,10 @@ class SplitPolicy:
             raise ValueError("embargo_days must be non-negative")
         if self.feature_lookback_seconds < 0 or self.label_horizon_seconds < 0:
             raise ValueError("split windows must be non-negative")
+        if self.evaluation_mode not in {"single_split", "walk_forward"}:
+            raise ValueError(f"unsupported evaluation mode: {self.evaluation_mode}")
+        if self.walk_forward_folds < 2:
+            raise ValueError("walk-forward evaluation requires at least two folds")
 
 
 @dataclass(frozen=True)
