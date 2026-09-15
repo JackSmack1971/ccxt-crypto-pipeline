@@ -7,6 +7,7 @@ import pytest
 
 from reporting.package import build_approved_handoff, generate_package
 from reporting.package.handoff import _dump
+from reporting.claims.model import Claim, Derivation, Evidence, _derived_value
 from reporting.render.static import render_svg
 from analysis.alpha import (CohortConfig, FeatureDefinition, FeatureRegistry, LabelDefinition,
                             PromotionEvidence, build_split, compute_features,
@@ -14,6 +15,17 @@ from analysis.alpha import (CohortConfig, FeatureDefinition, FeatureRegistry, La
                             score_candidate, write_research_run)
 from analysis.datasets import DatasetPolicy, DatasetSnapshot
 from storage.db import connect, insert_event, insert_ohlcv_batch, upsert_asset
+
+
+def _claim_for_derivation(operation, values):
+    return Claim(
+        id="derived",
+        text="derived value",
+        evidence=tuple(Evidence("results", index, "dataset", "config", {"start": "a", "end": "b"}, "fixture")
+                       for index in range(len(values))),
+        derivation=Derivation(source_field="value", operation=operation,
+                              unit="unitless", source_unit="unitless"),
+    )
 
 
 def approved_input(tmp_path, *, value=1.5, missing=False):
@@ -74,6 +86,55 @@ def test_phase4_replay_is_byte_identical_and_review_gated(tmp_path, monkeypatch)
     }
     assert json.loads((first / "review.json").read_text())['status'] == "pending"
     assert '<title>returns</title>' in (first / "charts" / "returns.svg").read_text()
+
+
+@pytest.mark.parametrize(("operation", "values", "expected"), [
+    ("identity", (3.0,), 3.0),
+    ("mean", (2.0, 4.0), 3.0),
+    ("difference", (7.0, 2.0), 5.0),
+    ("ratio", (6.0, 2.0), 3.0),
+    ("percent_change", (12.0, 8.0), 50.0),
+])
+def test_phase4_claim_derivations_compute_each_supported_operation(operation, values, expected):
+    claim = _claim_for_derivation(operation, values)
+    assert _derived_value(claim, {"results": [{"value": value} for value in values]}) == pytest.approx(expected)
+
+
+@pytest.mark.parametrize(("operation", "values", "message"), [
+    ("unsupported", (1.0,), "unsupported derivation operation"),
+    ("identity", (True,), "source is not numeric"),
+    ("identity", (float("inf"),), "source is non-finite"),
+    ("identity", (1.0, 2.0), "identity derivation requires one"),
+    ("difference", (1.0,), "difference derivation requires two"),
+    ("ratio", (1.0, 0.0), "ratio has a zero denominator"),
+    ("percent_change", (1.0, 0.0), "percent_change has a zero denominator"),
+])
+def test_phase4_claim_derivations_reject_invalid_inputs(operation, values, message):
+    with pytest.raises(ValueError, match=message):
+        _derived_value(_claim_for_derivation(operation, values),
+                       {"results": [{"value": value} for value in values]})
+
+
+def test_phase4_static_renderer_sorts_declared_x_values_before_plotting():
+    spec = {"id": "returns", "x_column": "time", "y_column": "return", "x_unit": "hours",
+            "y_unit": "percent", "missing_behavior": "explicit_state", "source_attribution": "fixture",
+            "alt_text": "Observed return percent over time.", "transformations": ["sort_x"],
+            "width": 800, "height": 450}
+    svg = render_svg(spec, [{"time": 2, "return": 20}, {"time": 1, "return": 10}])
+    assert 'points="60.000,400.000 760.000,50.000"' in svg
+
+
+def test_phase4_static_renderer_preserves_missing_state_and_fail_policy():
+    spec = {"id": "returns", "x_column": "time", "y_column": "return", "x_unit": "hours",
+            "y_unit": "percent", "missing_behavior": "explicit_state", "source_attribution": "fixture",
+            "alt_text": "Observed return percent over time.", "width": 800, "height": 450}
+    svg = render_svg(spec, [{"time": 1, "return": 10}, {"time": 2, "return": None}])
+    assert 'data-missing="true"' in svg
+    assert "Unavailable observations omitted" in svg
+
+    spec["missing_behavior"] = "fail"
+    with pytest.raises(ValueError, match="contains missing values"):
+        render_svg(spec, [{"time": 1, "return": None}])
 
 
 def test_approved_handoff_is_deterministic_and_does_not_mutate_phase3_run(tmp_path):

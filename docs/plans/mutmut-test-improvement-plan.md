@@ -1,7 +1,18 @@
 # Mutmut test-improvement plan
 
-Status: U1–U8 implemented; a fresh complete mutation campaign remains blocked by the local
+Status: U1–U9 implemented; a fresh complete mutation campaign remains blocked by the local
 WSL environment and is not claimed as a mutation-score result.
+
+## Execution update — 2026-09-14 (U9 complete)
+
+U9 added focused Phase 4 reporting-boundary tests in `tests/test_phase4.py`: every supported
+claim derivation operation and its invalid-input/zero-denominator behavior, deterministic
+`sort_x` rendering, and explicit missing-value versus fail-closed chart behavior. These tests
+exercise pure claim and renderer contracts directly without changing production behavior or
+mutation configuration. The focused suite passed 44 tests with
+`uv run --no-sync python -m pytest tests/test_phase4.py -q`. This remains test-only and does
+not claim refreshed mutation results; the POSIX campaign and terminal mutant reconciliation
+remain blocked by the unavailable WSL environment.
 
 ## Execution update — 2026-09-14 (U8 complete)
 
