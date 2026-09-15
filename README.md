@@ -75,6 +75,9 @@ The status command prints JSON derived from the `runs` table. A live cycle can s
 - Solana Tier 2 launch discovery and metadata/holder collection through Helius.
 - Canonical DuckDB persistence with Parquet OHLCV partitions and idempotent writes.
 - Contract-address-based DEX↔CEX lineage reconciliation, data-quality reporting, and structured scheduler health.
+- A local governed-experiment interface that validates declarative specs, runs
+  them against read-only persisted snapshots, verifies immutable results, and
+  records separate human approval attestations.
 
 ## Architecture
 
@@ -118,8 +121,19 @@ docs/                   Architecture and local operations documentation
 | `python -m ingestion.dex.tier0.poller` | Run one Tier 0 poll |
 | `python -m ingestion.solana.listener` | Run one Solana pass |
 | `python -m normalization.reconcile --report` | Reconcile and print quality summaries |
+| `python -m analysis.experiments validate SPEC.json` | Validate and content-identify a governed experiment spec |
+| `python -m analysis.experiments run SPEC.json --db DB --output RUNS [--timeframe 1h] [--source SOURCE]` | Execute the canonical experiment runner against a read-only local snapshot |
+| `python -m analysis.experiments inspect RUN_DIR` | Hash-verify and inspect one immutable experiment run |
+| `python -m analysis.experiments approve RUN_DIR --approval-dir APPROVALS --reviewer NAME --reviewed-at ISO_TIME --rationale TEXT` | Record a separate, immutable human approval attestation |
 | `python -m scheduler --once` | Run all stages once and exit |
 | `python -m scheduler.status` | Print JSON health status |
+
+The experiment interface is local and emits JSON. `run` never contacts a
+provider; select the persisted bar timeframe and, when needed, one unambiguous
+source with repeatable `--source` options. `approve` first verifies every run
+artifact and writes outside the immutable run directory. Approval attests to
+human review only: it does not change the candidate's promotion state, unseal a
+holdout, authorize trading, or publish a result.
 
 ## Configuration
 
@@ -186,9 +200,11 @@ Read [`CONTRIBUTING.md`](CONTRIBUTING.md) before opening an issue or pull reques
 
 The canonical forward execution roadmap is [`ROADMAP.md`](ROADMAP.md). It records the current phase frontier, dependency-ordered implementation slices, per-slice acceptance gates, phase exit criteria, deferred boundaries, and the maintenance contract agents must follow as work lands.
 
-The current frontier is Phase 5 research-grade data reliability. Phase 4R closed
-the local Phase 1–4 trust chain with acceptance matrices and a canonical offline
-end-to-end fixture; live-provider evidence remains explicitly separate.
+The current frontier is Phase 6 governed experiment control. Phase 5 data
+reliability is complete, and Phase 6 now provides declarative specifications,
+deterministic immutable runs, frozen hypothesis families, verified run
+comparison, and a narrow local control interface. Experiment-control closure
+acceptance remains the next roadmap slice.
 
 ## License
 

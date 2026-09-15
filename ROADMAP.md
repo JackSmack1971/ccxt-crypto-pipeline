@@ -3,7 +3,7 @@
 **Status:** Active execution authority for forward work  
 **Current phase:** Phase 6 governed experiment control plane
 **Baseline:** `main` at `23dbd389af88cade4584cb5fdc10b60dc17fcc3b`
-**Last reconciled:** 2026-09-15 (Slice 6.5 closed; Slice 6.6 active)
+**Last reconciled:** 2026-09-15 (Slice 6.6 closed; Slice 6.7 active)
 
 This file is the durable forward roadmap for `ccxt-crypto-pipeline`. It exists so a new agent can determine the repository's actual execution frontier without reconstructing intent from chat history, stale phase prose, or commit messages.
 
@@ -940,11 +940,31 @@ Evidence:
 
 ## Slice 6.6 — Experiment CLI/API boundary
 
-**Status:** ACTIVE
+**Status:** DONE
 
 Expose a narrow local interface for validate → run → inspect → approve without creating a second execution engine.
 
+Evidence:
+
+- `analysis/experiments/control.py` exposes spec loading/validation, execution,
+  verified inspection, and explicit human approval functions by delegating to
+  the existing `ExperimentSpec`, runner, and catalog boundaries. Canonical JSON
+  specs reconstruct the same nested validated dataclasses used by Python callers;
+  unknown or malformed schema fields fail closed.
+- `python -m analysis.experiments` provides matching `validate`, `run`,
+  `inspect`, and `approve` commands. The run command materializes one read-only
+  local `DatasetSnapshot` and invokes the sole experiment runner; it contains no
+  alternate cohort, feature, label, split, selection, or evaluation logic.
+- Approval first hash-verifies the immutable run and writes a content-addressed,
+  reviewer-attributed, timestamped attestation outside the run directory. It
+  does not mutate promotion evidence, unseal holdout data, authorize trading, or
+  imply publication. `tests/test_phase6.py` covers spec round-trip/rejection,
+  API delegation, CLI validation/inspection/approval, immutable approval replay,
+  run non-mutation, required attribution, and tampered-run rejection.
+
 ## Slice 6.7 — Experiment-control acceptance matrix
+
+**Status:** ACTIVE
 
 Prove identical spec+data replay, rejected incompatible comparisons, sealed holdout behavior, and complete manifest reconstruction.
 
@@ -1080,7 +1100,7 @@ For a fresh agent, the intended pickup sequence is:
 
 `AGENTS.md` → `ROADMAP.md` → active `docs/plans/phase-*.md` → relevant code/tests → Git history/status.
 
-The current frontier is **Slice 6.6 — Experiment CLI/API boundary**.
+The current frontier is **Slice 6.7 — Experiment-control acceptance matrix**.
 
 Phase 5 is DONE. Slice 5.7 closed the phase with
 `docs/plans/phase-5-data-plane-closure-matrix.md` and
@@ -1149,6 +1169,12 @@ and label sets, explicit registry-approved version compatibility, and equality
 of all other methodology fields before it returns candidate summary deltas;
 invalid, tampered, and methodologically incompatible runs fail closed.
 
-Slice 6.6 has not started. It needs to expose the existing spec validation,
-runner, catalog inspection, and explicit approval boundaries through one narrow
-local CLI/API without introducing a second execution engine.
+Slice 6.6 is DONE. `analysis/experiments/control.py` and
+`python -m analysis.experiments` expose validate, run, verified inspect, and
+explicit approval operations by composing the existing spec, runner, and catalog
+contracts. Approval is a separate immutable human attestation over a hash-verified
+run and cannot alter promotion or holdout state.
+
+Slice 6.7 has not started. It needs a phase closure matrix proving the complete
+experiment-control contract across replay, comparison rejection, sealed holdout
+behavior, and manifest reconstruction.

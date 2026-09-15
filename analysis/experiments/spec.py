@@ -3,9 +3,10 @@ from __future__ import annotations
 import hashlib
 import json
 from dataclasses import asdict, dataclass
+from datetime import datetime
 from typing import Any
 
-from analysis.alpha import CohortConfig, LabelDefinition, PromotionPolicy
+from analysis.alpha import ChainEligibility, CohortConfig, LabelDefinition, PromotionPolicy
 from analysis.alpha.labels import HORIZONS as LABEL_HORIZONS
 from analysis.alpha.registry import feature_policy_versions
 
@@ -234,3 +235,58 @@ def experiment_spec_dict(spec: ExperimentSpec) -> dict[str, Any]:
 def experiment_spec_id(spec: ExperimentSpec) -> str:
     """Deterministic content-addressed identity; identical specs hash identically."""
     return hashlib.sha256(_dump(experiment_spec_dict(spec))).hexdigest()[:24]
+
+
+def experiment_spec_from_dict(value: dict[str, Any]) -> ExperimentSpec:
+    """Reconstruct and validate a spec from its canonical JSON representation.
+
+    This is deliberately the inverse of :func:`experiment_spec_dict`; callers
+    do not get a looser CLI-only schema that could bypass the dataclass
+    validation used by the Python API and runner.
+    """
+    if not isinstance(value, dict):
+        raise ValueError("experiment spec must be a JSON object")
+    required = {field.name for field in ExperimentSpec.__dataclass_fields__.values()}
+    if set(value) != required:
+        missing, extra = sorted(required - set(value)), sorted(set(value) - required)
+        raise ValueError(f"experiment spec fields do not match schema: missing={missing}, extra={extra}")
+    try:
+        cohort_value = dict(value["cohort"])
+        cohort_value["start"] = _datetime(cohort_value["start"])
+        cohort_value["end"] = _datetime(cohort_value["end"])
+        cohort_value["chains"] = tuple(cohort_value.get("chains", ()))
+        cohort_value["event_types"] = tuple(cohort_value.get("event_types", ()))
+        cohort_value["liquidity_sensitivities"] = tuple(cohort_value.get("liquidity_sensitivities", ()))
+        if cohort_value.get("chain_eligibility") is not None:
+            cohort_value["chain_eligibility"] = {
+                key: ChainEligibility(**{**item, "quality": tuple(item["quality"])})
+                for key, item in cohort_value["chain_eligibility"].items()
+            }
+        return ExperimentSpec(
+            spec_version=value["spec_version"], name=value["name"],
+            cohort=CohortConfig(**cohort_value), feature_set=tuple(value["feature_set"]),
+            feature_policy_version=value["feature_policy_version"],
+            labels=tuple(LabelDefinition(**item) for item in value["labels"]),
+            split=SplitPolicy(**value["split"]),
+            hypothesis_family=HypothesisFamily(**{**value["hypothesis_family"],
+                "features": tuple(value["hypothesis_family"]["features"]),
+                "thresholds": tuple(value["hypothesis_family"]["thresholds"]),
+                "horizons": tuple(value["hypothesis_family"]["horizons"]),
+                "subgroups": tuple(value["hypothesis_family"]["subgroups"])}),
+            candidate=CandidateDefinition(**value["candidate"]),
+            costs=CostPolicy(**{**value["costs"], "scenarios": tuple(value["costs"]["scenarios"])}),
+            baselines=BaselinePolicy(families=tuple(value["baselines"]["families"])),
+            promotion_policy=PromotionPolicy(**value["promotion_policy"]),
+            code_version=value["code_version"], config_identity=value["config_identity"],
+        )
+    except (KeyError, TypeError, AttributeError) as exc:
+        raise ValueError("invalid experiment spec structure") from exc
+
+
+def _datetime(value: Any) -> datetime:
+    if isinstance(value, datetime):
+        return value
+    try:
+        return datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+    except ValueError as exc:
+        raise ValueError(f"invalid experiment spec timestamp: {value}") from exc
