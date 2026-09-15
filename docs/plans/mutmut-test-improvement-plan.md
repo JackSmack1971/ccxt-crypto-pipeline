@@ -1,7 +1,19 @@
 # Mutmut test-improvement plan
 
-Status: U1–U9 implemented; a fresh complete mutation campaign remains blocked by the local
+Status: U1–U10 implemented; a fresh complete mutation campaign remains blocked by the local
 WSL environment and is not claimed as a mutation-score result.
+
+## Execution update — 2026-09-14 (U10 complete)
+
+U10 added focused Phase 4 static-renderer coverage in `tests/test_phase4.py`: unsupported and
+non-finite values, strict empty charts, annotation-without-data rejection, invalid dimensions,
+and the SVG accessibility validator's role, title, missing-state, point-data, and malformed-SVG
+failure paths. The focused suite passed 50 tests with
+`uv run --no-sync python -m pytest tests/test_phase4.py -q`. The final focused result was 51
+tests after correcting the test oracle for the renderer's documented explicit-state behavior.
+The provisioned full suite completed with 267 passed and the same five pre-existing Phase 5/storage
+failures. This remains test-only and does not claim refreshed mutation results; the complete POSIX
+campaign and terminal-mutant reconciliation remain blocked by the unavailable WSL environment.
 
 ## Execution update — 2026-09-14 (U9 complete)
 

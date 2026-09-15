@@ -8,7 +8,7 @@ import pytest
 from reporting.package import build_approved_handoff, generate_package
 from reporting.package.handoff import _dump
 from reporting.claims.model import Claim, Derivation, Evidence, _derived_value
-from reporting.render.static import render_svg
+from reporting.render.static import render_svg, validate_accessibility
 from analysis.alpha import (CohortConfig, FeatureDefinition, FeatureRegistry, LabelDefinition,
                             PromotionEvidence, build_split, compute_features,
                             evaluate_candidate_promotion, extract_cohort, generate_labels,
@@ -135,6 +135,46 @@ def test_phase4_static_renderer_preserves_missing_state_and_fail_policy():
     spec["missing_behavior"] = "fail"
     with pytest.raises(ValueError, match="contains missing values"):
         render_svg(spec, [{"time": 1, "return": None}])
+
+
+def _renderer_spec(**overrides):
+    spec = {"id": "returns", "x_column": "time", "y_column": "return", "x_unit": "hours",
+            "y_unit": "percent", "missing_behavior": "explicit_state", "source_attribution": "fixture",
+            "alt_text": "Observed return percent over time.", "width": 800, "height": 450}
+    spec.update(overrides)
+    return spec
+
+
+@pytest.mark.parametrize(("rows", "overrides", "message"), [
+    ([{"time": "one", "return": 1}], {"missing_behavior": "fail"}, "contains unsupported values"),
+    ([{"time": 1, "return": float("inf")}], {}, "contains non-finite values"),
+    ([{"time": 1, "return": None}], {"missing_behavior": "fail"}, "contains missing values"),
+    ([{"time": 1, "return": None}], {"annotations": [{"type": "horizontal_line", "value": 1, "label": "x", "source": "fixture"}]},
+     "cannot apply annotations"),
+    ([{"time": 1, "return": 1}], {"width": 319}, "has invalid dimensions"),
+    ([{"time": 1, "return": 1}], {"height": True}, "has invalid dimensions"),
+])
+def test_phase4_renderer_rejects_unsupported_values_and_invalid_layout(rows, overrides, message):
+    with pytest.raises(ValueError, match=message):
+        render_svg(_renderer_spec(**overrides), rows)
+
+
+def test_phase4_renderer_accessibility_validator_rejects_malformed_or_incomplete_svg():
+    spec = _renderer_spec()
+    svg = render_svg(spec, [{"time": 1, "return": 1}])
+    validate_accessibility(svg, spec)
+
+    for malformed in (
+        svg.replace('role="img"', 'role="figure"'),
+        svg.replace("<title>returns</title>", "<title></title>"),
+        svg.replace('data-missing="false"', 'data-missing="maybe"'),
+        svg.replace('points="60.000,400.000"', 'points="not-a-point"'),
+    ):
+        with pytest.raises(ValueError, match="accessibility validation"):
+            validate_accessibility(malformed, spec)
+
+    with pytest.raises(ValueError, match="structure validation"):
+        validate_accessibility("<not-svg>", spec)
 
 
 def test_approved_handoff_is_deterministic_and_does_not_mutate_phase3_run(tmp_path):
