@@ -14,6 +14,8 @@ from analysis.experiments import (BaselinePolicy, CandidateDefinition, CostPolic
                                   ExperimentSpec, HypothesisFamily, SPEC_VERSION, SplitPolicy,
                                   experiment_spec_dict, experiment_spec_id, resolve_feature_registry,
                                   run_experiment)
+from analysis.experiments.runner import (_dump, _parse_selection_rule, _percentile,
+                                         _safe, _selected_token_ids)
 
 
 def build_spec(**overrides) -> ExperimentSpec:
@@ -175,6 +177,67 @@ def test_feature_set_rejects_duplicate_entries():
 def test_feature_set_rejects_blank_entries():
     with pytest.raises(ValueError, match="non-blank feature"):
         build_spec(feature_set=("launch_liquidity_usd", "  "))
+
+
+# --- Slice 6.2: deterministic runner helper contracts ----------------------
+
+@pytest.mark.parametrize("rule, expected", [
+    ("launch_liquidity_usd>=p0", ("launch_liquidity_usd", ">=", 0.0)),
+    (" lookback_return<p100 ", ("lookback_return", "<", 100.0)),
+    ("launch_liquidity_usd==p50", ("launch_liquidity_usd", "==", 50.0)),
+])
+def test_selection_rule_parser_accepts_supported_operators_and_boundaries(rule, expected):
+    assert _parse_selection_rule(rule) == expected
+
+
+@pytest.mark.parametrize("rule, message", [
+    ("launch_liquidity_usd>=p101", "percentile out of range"),
+    ("launch_liquidity_usd>=p-1", "unsupported candidate selection rule"),
+    ("launch_liquidity_usd>=p", "unsupported candidate selection rule"),
+    ("launch_liquidity_usd!=p50", "unsupported candidate selection rule"),
+    ("launch-liquidity_usd>=p50", "unsupported candidate selection rule"),
+])
+def test_selection_rule_parser_rejects_malformed_or_out_of_range_rules(rule, message):
+    with pytest.raises(ValueError, match=message):
+        _parse_selection_rule(rule)
+
+
+def test_percentile_interpolates_and_preserves_single_value():
+    assert _percentile([30.0, 10.0, 20.0], 50.0) == pytest.approx(20.0)
+    assert _percentile([10.0, 20.0], 25.0) == pytest.approx(12.5)
+    assert _percentile([42.0], 75.0) == 42.0
+
+
+@pytest.mark.parametrize("rule, expected", [
+    ("launch_liquidity_usd>=p50", frozenset({"a", "c"})),
+    ("launch_liquidity_usd<p50", frozenset({"b"})),
+    ("lookback_return==p50", frozenset({"a", "c"})),
+])
+def test_selected_token_ids_filters_missing_and_non_finite_values(rule, expected):
+    rows = (
+        {"token_id": "a", "launch_liquidity_usd": 10.0, "lookback_return": 0.1},
+        {"token_id": "b", "launch_liquidity_usd": 5.0, "lookback_return": None},
+        {"token_id": "c", "launch_liquidity_usd": 15.0, "lookback_return": 0.1},
+        {"token_id": "ignored", "launch_liquidity_usd": float("nan"), "lookback_return": 0.2},
+    )
+    assert _selected_token_ids(rows, rule) == expected
+
+
+def test_selected_token_ids_rejects_unsupported_feature_and_empty_values():
+    with pytest.raises(ValueError, match="unsupported candidate selection feature"):
+        _selected_token_ids(({"token_id": "a", "other": 1.0},), "other>=p50")
+    assert _selected_token_ids(({"token_id": "a", "launch_liquidity_usd": None},),
+                              "launch_liquidity_usd>=p50") == frozenset()
+
+
+def test_manifest_serialization_redacts_secret_fields_and_url_credentials():
+    value = {"api_key": "hidden", "nested": {"password": "also-hidden"},
+             "endpoint": "https://user:pass@example.test/rpc", "public": "kept"}
+    sanitized = _safe(value)
+    assert sanitized == {"api_key": "[REDACTED]", "nested": {"password": "[REDACTED]"},
+                         "endpoint": "https://[REDACTED]@example.test/rpc", "public": "kept"}
+    assert b"hidden" not in _dump(value)
+    assert b"user:pass" not in _dump(value)
 
 
 # --- Slice 6.2: deterministic experiment runner -----------------------------

@@ -66,6 +66,23 @@ def test_run_once_persists_comparable_solana_event_and_metadata(tmp_path):
     assert read_runs(db)[0]["status"] == "success"
 
 
+def test_run_once_persists_unix_event_timestamp_as_naive_utc(tmp_path):
+    mint = "So11111111111111111111111111111111111111112"
+
+    class Client:
+        def recent_transactions(self, address, *, limit, before=None):
+            return [{"type": "TOKEN_MINT", "signature": "sig", "timestamp": 1735689600,
+                     "events": {"tokenMint": mint}}]
+        def get_asset(self, address): return {}
+        def largest_accounts(self, address): return []
+
+    db = str(tmp_path / "solana-timestamp.duckdb")
+    assert run_once(db_path=db, config={"programs": {"token_metadata": "program"},
+                                        "discovery": {"limit": 1, "transaction_types": ["TOKEN_MINT"]}},
+                    client=Client()) == 1
+    assert read_events(db)[0]["timestamp"] == datetime(2025, 1, 1)
+
+
 def test_create_pool_persists_market_and_address_scoped_constituents(tmp_path):
     pool = "11111111111111111111111111111111"
     mint_a = "So11111111111111111111111111111111111111112"

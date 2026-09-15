@@ -1,7 +1,40 @@
 # Mutmut test-improvement plan
 
-Status: U1–U13 implemented; a fresh complete mutation campaign remains blocked by the local
+Status: U1–U14 implemented; a fresh complete mutation campaign remains blocked by the local
 WSL environment and is not claimed as a mutation-score result.
+
+## Execution update — 2026-09-15 (U14 complete)
+
+U14 added focused Phase 6 deterministic-runner helper coverage in `tests/test_phase6.py`:
+selection-rule operators and percentile boundaries, malformed rules, partition-local token
+selection with missing/non-finite values, unsupported selection features, and manifest secret
+redaction for fields and credential-bearing URLs. The focused suite passed 82 tests with
+`uv run --no-sync python -m pytest tests/test_phase6.py -q`; the complete suite passed 341
+tests. This remains test-only and does not claim refreshed mutation results. The replacement
+Ubuntu WSL distribution starts successfully, but its Python/mutmut environment is not yet
+installed, so the complete POSIX campaign and terminal-mutant reconciliation remain pending.
+
+## Environment recovery update — 2026-09-15
+
+The missing Ubuntu `ext4.vhdx` cannot be recovered as a runnable distribution.
+To keep a replacement mutation runner within laptop storage limits, the Windows
+WSL configuration now caps the VM at 4 GB memory, two processors, and no
+disk-backed swap. The replacement is a minimal Ubuntu WSL 2 distribution that
+runs the existing mounted working tree rather than a second clone. Ubuntu is
+installed, but this does not establish a mutation environment until it can run
+`mutmut`; no campaign or score is claimed by this update.
+
+## Execution update — 2026-09-15 (baseline repair before fresh campaign)
+
+The current provisioned baseline initially reached 224 passed tests and then exposed the known
+Phase 5 closure failure. A direct reproduction showed that an aware UTC timestamp passed to
+DuckDB's naive `TIMESTAMP` storage was round-tripped in the local offset, placing the event before
+the UTC fixture boundary. The canonical storage connection now pins DuckDB's session timezone to
+UTC, restoring the existing naive-UTC dataset contract for all ingestion paths; a focused Solana
+test asserts that exact boundary. This is a narrow production correction required to restore the
+documented point-in-time closure, not a mutation-score claim. The fresh complete campaign remains
+blocked because WSL cannot attach Ubuntu's missing `ext4.vhdx`; native Windows cannot run mutmut
+3.x because it does not provide POSIX `fork`.
 
 ## Execution update — 2026-09-15 (U13 complete)
 
