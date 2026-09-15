@@ -236,6 +236,7 @@ def run_experiment(spec: ExperimentSpec, snapshot: DatasetSnapshot, output_dir: 
     ci95_low = candidate.uncertainty.get("ci95_low")
     evidence = PromotionEvidence(
         target_stage="discovery",
+        effect_size=difference,
         baseline_superior=difference is not None and difference > 0,
         uncertainty_supports_effect=ci95_low is not None and ci95_low > 0,
         cost_sensitivity_passed=bool(candidate.cost_sensitivity)
