@@ -3,17 +3,18 @@ set -euo pipefail
 
 repo_root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$repo_root"
+venv_root="${CCXT_PROJECT_VENV:-$repo_root/.venv}"
 
 # Prefer the fully isolated project interpreter when it contains the test runner.
-if [[ -x .venv/bin/python ]] && .venv/bin/python -c 'import pytest' 2>/dev/null; then
-    exec .venv/bin/python -m pytest "$@"
+if [[ -x "$venv_root/bin/python" ]] && "$venv_root/bin/python" -c 'import pytest' 2>/dev/null; then
+    exec "$venv_root/bin/python" -m pytest "$@"
 fi
 
 # Some managed workspaces provide pytest on the host interpreter while keeping
 # locked project dependencies in .venv. Reuse those installed dependencies
 # without asking uv to contact an unavailable package index.
-if [[ -x .venv/bin/python ]] && python -c 'import pytest' 2>/dev/null; then
-    venv_site_packages="$(.venv/bin/python -c 'import sysconfig; print(sysconfig.get_path("purelib"))')"
+if [[ -x "$venv_root/bin/python" ]] && python -c 'import pytest' 2>/dev/null; then
+    venv_site_packages="$("$venv_root/bin/python" -c 'import sysconfig; print(sysconfig.get_path("purelib"))')"
     if [[ -n "${PYTHONPATH:-}" ]]; then
         export PYTHONPATH="$venv_site_packages:$PYTHONPATH"
     else
@@ -25,7 +26,7 @@ fi
 cat >&2 <<'EOF'
 pytest is not available in the project virtual environment or host Python.
 Provision the locked environment, then install the pinned test runner:
-  uv sync --locked
-  uv pip install --python .venv/bin/python pytest==9.0.3
+  uv sync --locked --extra test
+Or point CCXT_PROJECT_VENV at an already-provisioned environment.
 EOF
 exit 2

@@ -26,3 +26,8 @@ test = [
 
 [tool.setuptools.packages.find]
 include = ["analysis*", "config*", "ingestion*", "normalization*", "reporting*", "scheduler*", "storage*"]
+
+[tool.mutmut]
+source_paths = ["analysis", "ingestion", "normalization", "reporting", "scheduler", "storage"]
+pytest_add_cli_args_test_selection = ["tests"]
+also_copy = [".github/", "scripts/", "config/"]
