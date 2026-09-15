@@ -9,6 +9,7 @@ from typing import Any
 from analysis.alpha import ChainEligibility, CohortConfig, LabelDefinition, PromotionPolicy
 from analysis.alpha.labels import HORIZONS as LABEL_HORIZONS
 from analysis.alpha.registry import feature_policy_versions
+from .uncertainty import UncertaintyPolicy
 
 SPEC_VERSION = "phase6-experiment-v1"
 SUPPORTED_DISCOVERY_CORRECTIONS = ("benjamini-hochberg",)
@@ -178,6 +179,7 @@ class ExperimentSpec:
     promotion_policy: PromotionPolicy
     code_version: str
     config_identity: str
+    uncertainty: UncertaintyPolicy = UncertaintyPolicy()
 
     def __post_init__(self):
         if self.spec_version != SPEC_VERSION:
@@ -253,8 +255,10 @@ def experiment_spec_from_dict(value: dict[str, Any]) -> ExperimentSpec:
     if not isinstance(value, dict):
         raise ValueError("experiment spec must be a JSON object")
     required = {field.name for field in ExperimentSpec.__dataclass_fields__.values()}
-    if set(value) != required:
-        missing, extra = sorted(required - set(value)), sorted(set(value) - required)
+    required_without_defaults = required - {"uncertainty"}
+    if not required_without_defaults <= set(value) or set(value) - required:
+        missing = sorted(required_without_defaults - set(value))
+        extra = sorted(set(value) - required)
         raise ValueError(f"experiment spec fields do not match schema: missing={missing}, extra={extra}")
     try:
         cohort_value = dict(value["cohort"])
@@ -284,6 +288,7 @@ def experiment_spec_from_dict(value: dict[str, Any]) -> ExperimentSpec:
             baselines=BaselinePolicy(families=tuple(value["baselines"]["families"])),
             promotion_policy=PromotionPolicy(**value["promotion_policy"]),
             code_version=value["code_version"], config_identity=value["config_identity"],
+            uncertainty=UncertaintyPolicy(**value.get("uncertainty", {})),
         )
     except (KeyError, TypeError, AttributeError) as exc:
         raise ValueError("invalid experiment spec structure") from exc

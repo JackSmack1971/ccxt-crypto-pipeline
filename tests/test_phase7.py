@@ -7,7 +7,9 @@ from types import SimpleNamespace
 
 import pytest
 
-from analysis.experiments import SplitPolicy, build_walk_forward_evaluation, run_experiment
+from analysis.experiments import (SplitPolicy, UncertaintyPolicy, bootstrap_mean,
+                                  build_walk_forward_evaluation, experiment_spec_dict,
+                                  experiment_spec_from_dict, run_experiment)
 from test_phase6 import runner_snapshot, runner_spec
 
 
@@ -79,3 +81,44 @@ def test_runner_persists_walk_forward_evidence_only_when_configured(tmp_path):
     assert all(result["selection_threshold"] is not None for result in evidence["results"])
     assert all(result["candidate"]["sample_size"] >= 0 for result in evidence["results"])
     assert "walk_forward.json" in manifest["artifacts"]
+
+
+def test_moving_block_bootstrap_is_deterministic_and_preserves_policy_identity():
+    policy = UncertaintyPolicy(resamples=200, block_size=2, seed=9)
+    first = bootstrap_mean((0.01, 0.02, 0.03, 0.04, 0.05), policy)
+    second = bootstrap_mean((0.01, 0.02, 0.03, 0.04, 0.05), policy)
+    assert first == second
+    assert first["status"] == "available"
+    assert first["config"] == policy.as_dict()
+    assert first["ci95_low"] <= first["estimate"] <= first["ci95_high"]
+
+
+def test_uncertainty_rejects_unsupported_dependence_and_keeps_gaps_explicit():
+    with pytest.raises(ValueError, match="requires ordered_blocks"):
+        UncertaintyPolicy(dependence_structure="independent")
+    result = bootstrap_mean((), UncertaintyPolicy(resamples=100))
+    assert result["status"] == "unavailable"
+    assert result["reason"] == "NO_COMPLETE_OBSERVATIONS"
+    for field, value in (("resamples", 100.5), ("block_size", 2.5), ("seed", "17")):
+        with pytest.raises(ValueError, match="uncertainty"):
+            UncertaintyPolicy(**{field: value})
+
+
+def test_runner_persists_hash_bound_uncertainty_evidence(tmp_path):
+    run = run_experiment(runner_spec(), runner_snapshot(), tmp_path / "runs")
+    evidence = json.loads((run / "uncertainty.json").read_text())
+    manifest = json.loads((run / "manifest.json").read_text())
+    assert evidence["method"] == "moving_block_bootstrap"
+    assert evidence["config"]["version"] == "phase7-uncertainty-v1"
+    assert evidence["scope"] == "selected_candidate_observations"
+    candidate = json.loads((run / "candidate.json").read_text())
+    assert candidate["uncertainty"]["method"] == evidence["method"]
+    assert candidate["uncertainty"]["ci95_low"] == evidence["ci95_low"]
+    assert "uncertainty.json" in manifest["artifacts"]
+
+
+def test_phase6_spec_without_uncertainty_remains_loadable():
+    legacy = experiment_spec_dict(runner_spec())
+    legacy.pop("uncertainty")
+    restored = experiment_spec_from_dict(legacy)
+    assert restored.uncertainty == UncertaintyPolicy()
