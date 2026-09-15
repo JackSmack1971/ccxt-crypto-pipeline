@@ -206,7 +206,7 @@ def evaluate_candidate_promotion(candidate: CandidateResult, evidence: Promotion
     if candidate.coverage < policy.minimum_coverage:
         return _promotion_decision("insufficient_coverage", ["MINIMUM_COVERAGE"], policy, evidence)
 
-    valid_effect_size = (evidence.effect_size if isinstance(evidence.effect_size, (int, float))
+    valid_effect_size = (evidence.effect_size if type(evidence.effect_size) in (int, float)
                          and math.isfinite(evidence.effect_size) else None)
     required = {
         "MISSING_DISCOVERY_CORRECTION": evidence.discovery_adjusted_p_value,
@@ -225,7 +225,7 @@ def evaluate_candidate_promotion(candidate: CandidateResult, evidence: Promotion
     failed = []
     if evidence.discovery_adjusted_p_value > policy.discovery_q:
         failed.append("DISCOVERY_CORRECTION_FAILED")
-    if valid_effect_size < policy.minimum_effect_size:
+    if measured_effect < policy.minimum_effect_size:
         failed.append("PRACTICAL_EFFECT_TOO_SMALL")
     if not evidence.baseline_superior: failed.append("BASELINE_COMPARISON_FAILED")
     if not evidence.uncertainty_supports_effect: failed.append("UNCERTAINTY_EFFECT_FAILED")

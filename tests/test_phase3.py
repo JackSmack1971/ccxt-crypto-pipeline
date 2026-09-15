@@ -449,6 +449,16 @@ def test_candidate_promotion_separates_practical_effect_from_uncertainty():
     assert contradictory.state == "rejected"
     assert contradictory.reasons == ("EFFECT_SIZE_MISMATCH",)
 
+    threshold_boundary = replace(candidate, baseline_comparison={"difference": .0099999999995})
+    boundary = evaluate_candidate_promotion(threshold_boundary,
+                                            replace(evidence, effect_size=.0100000000004))
+    assert boundary.state == "rejected"
+    assert boundary.reasons == ("PRACTICAL_EFFECT_TOO_SMALL",)
+
+    invalid_type = evaluate_candidate_promotion(candidate, replace(evidence, effect_size=True))
+    assert invalid_type.state == "insufficient_evidence"
+    assert "MISSING_EFFECT_SIZE" in invalid_type.reasons
+
 
 def test_promotion_policy_requires_a_positive_finite_effect_floor():
     with pytest.raises(ValueError, match="minimum effect size"):
