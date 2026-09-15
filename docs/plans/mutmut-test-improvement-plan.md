@@ -1,7 +1,21 @@
 # Mutmut test-improvement plan
 
-Status: U1–U12 implemented; a fresh complete mutation campaign remains blocked by the local
+Status: U1–U13 implemented; a fresh complete mutation campaign remains blocked by the local
 WSL environment and is not claimed as a mutation-score result.
+
+## Execution update — 2026-09-15 (U13 complete)
+
+U13 added focused Phase 2 metrics-contract coverage in `tests/test_phase2.py`:
+equity return/drawdown arithmetic, fee and slippage aggregation, observation metadata,
+single-observation and zero-initial-equity behavior, invalid/duplicate/out-of-order ledger
+rows, and declared-frequency parsing. An empty optional frequency is explicitly recorded as
+using timestamp-derived spacing, matching the implemented contract. The focused suite passed
+78 tests with `uv run --no-sync python -m pytest tests/test_phase2.py -q`.
+`uv run --no-sync python -m pytest -x -q` reached 223 passed tests and then failed at the
+pre-existing Phase 5 closure assertion for a missing unresolved Solana cohort row; it is not
+attributed to this test-only slice. No production behavior or mutation configuration changed.
+The complete POSIX campaign and terminal-mutant reconciliation remain blocked by the unavailable
+WSL environment, so no refreshed mutation result is claimed.
 
 ## Execution update — 2026-09-15 (U12 complete)
 
