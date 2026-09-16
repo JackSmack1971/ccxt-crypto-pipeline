@@ -1,9 +1,9 @@
 # Engineering Roadmap
 
 **Status:** Active execution authority for forward work  
-**Current phase:** Phase 7 robust validation and research scaling
+**Current phase:** Phase 8 research product and publication operations
 **Baseline:** `main` at `23dbd389af88cade4584cb5fdc10b60dc17fcc3b`
-**Last reconciled:** 2026-09-16 (Slice 7.6 closed; Slice 7.7 active)
+**Last reconciled:** 2026-09-16 (Slice 7.7 closed; Slice 8.1 active)
 
 This file is the durable forward roadmap for `ccxt-crypto-pipeline`. It exists so a new agent can determine the repository's actual execution frontier without reconstructing intent from chat history, stale phase prose, or commit messages.
 
@@ -1123,7 +1123,7 @@ Evidence:
 
 ## Slice 7.7 — Validation closure matrix
 
-**Status:** ACTIVE
+**Status:** DONE
 
 Require replayable evidence that promoted results survive the configured robustness suite; passing remains a research result, not a profitability claim.
 
@@ -1154,15 +1154,19 @@ Evidence:
 
 # Phase 8 — Research Product & Publication Operations
 
-**Status:** PLANNED  
+**Status:** ACTIVE
 **Depends on:** Phase 7 for claims of validated research; descriptive packages may continue under Phase 4 rules.  
 **Goal:** Turn approved evidence into maintainable research products without weakening provenance or human review.
 
 ## Slice 8.1 — Review/approval history
 
+**Status:** ACTIVE
+
 Represent approval, rejection, supersession, and reviewer notes as immutable records linked to exact research/package identities.
 
 ## Slice 8.2 — Rich deterministic output
+
+**Status:** PLANNED
 
 Add HTML and/or PDF only if explicitly selected, with reproducible rendering/versioning and accessibility checks.
 
