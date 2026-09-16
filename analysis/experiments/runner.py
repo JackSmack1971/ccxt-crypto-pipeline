@@ -36,8 +36,9 @@ from .uncertainty import bootstrap_mean
 from .stress import _build_stress_matrix
 from .stability import build_stability_evidence
 from .negative_controls import build_negative_control_evidence
+from .closure import build_validation_closure
 
-MANIFEST_VERSION = "phase7-run-v2"
+MANIFEST_VERSION = "phase7-run-v3"
 
 
 def resolve_feature_registry(spec: ExperimentSpec) -> FeatureRegistry:
@@ -260,6 +261,12 @@ def run_experiment(spec: ExperimentSpec, snapshot: DatasetSnapshot, output_dir: 
         score_candidate=score_candidate, baseline_families=baseline_families)
 
     spec_id = experiment_spec_id(spec)
+    walk_forward_evidence = (_walk_forward_results(walk_forward, feature_rows, candidate_labels, spec)
+                             if walk_forward is not None else None)
+    validation_closure = build_validation_closure(
+        spec_id=spec_id, selected_token_ids=selected_ids, promotion=asdict(decision),
+        uncertainty=uncertainty, stress=stress_matrix, stability=stability,
+        negative_controls=negative_controls, walk_forward=walk_forward_evidence)
     inputs = {"experiment_spec_id": spec_id, "dataset_identity": snapshot.dataset_identity,
               "code_version": spec.code_version, "manifest_version": MANIFEST_VERSION}
     run_id = hashlib.sha256(_dump(inputs)).hexdigest()[:24]
@@ -288,10 +295,10 @@ def run_experiment(spec: ExperimentSpec, snapshot: DatasetSnapshot, output_dir: 
         "stress_matrix.json": stress_matrix,
         "stability.json": stability,
         "negative_controls.json": negative_controls,
+        "validation_closure.json": validation_closure,
     }
     if walk_forward is not None:
-        artifacts["walk_forward.json"] = _walk_forward_results(
-            walk_forward, feature_rows, candidate_labels, spec)
+        artifacts["walk_forward.json"] = walk_forward_evidence
     manifest = {"manifest_version": MANIFEST_VERSION, "run_id": run_id, "immutable": True,
                 "inputs": inputs, "artifacts": {name: hashlib.sha256(_dump(value)).hexdigest()
                                                 for name, value in artifacts.items()}}

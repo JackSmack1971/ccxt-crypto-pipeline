@@ -175,6 +175,13 @@ with deterministic label permutations and a declared known-null control.
 Controls are synthetic evidence for leakage and false-positive detection; they
 never change candidate selection or promotion and never use sealed holdout rows.
 
+Runs also emit `validation_closure.json`, which records whether the fixed
+discovery selection is eligible for closure and whether its configured
+uncertainty, stress, stability, and negative-control evidence all pass after
+holdout confirmation; configured walk-forward evidence is included as well. A
+passing closure is replayable research evidence, not a profitability claim or
+authorization to trade.
+
 ## Configuration
 
 Safe examples are provided in [`.env.example`](.env.example). YAML settings live in `config/cex.yaml`, `config/chains.yaml`, `config/evm.yaml`, and `config/solana.yaml`. The complete variable and credential setup is in [`docs/RUNBOOK.md`](docs/RUNBOOK.md).
