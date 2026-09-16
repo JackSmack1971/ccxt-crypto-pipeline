@@ -194,6 +194,32 @@ class StabilityPolicy:
 
 
 @dataclass(frozen=True)
+class NegativeControlPolicy:
+    """Declared synthetic controls used to expose leakage and false positives."""
+
+    version: str = "phase7-negative-controls-v1"
+    methods: tuple[str, ...] = ("label_permutation", "known_null")
+    permutations: int = 25
+    seed: int = 23
+
+    def __post_init__(self):
+        if self.version != "phase7-negative-controls-v1":
+            raise ValueError("invalid negative-control policy")
+        allowed = {"label_permutation", "known_null"}
+        if not self.methods or any(method not in allowed for method in self.methods):
+            raise ValueError("unsupported negative-control method")
+        if len(set(self.methods)) != len(self.methods):
+            raise ValueError("negative-control methods must be unique")
+        if type(self.permutations) is not int or self.permutations < 1:
+            raise ValueError("negative-control permutations must be positive")
+        if type(self.seed) is not int or self.seed < 0:
+            raise ValueError("negative-control seed must be a non-negative integer")
+
+    def as_dict(self) -> dict[str, Any]:
+        return asdict(self)
+
+
+@dataclass(frozen=True)
 class BaselinePolicy:
     """Declares which mandatory baseline families this experiment requires."""
 
@@ -239,6 +265,7 @@ class ExperimentSpec:
     uncertainty: UncertaintyPolicy = UncertaintyPolicy()
     stress: StressPolicy = StressPolicy()
     stability: StabilityPolicy = StabilityPolicy()
+    negative_controls: NegativeControlPolicy = NegativeControlPolicy()
 
     def __post_init__(self):
         if self.spec_version != SPEC_VERSION:
@@ -314,7 +341,7 @@ def experiment_spec_from_dict(value: dict[str, Any]) -> ExperimentSpec:
     if not isinstance(value, dict):
         raise ValueError("experiment spec must be a JSON object")
     required = {field.name for field in ExperimentSpec.__dataclass_fields__.values()}
-    required_without_defaults = required - {"uncertainty", "stress", "stability"}
+    required_without_defaults = required - {"uncertainty", "stress", "stability", "negative_controls"}
     if not required_without_defaults <= set(value) or set(value) - required:
         missing = sorted(required_without_defaults - set(value))
         extra = sorted(set(value) - required)
@@ -356,6 +383,8 @@ def experiment_spec_from_dict(value: dict[str, Any]) -> ExperimentSpec:
             stability=StabilityPolicy(**{**value.get("stability", {}),
                                          "dimensions": tuple(value.get("stability", {}).get("dimensions", StabilityPolicy().dimensions)),
                                          "liquidity_bands_usd": tuple(value.get("stability", {}).get("liquidity_bands_usd", StabilityPolicy().liquidity_bands_usd))}),
+            negative_controls=NegativeControlPolicy(**{**value.get("negative_controls", {}),
+                                                        "methods": tuple(value.get("negative_controls", {}).get("methods", NegativeControlPolicy().methods))}),
         )
     except (KeyError, TypeError, AttributeError) as exc:
         raise ValueError("invalid experiment spec structure") from exc

@@ -170,6 +170,11 @@ provider, and leave-one-out launch. The declared `stability` policy controls
 these dimensions and the dominance threshold; missing or empty evidence stays
 explicit and the analysis never reselects a candidate from validation or holdout.
 
+Runs also emit `negative_controls.json`, using the fixed discovery selection
+with deterministic label permutations and a declared known-null control.
+Controls are synthetic evidence for leakage and false-positive detection; they
+never change candidate selection or promotion and never use sealed holdout rows.
+
 ## Configuration
 
 Safe examples are provided in [`.env.example`](.env.example). YAML settings live in `config/cex.yaml`, `config/chains.yaml`, `config/evm.yaml`, and `config/solana.yaml`. The complete variable and credential setup is in [`docs/RUNBOOK.md`](docs/RUNBOOK.md).
@@ -236,8 +241,9 @@ Read [`CONTRIBUTING.md`](CONTRIBUTING.md) before opening an issue or pull reques
 The canonical forward execution roadmap is [`ROADMAP.md`](ROADMAP.md). It records the current phase frontier, dependency-ordered implementation slices, per-slice acceptance gates, phase exit criteria, deferred boundaries, and the maintenance contract agents must follow as work lands.
 
 The current frontier is Phase 7 robust validation. Phase 6 governed experiment
-control is complete, and Phase 7.1 adds explicitly configured, deterministic
-purged walk-forward fold evidence while preserving a sealed holdout.
+control is complete, and Phase 7 now includes deterministic purged walk-forward,
+uncertainty, stress, stability, and negative-control evidence while preserving a
+sealed holdout.
 
 ## License
 
