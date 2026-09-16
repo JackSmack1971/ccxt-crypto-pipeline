@@ -191,6 +191,12 @@ and reviewer `note`. Supersession must reference an existing review for the
 same target. Review history does not publish packages or change research
 promotion state.
 
+Approved handoffs generate immutable, pending-review packages containing the
+Markdown article source, a self-contained accessible `article.html` draft with
+inline validated SVG charts, chart specifications, the claim ledger, and
+methodology/limitations. The HTML renderer is deterministic and offline; its
+renderer and output-format identities are recorded in `package-manifest.json`.
+
 ## Configuration
 
 Safe examples are provided in [`.env.example`](.env.example). YAML settings live in `config/cex.yaml`, `config/chains.yaml`, `config/evm.yaml`, and `config/solana.yaml`. The complete variable and credential setup is in [`docs/RUNBOOK.md`](docs/RUNBOOK.md).
