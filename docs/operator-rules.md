@@ -277,8 +277,9 @@ nullability, preservation, and rollback/error behavior.
 `.agents/skills/storage-schema-migration/SKILL.md`; `storage.schema.initialize`.
 **Evidence:** CI first runs `test_v1_store_migrates_in_place_and_preserves_rows`; full tests pin current version.
 **Exceptions / Overrides:** Explicitly approved migration may change the contract.
-**Related rules:** OPR-010, OPR-036. **Notes:** The helper guard is not in CI, and `docs/ARCHITECTURE.md`
-states stale schema version 6 while code defines 13.
+**Related rules:** OPR-010, OPR-036. **Notes:** The helper guard is not in CI. A
+previous version of `docs/ARCHITECTURE.md` stated schema version 6; the current
+architecture records the authoritative version 13.
 
 ### OPR-012 — Two-store verification and recovery
 **Rule:** DuckDB is authoritative; verify and repair divergent OHLCV Parquet partitions rather than re-run
@@ -727,11 +728,13 @@ credential exfiltration, live offline-test dependencies, or unsanitized proof.
 
 ## Conflicts and Ambiguities
 
-1. **Schema documentation is stale.** `docs/ARCHITECTURE.md` says schema version 6, while
-   `storage/schema.py` defines 13 and tests pin 13. Runtime wins under OPR-001; the documentation mismatch remains.
-2. **Current frontier versus root phase framing.** `AGENTS.md` describes work through Phase 4, while `ROADMAP.md`
-   records completed Phase 5 and active Slice 6.4, and Phase 6 code/tests exist. This report treats landed Phase 5/6
-   behavior as current evidence, but the formal extension of root guidance beyond Phase 4 is **UNRESOLVED**.
+1. **Schema documentation — resolved.** A previous version of `docs/ARCHITECTURE.md`
+   said schema version 6, while `storage/schema.py` and tests pin 13. The current
+   architecture records 13; runtime and storage code remain authoritative.
+2. **Current frontier versus root phase framing — resolved for the public surface.**
+   `ROADMAP.md` now records Phase 8 complete, Phase 8R active, and Phases 9–10
+   deferred. Root guidance remains the repository-wide invariant source, while
+   the roadmap is the forward phase authority.
 3. **Python support breadth.** Metadata promises `>=3.10`; CI exercises only 3.12. Whether 3.10/3.11 remain genuinely
    supported is **UNRESOLVED**.
 4. **Health semantics.** `scheduler.status` declares unhealthy if any historical run is failed/running, whereas an
@@ -822,8 +825,10 @@ instructions:
 * Static boundary guards under `.agents/skills/` are optional/manual. No CI scanner prohibits future network imports in
   all analysis code or future ad hoc database writers.
 * Protocol contracts for strategies/EVM providers are not statically checked. Tier 0 clients have no shared protocol.
-* There is no supported experiment CLI, deployment topology, external publication path, paper/live executor, license,
-  or conduct-enforcement process. Insufficient repository evidence exists to assign rules to nonexistent interfaces.
+* A supported local experiment CLI exists, but there is no deployment topology,
+  external publication path, paper/live executor, license, or conduct-enforcement
+  process. Insufficient repository evidence exists to assign rules to nonexistent
+  interfaces.
 
 ## Summary
 

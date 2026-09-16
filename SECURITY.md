@@ -1,7 +1,7 @@
 # Security Policy
 
-`ccxt-crypto-pipeline` is a local-first crypto data-ingestion and research
-pipeline. It handles provider credentials, RPC URLs, externally supplied market
+`ccxt-crypto-pipeline` is a local-first crypto quantitative research system
+with a provider-facing ingestion pipeline. It handles provider credentials, RPC URLs, externally supplied market
 and on-chain data, local DuckDB/Parquet stores, and generated research/reporting
 artifacts. Security reports are welcome when they identify a concrete risk in
 the repository, its documented operation, or its generated outputs.
