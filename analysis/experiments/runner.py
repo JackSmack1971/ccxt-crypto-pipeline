@@ -269,6 +269,9 @@ def run_experiment(spec: ExperimentSpec, snapshot: DatasetSnapshot, output_dir: 
         negative_controls=negative_controls, walk_forward=walk_forward_evidence)
     inputs = {"experiment_spec_id": spec_id, "dataset_identity": snapshot.dataset_identity,
               "code_version": spec.code_version, "manifest_version": MANIFEST_VERSION}
+    if spec.research_question_id is not None:
+        inputs["research_question_id"] = spec.research_question_id
+        inputs["research_hypothesis_id"] = spec.research_hypothesis_id
     run_id = hashlib.sha256(_dump(inputs)).hexdigest()[:24]
     target = Path(output_dir) / run_id
     target.mkdir(parents=True, exist_ok=True)

@@ -165,6 +165,9 @@ docs/                   Architecture and local operations documentation
 | `python -m ingestion.solana.listener` | Run one Solana pass |
 | `python -m normalization.reconcile --report` | Reconcile and print quality summaries |
 | `python -m analysis.experiments validate SPEC.json` | Validate and content-identify a governed experiment spec |
+| `python -m analysis.experiments validate-question QUESTION.json` | Validate and identify a durable research question declaration |
+| `python -m analysis.experiments validate-hypothesis HYPOTHESIS.json` | Validate and identify a durable hypothesis declaration |
+| `python -m analysis.experiments write-registry REGISTRY.json --output REGISTRIES` | Write an immutable question/hypothesis registry |
 | `python -m analysis.experiments run SPEC.json --db DB --output RUNS [--timeframe 1h] [--source SOURCE]` | Execute the canonical experiment runner against a read-only local snapshot |
 | `python -m analysis.experiments inspect RUN_DIR` | Hash-verify and inspect one immutable experiment run |
 | `python -m analysis.experiments approve RUN_DIR --approval-dir APPROVALS --reviewer NAME --reviewed-at ISO_TIME --rationale TEXT` | Record a separate, immutable human approval attestation |
@@ -183,6 +186,14 @@ source with repeatable `--source` options. `approve` first verifies every run
 artifact and writes outside the immutable run directory. Approval attests to
 human review only: it does not change the candidate's promotion state, unseal a
 holdout, authorize trading, or publish a result.
+
+Research declarations are separate from experiment results. A question records
+the intended inquiry, a hypothesis records one testable claim, and a registry
+can bind that hypothesis to an experiment spec. Binding makes the question and
+hypothesis identities part of the spec and run identities, so a result cannot
+silently change what was declared. Declarations retain unavailable or
+question-specific evidence as explicit fields; they do not establish alpha or
+execution readiness.
 
 Experiment runs also emit deterministic `uncertainty.json` evidence using the
 configured moving-block bootstrap policy. The policy records its method,
