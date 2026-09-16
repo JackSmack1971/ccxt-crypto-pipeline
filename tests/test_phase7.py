@@ -410,6 +410,15 @@ def test_validation_closure_rejects_non_positive_uncertainty_and_incomplete_stab
     }
 
 
+def test_validation_closure_rejects_boolean_control_evidence():
+    values = _closure_inputs()
+    values["negative_controls"] = {"version": "n1", "status": "available", "results": [
+        {"candidate": {"baseline_comparison": {"difference": False}}}]}
+    result = build_validation_closure(**values)
+    assert result["status"] == "failed"
+    assert result["components"][-1]["reason"] == "NEGATIVE_CONTROL_INSUFFICIENT_EVIDENCE"
+
+
 def test_validation_closure_includes_configured_walk_forward_evidence():
     values = _closure_inputs()
     values["walk_forward"] = {"version": "wf1", "folds": [1], "results": [1]}

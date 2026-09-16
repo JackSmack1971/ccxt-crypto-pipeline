@@ -6,7 +6,7 @@ import math
 from typing import Any
 
 
-CLOSURE_VERSION = "phase7-validation-closure-v1"
+CLOSURE_VERSION = "phase7-validation-closure-v2"
 
 
 def _component(name: str, evidence: dict[str, Any], *, passed: bool | None,
@@ -64,7 +64,7 @@ def build_validation_closure(*, spec_id: str, selected_token_ids: frozenset[str]
             reason=None if walk_forward_passed else "WALK_FORWARD_EVIDENCE_UNAVAILABLE"))
 
     uncertainty_passed = (uncertainty.get("status") == "available" and
-                          isinstance(uncertainty.get("ci95_low"), (int, float)) and
+                          type(uncertainty.get("ci95_low")) in (int, float) and
                           math.isfinite(uncertainty["ci95_low"]) and uncertainty["ci95_low"] > 0)
     components.append(_component("uncertainty", uncertainty, passed=uncertainty_passed,
                                  reason=None if uncertainty_passed else "UNCERTAINTY_UNAVAILABLE"))
@@ -83,10 +83,10 @@ def build_validation_closure(*, spec_id: str, selected_token_ids: frozenset[str]
     controls = negative_controls.get("results", [])
     differences = [row.get("candidate", {}).get("baseline_comparison", {}).get("difference")
                    for row in controls]
-    insufficient_controls = any(not isinstance(value, (int, float)) or not math.isfinite(value)
+    insufficient_controls = any(type(value) not in (int, float) or not math.isfinite(value)
                                 for value in differences)
     control_failures = [value for value in differences
-                        if isinstance(value, (int, float)) and math.isfinite(value) and value > 0]
+                        if type(value) in (int, float) and math.isfinite(value) and value > 0]
     controls_passed = (negative_controls.get("status") == "available" and bool(controls)
                        and not insufficient_controls and not control_failures)
     components.append(_component("negative_controls", negative_controls, passed=controls_passed,

@@ -1141,8 +1141,9 @@ Evidence:
   uncertainty, stress, stability, negative-control, and configured walk-forward
   components; failures and unavailable evidence remain explicit.
 - The runner persists hash-bound `validation_closure.json`, and manifest
-  version `phase7-run-v3` binds the new artifact to current runs while the
-  catalog retains read-only compatibility for prior Phase 6/7 manifests.
+  version `phase7-run-v4` binds the closure semantics and new artifact to
+  current runs while the catalog retains read-only compatibility for prior
+  Phase 6/7 manifests.
 - `tests/test_phase7.py` covers premature-promotion rejection, failed and
   unavailable components, deterministic replay, and walk-forward inclusion;
   Phase 3/6/7 focused verification passed with 189 tests. The locked full suite
