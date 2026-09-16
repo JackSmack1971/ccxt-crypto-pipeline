@@ -2,10 +2,10 @@
 
 **Status:** Active execution authority for forward work  
 **Current phase:** Phase 8R empirical research readiness
-**Baseline:** `main` at `1656dd9` (Slice 8R.7b focused evidence: 141 passed)
-**Last reconciled:** 2026-09-16 (Slice 8R.7b integrates validated significance evidence into
-immutable experiment runs; Slice 8R.7c is ACTIVE and 8R.7 remains subject to the unavailable
-independent methodological reviewer; Phase 8R remains open; Phases 9–10 remain deferred)
+**Baseline:** `main` at `666dd49` (Slice 8R.7b merged; Slice 8R.7c focused evidence: 38 passed)
+**Last reconciled:** 2026-09-16 (Slice 8R.7c integrates sequential governed promotion through
+holdout and campaign verification; Phase 8R remains blocked only on the unavailable independent
+methodological reviewer; Phases 9–10 remain deferred)
 
 This file is the durable forward roadmap for `ccxt-crypto-pipeline`. It exists so a new agent can determine the repository's actual execution frontier without reconstructing intent from chat history, stale phase prose, or commit messages.
 
@@ -1527,7 +1527,7 @@ the named independent reviewer against
 available and record its verdict here, or (b) an explicit, documented repository-authority decision
 to accept an alternative review path.
 
-**Blocker B — material audit finding (corrected).** Governed campaign execution
+**Historical Blocker B — material audit finding (corrected and resolved by 8R.7a-c).** Governed campaign execution
 (`analysis/experiments/runner.py:run_experiment`, called from `campaign.py:execute_campaign`) lacks
 an authorized, provenance-bound source of discovery/confirmation significance evidence.
 `run_experiment` never sets `PromotionEvidence.discovery_adjusted_p_value`, so
@@ -1620,8 +1620,9 @@ here. Manifest identity: this evidence is observed result data, not pre-register
 it deliberately does not join `ExperimentSpec.spec_version` or `runner.py`'s `MANIFEST_VERSION`;
 it versions its own identity (`SIGNIFICANCE_MANIFEST_VERSION = "phase8r-significance-evidence-v1"`).
 Whether run/campaign identity must absorb this evidence once it is actually consumed is deferred to
-8R.7b, which is where that consumption happens. Blocker B is unchanged by this slice — the
-governed path still cannot reach `discovery_promoted` — and remains open pending 8R.7b/8R.7c.
+8R.7b, which is where that consumption happens. At the time of this contract-only slice, Blocker B
+was unchanged and the governed path still could not reach `discovery_promoted`; it was resolved by
+the subsequent 8R.7b/8R.7c slices below.
 
 The remainder of this entry is the original pre-implementation design record; it is retained for
 context on the two candidates considered and the questions this slice had to answer. Candidate A
@@ -1684,7 +1685,20 @@ correction is deterministic; corrected values are provenance-bound (traceable to
 and test identity that produced them); and methodology-significant evidence participates in run/
 artifact identity where the 8R.7a design requires it.
 
-**Slice 8R.7c — Sequential governed promotion.** Only after significance evidence can legitimately
+**Slice 8R.7c — Sequential governed promotion.** **Status: DONE (focused evidence:
+`tests/test_phase8r_significance.py` and `tests/test_research_campaign.py`, 38 passed).**
+`run_experiment` now advances only after each preceding gate succeeds: discovery correction,
+validation replication under the same discovery-learned selection threshold, then sealed-holdout
+confirmation through the existing `evaluate_candidate_promotion` contract. Later partitions are
+never used to learn a new threshold; failed discovery/validation stops before later scoring.
+Confirmation evidence is consumed only at the eligible holdout stage, and staged candidate/
+promotion artifacts preserve the exact path and selected memberships. `execute_campaign` accepts
+per-bound-hypothesis discovery and confirmation evidence mappings and the positive fixture reaches
+`holdout_confirmed` through `execute_campaign`/`verify_campaign`; discovery, validation, holdout,
+and deterministic-replay cases are covered. The independent methodological reviewer remains the
+sole unresolved 8R.7 blocker. The next eligible action is that review, not Phase 9 activation.
+
+Original scope: only after significance evidence can legitimately
 satisfy discovery should `run_experiment`/`execute_campaign` advance the frozen candidate through
 `discovery` → `validation` → `holdout` using the existing, unmodified `evaluate_candidate_promotion`
 API and `target_stage` contract (`analysis/alpha/evaluation.py`). Requires: a successful positive

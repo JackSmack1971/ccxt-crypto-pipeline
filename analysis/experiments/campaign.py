@@ -14,6 +14,7 @@ from analysis.datasets.profile import verify_dataset_profile
 from .catalog import load_run
 from .research import ResearchRegistry
 from .runner import run_experiment
+from .significance import SignificanceEvidenceBundle
 from .spec import ExperimentSpec, experiment_spec_id
 
 
@@ -194,7 +195,9 @@ def execute_campaign(registry: ResearchRegistry, specs: tuple[ExperimentSpec, ..
                      rejected_hypothesis_ids: tuple[str, ...] = (),
                      promoted_hypothesis_ids: tuple[str, ...] = (),
                      conclusion: str, limitations: tuple[str, ...],
-                     provenance: Mapping[str, Any] | None = None) -> Path:
+                     provenance: Mapping[str, Any] | None = None,
+                     significance_evidence: Mapping[str, SignificanceEvidenceBundle] | None = None,
+                     confirmation_significance_evidence: Mapping[str, SignificanceEvidenceBundle] | None = None) -> Path:
     """Run one complete, locally replayable campaign through governed boundaries."""
     if not specs:
         raise ValueError("research campaign requires at least one experiment spec")
@@ -208,7 +211,20 @@ def execute_campaign(registry: ResearchRegistry, specs: tuple[ExperimentSpec, ..
                     for spec in bound_specs}
     if len(question_ids) != 1:
         raise ValueError("campaign specs must belong to one research question")
-    run_paths = tuple(run_experiment(spec, snapshot, run_root) for spec in bound_specs)
+    allowed_hypotheses = {spec.research_hypothesis_id for spec in bound_specs}
+    for label, evidence in (("significance_evidence", significance_evidence),
+                            ("confirmation_significance_evidence", confirmation_significance_evidence)):
+        if evidence is not None and not set(evidence) <= allowed_hypotheses:
+            raise ValueError(f"campaign {label} references an unknown hypothesis")
+
+    def run_bound(spec: ExperimentSpec) -> Path:
+        hypothesis_id = spec.research_hypothesis_id
+        return run_experiment(
+            spec, snapshot, run_root,
+            significance_evidence=(significance_evidence or {}).get(hypothesis_id),
+            confirmation_significance_evidence=(confirmation_significance_evidence or {}).get(hypothesis_id))
+
+    run_paths = tuple(run_bound(spec) for spec in bound_specs)
     records = tuple(load_run(path) for path in run_paths)
     hypothesis_ids = tuple(record.research_hypothesis_id for record in records)
     if None in hypothesis_ids or len(set(hypothesis_ids)) != len(hypothesis_ids):

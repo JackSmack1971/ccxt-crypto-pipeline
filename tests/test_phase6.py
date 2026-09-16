@@ -483,14 +483,15 @@ def test_runner_executes_the_declared_sequence_and_honestly_withholds_significan
     assert set(manifest["artifacts"]) == {
         "spec.json", "cohort.json", "features.json", "labels.json",
         "split.json", "baselines.json", "candidate.json", "promotion.json",
+        "promotion_stages.json",
         "definitions.json",
         "hypothesis_family.json",
         "uncertainty.json",
         "stress_matrix.json",
-            "stability.json",
-            "negative_controls.json",
-            "falsification.json",
-            "validation_closure.json",
+        "stability.json",
+        "negative_controls.json",
+        "falsification.json",
+        "validation_closure.json",
     }
 
     definitions = json.loads((run / "definitions.json").read_text())
