@@ -29,6 +29,7 @@ from .uncertainty import UncertaintyPolicy, bootstrap_mean
 from .stress import STRESS_MATRIX_VERSION
 from .stability import STABILITY_VERSION, build_stability_evidence
 from .negative_controls import NEGATIVE_CONTROL_VERSION, build_negative_control_evidence
+from .closure import CLOSURE_VERSION, build_validation_closure
 
 __all__ = [
     "BaselinePolicy", "CandidateDefinition", "CostPolicy", "ExperimentSpec",
@@ -46,4 +47,5 @@ __all__ = [
     "STRESS_MATRIX_VERSION",
     "STABILITY_VERSION", "build_stability_evidence",
     "NEGATIVE_CONTROL_VERSION", "build_negative_control_evidence",
+    "CLOSURE_VERSION", "build_validation_closure",
 ]

@@ -3,7 +3,7 @@
 **Status:** Active execution authority for forward work  
 **Current phase:** Phase 7 robust validation and research scaling
 **Baseline:** `main` at `23dbd389af88cade4584cb5fdc10b60dc17fcc3b`
-**Last reconciled:** 2026-09-16 (Slice 7.5 closed; Slice 7.6 active)
+**Last reconciled:** 2026-09-16 (Slice 7.6 closed; Slice 7.7 active)
 
 This file is the durable forward roadmap for `ccxt-crypto-pipeline`. It exists so a new agent can determine the repository's actual execution frontier without reconstructing intent from chat history, stale phase prose, or commit messages.
 
@@ -1103,11 +1103,9 @@ Evidence:
 
 ## Slice 7.6 — Negative controls and falsification suite
 
-**Status:** ACTIVE
+**Status:** DONE
 
 Introduce shuffled/permuted/known-null controls designed to reveal leakage and research-process false positives.
-
-**Status:** DONE
 
 Evidence:
 
@@ -1128,6 +1126,29 @@ Evidence:
 **Status:** ACTIVE
 
 Require replayable evidence that promoted results survive the configured robustness suite; passing remains a research result, not a profitability claim.
+
+Exit criteria:
+
+- Every run emits a hash-bound closure artifact that records the fixed discovery selection, promotion eligibility, each configured robustness component, and an explicit passed, failed, unavailable, or ineligible state.
+- Closure cannot pass before `holdout_confirmed`; stress, uncertainty, stability, and negative-control evidence must all be complete and satisfy their declared gates.
+- Repeated closure construction is deterministic, and the catalog rejects a current run with a missing closure artifact.
+- README documents the closure artifact and states that a passing closure is research evidence, not a profitability claim.
+
+Evidence:
+
+- `analysis/experiments/closure.py` emits deterministic closure evidence for the
+  fixed discovery selection. It requires `holdout_confirmed` before evaluating
+  uncertainty, stress, stability, negative-control, and configured walk-forward
+  components; failures and unavailable evidence remain explicit.
+- The runner persists hash-bound `validation_closure.json`, and manifest
+  version `phase7-run-v3` binds the new artifact to current runs while the
+  catalog retains read-only compatibility for prior Phase 6/7 manifests.
+- `tests/test_phase7.py` covers premature-promotion rejection, failed and
+  unavailable components, deterministic replay, and walk-forward inclusion;
+  Phase 3/6/7 focused verification passed with 189 tests. The locked full suite
+  passed with 440 tests; byte-compilation, whitespace validation, and offline
+  fixture/network-denial coverage passed. Live-provider behavior remains
+  outside scope and unverified.
 
 ---
 
@@ -1225,7 +1246,7 @@ For a fresh agent, the intended pickup sequence is:
 
 `AGENTS.md` → `ROADMAP.md` → active `docs/plans/phase-*.md` → relevant code/tests → Git history/status.
 
-The current frontier is **Slice 7.6 — Negative controls and falsification suite**.
+The current frontier is **Slice 7.7 — Validation closure matrix**.
 
 Phase 5 is DONE. Slice 5.7 closed the phase with
 `docs/plans/phase-5-data-plane-closure-matrix.md` and

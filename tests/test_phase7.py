@@ -14,6 +14,7 @@ from analysis.experiments import (SplitPolicy, UncertaintyPolicy, bootstrap_mean
                                   experiment_spec_from_dict, run_experiment, StressPolicy)
 from analysis.experiments import NegativeControlPolicy, StabilityPolicy
 from analysis.experiments.negative_controls import build_negative_control_evidence
+from analysis.experiments.closure import build_validation_closure
 from analysis.alpha import baseline_families, score_candidate
 from analysis.alpha.labels import LabelRow
 from analysis.experiments.stress import _build_stress_matrix
@@ -256,6 +257,16 @@ def test_current_run_requires_stability_artifact_at_catalog_boundary(tmp_path):
         load_run(run)
 
 
+def test_current_run_requires_validation_closure_at_catalog_boundary(tmp_path):
+    run = run_experiment(runner_spec(), runner_snapshot(), tmp_path / "runs")
+    manifest_path = run / "manifest.json"
+    manifest = json.loads(manifest_path.read_text())
+    manifest["artifacts"].pop("validation_closure.json")
+    manifest_path.write_text(json.dumps(manifest, sort_keys=True, separators=(",", ":")) + "\n")
+    with pytest.raises(ValueError, match="lacks required artifacts"):
+        load_run(run)
+
+
 def test_current_manifest_cannot_be_downgraded_to_legacy_phase7(tmp_path):
     run = run_experiment(runner_spec(), runner_snapshot(), tmp_path / "runs")
     manifest_path = run / "manifest.json"
@@ -319,3 +330,89 @@ def test_negative_controls_keep_null_and_missingness_explicit():
                    {"methods": ("known_null",), "seed": -1}):
         with pytest.raises(ValueError, match="negative-control"):
             NegativeControlPolicy(**kwargs)
+
+
+def _closure_inputs():
+    return dict(
+        spec_id="spec-1", selected_token_ids=frozenset({"a"}),
+        promotion={"state": "holdout_confirmed"},
+        uncertainty={"version": "u1", "status": "available", "ci95_low": 0.01},
+        stress={"version": "s1", "passed": True},
+        stability={"version": "st1", "status": "available", "dominated": False,
+                   "dimensions": {"chain": []}},
+        negative_controls={"version": "n1", "status": "available", "results": [
+            {"candidate": {"baseline_comparison": {"difference": 0.0}}}]},
+    )
+
+
+def test_validation_closure_requires_holdout_confirmation():
+    values = _closure_inputs()
+    values["promotion"] = {"state": "discovery_promoted"}
+    result = build_validation_closure(**values)
+    assert result["status"] == "ineligible"
+    assert result["reason"] == "PROMOTION_NOT_HOLDOUT_CONFIRMED"
+    assert [item["name"] for item in result["components"]] == [
+        "uncertainty", "stress_matrix", "stability", "negative_controls"]
+    assert all(item["status"] == "ineligible" for item in result["components"])
+
+
+@pytest.mark.parametrize(("field", "expected"), [
+    ("stress", "ROBUSTNESS_COMPONENT_FAILED"),
+    ("stability", "ROBUSTNESS_COMPONENT_FAILED"),
+    ("negative_controls", "ROBUSTNESS_COMPONENT_FAILED"),
+    ("uncertainty", "ROBUSTNESS_COMPONENT_UNAVAILABLE"),
+])
+def test_validation_closure_fails_or_marks_unavailable_components(field, expected):
+    values = _closure_inputs()
+    if field == "stress":
+        values[field] = {"version": "s1", "passed": False}
+    elif field == "stability":
+        values[field] = {"version": "st1", "status": "available", "dominated": True}
+    elif field == "negative_controls":
+        values[field] = {"version": "n1", "status": "available", "results": [
+            {"candidate": {"baseline_comparison": {"difference": 0.1}}}]}
+    else:
+        values[field] = {"version": "u1", "status": "unavailable"}
+    result = build_validation_closure(**values)
+    assert result["status"] == ("failed" if expected.endswith("FAILED") else "unavailable")
+    assert result["reason"] == expected
+
+
+def test_validation_closure_is_deterministic_and_passes_only_complete_suite():
+    first = build_validation_closure(**_closure_inputs())
+    second = build_validation_closure(**_closure_inputs())
+    assert first == second
+    assert first["status"] == "passed"
+    assert {item["name"] for item in first["components"]} == {
+        "uncertainty", "stress_matrix", "stability", "negative_controls"
+    }
+
+
+def test_validation_closure_keeps_missing_negative_control_evidence_explicit():
+    values = _closure_inputs()
+    values["negative_controls"] = {"version": "n1", "status": "available", "results": [
+        {"candidate": {"baseline_comparison": {"difference": None}}}]}
+    result = build_validation_closure(**values)
+    assert result["status"] == "failed"
+    assert result["reason"] == "ROBUSTNESS_COMPONENT_FAILED"
+    control = next(item for item in result["components"] if item["name"] == "negative_controls")
+    assert control["reason"] == "NEGATIVE_CONTROL_INSUFFICIENT_EVIDENCE"
+
+
+def test_validation_closure_rejects_non_positive_uncertainty_and_incomplete_stability():
+    values = _closure_inputs()
+    values["uncertainty"] = {"version": "u1", "status": "available", "ci95_low": -1.0}
+    values["stability"] = {"version": "st1", "status": "available", "dominated": False}
+    result = build_validation_closure(**values)
+    assert result["status"] == "failed"
+    assert {item["reason"] for item in result["components"] if not item["passed"]} == {
+        "UNCERTAINTY_UNAVAILABLE", "STABILITY_DOMINANCE_OR_UNAVAILABLE"
+    }
+
+
+def test_validation_closure_includes_configured_walk_forward_evidence():
+    values = _closure_inputs()
+    values["walk_forward"] = {"version": "wf1", "folds": [1], "results": [1]}
+    result = build_validation_closure(**values)
+    assert result["status"] == "passed"
+    assert result["components"][0]["name"] == "walk_forward"
