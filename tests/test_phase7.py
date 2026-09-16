@@ -1,6 +1,8 @@
 """Offline acceptance evidence for Phase 7 robust-validation slices."""
 
+import hashlib
 import json
+import shutil
 from dataclasses import replace
 from datetime import datetime, timedelta
 from types import SimpleNamespace
@@ -10,7 +12,13 @@ import pytest
 from analysis.experiments import (SplitPolicy, UncertaintyPolicy, bootstrap_mean,
                                   build_walk_forward_evaluation, experiment_spec_dict,
                                   experiment_spec_from_dict, run_experiment, StressPolicy)
+from analysis.experiments import NegativeControlPolicy, StabilityPolicy
+from analysis.experiments.negative_controls import build_negative_control_evidence
+from analysis.alpha import baseline_families, score_candidate
+from analysis.alpha.labels import LabelRow
 from analysis.experiments.stress import _build_stress_matrix
+from analysis.experiments.stability import build_stability_evidence
+from analysis.experiments.catalog import load_run
 from test_phase6 import runner_snapshot, runner_spec
 
 
@@ -164,3 +172,150 @@ def test_runner_stress_matrix_does_not_expose_holdout_ids(tmp_path):
     assert evidence["selected_token_ids"] == ["ethereum:0xtok3"]
     assert all("ethereum:0xtok06" not in row["liquidity_excluded_token_ids"]
                for row in evidence["scenarios"])
+
+
+def test_stability_is_discovery_only_and_reports_concentration(tmp_path):
+    run = run_experiment(runner_spec(), runner_snapshot(), tmp_path / "runs")
+    evidence = json.loads((run / "stability.json").read_text())
+    assert evidence["version"] == "phase7-stability-v1"
+    assert evidence["selected_token_ids"] == ["ethereum:0xtok3"]
+    assert evidence["dimensions"]["chain"][0]["dominant"] is True
+    assert evidence["dimensions"]["leave_one_out"][0]["remaining_sample_size"] == 0
+    assert "ethereum:0xtok06" not in evidence["selected_token_ids"]
+
+
+def test_stability_policy_rejects_ambiguous_configuration():
+    with pytest.raises(ValueError, match="unsupported stability dimension"):
+        StabilityPolicy(dimensions=("chain", "unknown"))
+    with pytest.raises(ValueError, match="dominance threshold"):
+        StabilityPolicy(dominance_threshold=0)
+    with pytest.raises(ValueError, match="invalid stability policy"):
+        StabilityPolicy(version="phase7-stability-v999")
+
+
+def test_legacy_spec_without_stability_remains_loadable():
+    legacy = experiment_spec_dict(runner_spec())
+    legacy.pop("stability")
+    assert experiment_spec_from_dict(legacy).stability == StabilityPolicy()
+
+
+def test_stability_uses_decision_time_provider_evidence_and_fails_closed_on_ambiguity():
+    t0 = datetime(2025, 1, 1)
+    member = SimpleNamespace(token_id="a", chain="ethereum", t0=t0, source_evidence=(
+        {"source": "provider-z", "timestamp": t0.isoformat()},
+        {"source": "provider-a", "timestamp": (t0 + timedelta(days=1)).isoformat()},))
+    label = SimpleNamespace(token_id="a", horizon="24h", status="COMPLETE", value=0.1)
+    result = build_stability_evidence(selected_token_ids=frozenset({"a"}), labels=(label,), cohort=(member,),
+                                      feature_rows=({"token_id": "a", "launch_liquidity_usd": 20_000.0},),
+                                      horizon="24h", policy=StabilityPolicy(dimensions=("provider",)))
+    assert result["dimensions"]["provider"][0]["group"] == "provider-z"
+
+    offset_future = SimpleNamespace(token_id="a", chain="ethereum", t0=t0, source_evidence=(
+        {"source": "provider-z", "timestamp": "2024-12-31T23:30:00-02:00"},))
+    result = build_stability_evidence(selected_token_ids=frozenset({"a"}), labels=(label,), cohort=(offset_future,),
+                                      feature_rows=(), horizon="24h", policy=StabilityPolicy(dimensions=("provider",)))
+    assert result["dimensions"]["provider"][0]["group"] == "unavailable"
+
+    ambiguous = SimpleNamespace(token_id="a", chain="ethereum", t0=t0, source_evidence=(
+        {"source": "provider-a", "timestamp": t0.isoformat()},
+        {"source": "provider-b", "timestamp": t0.isoformat()},))
+    result = build_stability_evidence(selected_token_ids=frozenset({"a"}), labels=(label,), cohort=(ambiguous,),
+                                      feature_rows=(), horizon="24h", policy=StabilityPolicy(dimensions=("provider",)))
+    assert result["dimensions"]["provider"][0]["group"] == "ambiguous"
+
+
+def test_stability_does_not_call_censored_evidence_available_or_dominant():
+    result = build_stability_evidence(
+        selected_token_ids=frozenset({"a"}),
+        labels=(SimpleNamespace(token_id="a", horizon="24h", status="DATA_CENSORED", value=None),),
+        cohort=(SimpleNamespace(token_id="a", chain="ethereum", t0=datetime(2025, 1, 1), source_evidence=()),),
+        feature_rows=(), horizon="24h", policy=StabilityPolicy(dimensions=("chain",)))
+    assert result["status"] == "unavailable"
+    assert result["reason"] == "NO_COMPLETE_OBSERVATIONS"
+    assert result["dominated"] is False
+    assert result["dimensions"]["chain"][0]["dominant"] is False
+
+
+def test_stability_rejects_missing_subgroup_metadata_as_dominance():
+    result = build_stability_evidence(
+        selected_token_ids=frozenset({"a"}),
+        labels=(SimpleNamespace(token_id="a", horizon="24h", status="COMPLETE", value=0.1),),
+        cohort=(SimpleNamespace(token_id="a", chain="", t0=datetime(2025, 1, 1), source_evidence=()),),
+        feature_rows=(), horizon="24h", policy=StabilityPolicy(dimensions=("provider",)))
+    assert result["dimensions"]["provider"][0]["group"] == "unavailable"
+    assert result["dimensions"]["provider"][0]["dominant"] is False
+
+
+def test_current_run_requires_stability_artifact_at_catalog_boundary(tmp_path):
+    run = run_experiment(runner_spec(), runner_snapshot(), tmp_path / "runs")
+    manifest_path = run / "manifest.json"
+    manifest = json.loads(manifest_path.read_text())
+    manifest["artifacts"].pop("stability.json")
+    manifest_path.write_text(json.dumps(manifest, sort_keys=True, separators=(",", ":")) + "\n")
+    with pytest.raises(ValueError, match="lacks required artifacts"):
+        load_run(run)
+
+
+def test_current_manifest_cannot_be_downgraded_to_legacy_phase7(tmp_path):
+    run = run_experiment(runner_spec(), runner_snapshot(), tmp_path / "runs")
+    manifest_path = run / "manifest.json"
+    manifest = json.loads(manifest_path.read_text())
+    manifest["manifest_version"] = "phase7-run-v1"
+    manifest["artifacts"].pop("negative_controls.json")
+    manifest_path.write_text(json.dumps(manifest, sort_keys=True, separators=(",", ":")) + "\n")
+    with pytest.raises(ValueError, match="identity-bound"):
+        load_run(run)
+
+
+def test_genuine_legacy_phase7_manifest_remains_loadable(tmp_path):
+    current = run_experiment(runner_spec(), runner_snapshot(), tmp_path / "runs")
+    legacy = tmp_path / "legacy" / current.name
+    legacy.parent.mkdir()
+    shutil.copytree(current, legacy)
+    manifest_path = legacy / "manifest.json"
+    manifest = json.loads(manifest_path.read_text())
+    manifest["manifest_version"] = "phase7-run-v1"
+    manifest["artifacts"].pop("negative_controls.json")
+    manifest["inputs"].pop("manifest_version")
+    legacy_id = hashlib.sha256(
+        (json.dumps(manifest["inputs"], sort_keys=True, separators=(",", ":")) + "\n").encode()
+    ).hexdigest()[:24]
+    renamed = legacy.parent / legacy_id
+    legacy.rename(renamed)
+    manifest["run_id"] = legacy_id
+    (renamed / "manifest.json").write_text(
+        json.dumps(manifest, sort_keys=True, separators=(",", ":")) + "\n")
+    assert load_run(renamed).run_id == legacy_id
+
+
+def test_negative_controls_are_deterministic_fixed_selection_and_discovery_only(tmp_path):
+    first = run_experiment(runner_spec(), runner_snapshot(), tmp_path / "runs")
+    evidence = json.loads((first / "negative_controls.json").read_text())
+    assert evidence["version"] == "phase7-negative-controls-v1"
+    assert evidence["selection_scope"] == "discovery_selected_candidate"
+    assert len(evidence["results"]) == 26
+    assert {row["method"] for row in evidence["results"]} == {"label_permutation", "known_null"}
+    assert all(row["synthetic"] is True for row in evidence["results"])
+    assert all(row["selected_token_ids"] == ["ethereum:0xtok3"] for row in evidence["results"])
+    assert all("ethereum:0xtok06" not in row["selected_token_ids"] for row in evidence["results"])
+    assert json.loads((first / "manifest.json").read_text())["artifacts"]["negative_controls.json"]
+
+
+def test_negative_controls_keep_null_and_missingness_explicit():
+    labels = (LabelRow("a", "24h", 0.2, "COMPLETE", "2025-01-01", "2025-01-02", 1.0, 1.2, {}),
+              LabelRow("b", "24h", None, "DATA_CENSORED", "2025-01-01", "2025-01-02", None, None, {}))
+    result = build_negative_control_evidence(
+        selected_token_ids=frozenset({"a"}), labels=labels, horizon="24h", turnover=0.0,
+        costs=(0.0,), min_coverage=0.1, policy=NegativeControlPolicy(methods=("known_null",)),
+        score_candidate=score_candidate, baseline_families=baseline_families)
+    row = result["results"][0]
+    assert row["candidate"]["mean_return"] == 0.0
+    assert row["candidate"]["baseline_comparison"]["difference"] == 0.0
+    assert row["candidate"]["sample_size"] == 1
+    with pytest.raises(ValueError, match="unsupported negative-control method"):
+        NegativeControlPolicy(methods=("shuffle_features",))
+    for kwargs in ({"methods": ("known_null",), "permutations": 0},
+                   {"methods": ("known_null",), "permutations": -1},
+                   {"methods": ("known_null",), "seed": -1}):
+        with pytest.raises(ValueError, match="negative-control"):
+            NegativeControlPolicy(**kwargs)

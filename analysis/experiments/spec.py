@@ -165,6 +165,61 @@ class StressPolicy:
 
 
 @dataclass(frozen=True)
+class StabilityPolicy:
+    """Declared subgroup and leave-one-out stability evidence."""
+
+    version: str = "phase7-stability-v1"
+    dimensions: tuple[str, ...] = ("chain", "era", "liquidity_band", "provider", "leave_one_out")
+    era_days: int = 30
+    liquidity_bands_usd: tuple[float, ...] = (10_000.0, 25_000.0, 50_000.0)
+    minimum_group_size: int = 2
+    dominance_threshold: float = 0.75
+
+    def __post_init__(self):
+        if self.version != "phase7-stability-v1" or self.era_days <= 0 or self.minimum_group_size <= 0:
+            raise ValueError("invalid stability policy configuration")
+        allowed = {"chain", "era", "liquidity_band", "provider", "leave_one_out"}
+        if not self.dimensions or any(item not in allowed for item in self.dimensions):
+            raise ValueError("unsupported stability dimension")
+        if len(set(self.dimensions)) != len(self.dimensions):
+            raise ValueError("stability dimensions must be unique")
+        if (not self.liquidity_bands_usd or
+                any(type(value) not in (int, float) or not math.isfinite(value) or value < 0
+                    for value in self.liquidity_bands_usd) or
+                tuple(sorted(self.liquidity_bands_usd)) != self.liquidity_bands_usd or
+                len(set(self.liquidity_bands_usd)) != len(self.liquidity_bands_usd)):
+            raise ValueError("stability liquidity bands must be sorted and unique")
+        if not 0 < self.dominance_threshold <= 1:
+            raise ValueError("stability dominance threshold must be in (0, 1]")
+
+
+@dataclass(frozen=True)
+class NegativeControlPolicy:
+    """Declared synthetic controls used to expose leakage and false positives."""
+
+    version: str = "phase7-negative-controls-v1"
+    methods: tuple[str, ...] = ("label_permutation", "known_null")
+    permutations: int = 25
+    seed: int = 23
+
+    def __post_init__(self):
+        if self.version != "phase7-negative-controls-v1":
+            raise ValueError("invalid negative-control policy")
+        allowed = {"label_permutation", "known_null"}
+        if not self.methods or any(method not in allowed for method in self.methods):
+            raise ValueError("unsupported negative-control method")
+        if len(set(self.methods)) != len(self.methods):
+            raise ValueError("negative-control methods must be unique")
+        if type(self.permutations) is not int or self.permutations < 1:
+            raise ValueError("negative-control permutations must be positive")
+        if type(self.seed) is not int or self.seed < 0:
+            raise ValueError("negative-control seed must be a non-negative integer")
+
+    def as_dict(self) -> dict[str, Any]:
+        return asdict(self)
+
+
+@dataclass(frozen=True)
 class BaselinePolicy:
     """Declares which mandatory baseline families this experiment requires."""
 
@@ -209,6 +264,8 @@ class ExperimentSpec:
     config_identity: str
     uncertainty: UncertaintyPolicy = UncertaintyPolicy()
     stress: StressPolicy = StressPolicy()
+    stability: StabilityPolicy = StabilityPolicy()
+    negative_controls: NegativeControlPolicy = NegativeControlPolicy()
 
     def __post_init__(self):
         if self.spec_version != SPEC_VERSION:
@@ -284,7 +341,7 @@ def experiment_spec_from_dict(value: dict[str, Any]) -> ExperimentSpec:
     if not isinstance(value, dict):
         raise ValueError("experiment spec must be a JSON object")
     required = {field.name for field in ExperimentSpec.__dataclass_fields__.values()}
-    required_without_defaults = required - {"uncertainty", "stress"}
+    required_without_defaults = required - {"uncertainty", "stress", "stability", "negative_controls"}
     if not required_without_defaults <= set(value) or set(value) - required:
         missing = sorted(required_without_defaults - set(value))
         extra = sorted(set(value) - required)
@@ -323,6 +380,11 @@ def experiment_spec_from_dict(value: dict[str, Any]) -> ExperimentSpec:
                                    "slippage_bps": tuple(value.get("stress", {}).get("slippage_bps", StressPolicy().slippage_bps)),
                                    "minimum_liquidity_usd": tuple(value.get("stress", {}).get("minimum_liquidity_usd", StressPolicy().minimum_liquidity_usd)),
                                    "missingness_modes": tuple(value.get("stress", {}).get("missingness_modes", StressPolicy().missingness_modes))}),
+            stability=StabilityPolicy(**{**value.get("stability", {}),
+                                         "dimensions": tuple(value.get("stability", {}).get("dimensions", StabilityPolicy().dimensions)),
+                                         "liquidity_bands_usd": tuple(value.get("stability", {}).get("liquidity_bands_usd", StabilityPolicy().liquidity_bands_usd))}),
+            negative_controls=NegativeControlPolicy(**{**value.get("negative_controls", {}),
+                                                        "methods": tuple(value.get("negative_controls", {}).get("methods", NegativeControlPolicy().methods))}),
         )
     except (KeyError, TypeError, AttributeError) as exc:
         raise ValueError("invalid experiment spec structure") from exc

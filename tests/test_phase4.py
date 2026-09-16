@@ -7,7 +7,8 @@ import pytest
 
 from reporting.package import build_approved_handoff, generate_package
 from reporting.package.handoff import _dump
-from reporting.claims.model import Claim, Derivation, Evidence, _derived_value, validate_claims
+from reporting.claims.model import (Claim, Derivation, Evidence, _COMPARE, _DURATION,
+                                    _NUMBER_WORD, _derived_value, validate_claims)
 from reporting.render.static import render_svg, validate_accessibility
 from analysis.alpha import (CohortConfig, FeatureDefinition, FeatureRegistry, LabelDefinition,
                             PromotionEvidence, build_split, compute_features,
@@ -26,6 +27,22 @@ def _claim_for_derivation(operation, values):
         derivation=Derivation(source_field="value", operation=operation,
                               unit="unitless", source_unit="unitless"),
     )
+
+
+def test_compare_regex_rejects_word_boundary_near_misses():
+    assert _COMPARE.search("outperformer") is None
+    assert _COMPARE.search("outperformed").group(0) == "outperformed"
+
+
+def test_duration_regex_distinguishes_hyphenated_singular_and_near_misses():
+    assert _DURATION.search("ten-hour").group(0) == "ten-hour"
+    assert _DURATION.search("tenhour").group(0) == "tenhour"
+    assert _DURATION.search("ten hours") is None
+
+
+def test_number_word_regex_requires_boundaries_before_adjacent_words():
+    assert _NUMBER_WORD.search("oneworld") is None
+    assert _NUMBER_WORD.search("one world").group(0) == "one"
 
 
 def approved_input(tmp_path, *, value=1.5, missing=False):

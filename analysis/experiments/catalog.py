@@ -12,6 +12,9 @@ from analysis.alpha import assert_feature_versions_compatible, assert_label_vers
 
 from .runner import MANIFEST_VERSION
 
+LEGACY_MANIFEST_VERSION = "phase6-run-v1"
+LEGACY_ROBUST_MANIFEST_VERSION = "phase7-run-v1"
+
 
 @dataclass(frozen=True)
 class RunRecord:
@@ -52,7 +55,8 @@ def load_run(run_dir: str | Path) -> RunRecord:
     """Verify an immutable run and return its catalog metadata without writing it."""
     path = Path(run_dir)
     manifest = _read_json(path / "manifest.json")
-    if manifest.get("manifest_version") != MANIFEST_VERSION or manifest.get("immutable") is not True:
+    manifest_version = manifest.get("manifest_version")
+    if manifest_version not in {LEGACY_MANIFEST_VERSION, LEGACY_ROBUST_MANIFEST_VERSION, MANIFEST_VERSION} or manifest.get("immutable") is not True:
         raise ValueError(f"unsupported or mutable experiment run manifest: {path}")
     run_id = manifest.get("run_id")
     inputs = manifest.get("inputs")
@@ -62,6 +66,11 @@ def load_run(run_dir: str | Path) -> RunRecord:
     expected_run_id = hashlib.sha256(_canonical(inputs)).hexdigest()[:24]
     if run_id != expected_run_id:
         raise ValueError(f"experiment run identity mismatch: {path}")
+    declared_manifest_version = inputs.get("manifest_version")
+    if manifest_version == MANIFEST_VERSION and declared_manifest_version != MANIFEST_VERSION:
+        raise ValueError(f"experiment run manifest version is not identity-bound: {path}")
+    if manifest_version != MANIFEST_VERSION and declared_manifest_version is not None:
+        raise ValueError(f"experiment run manifest version is not identity-bound: {path}")
     for name, expected_hash in sorted(artifacts.items()):
         artifact_path = path / name
         try:
@@ -72,6 +81,10 @@ def load_run(run_dir: str | Path) -> RunRecord:
             raise ValueError(f"experiment run artifact hash mismatch: {artifact_path}")
 
     required = {"spec.json", "candidate.json", "promotion.json", "definitions.json"}
+    if manifest_version in {LEGACY_ROBUST_MANIFEST_VERSION, MANIFEST_VERSION}:
+        required.add("stability.json")
+    if manifest_version == MANIFEST_VERSION:
+        required.add("negative_controls.json")
     if not required <= set(artifacts):
         raise ValueError(f"experiment run manifest lacks required artifacts: {path}")
     spec = _read_json(path / "spec.json")
