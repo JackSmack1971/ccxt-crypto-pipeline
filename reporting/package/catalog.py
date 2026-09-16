@@ -31,6 +31,30 @@ def _read_json(path: Path) -> dict[str, Any]:
     return value
 
 
+def verify_package(path: str | Path) -> tuple[dict[str, Any], dict[str, str]]:
+    """Verify an immutable package manifest and every declared artifact."""
+    package = Path(path).resolve()
+    manifest = _read_json(package / "package-manifest.json")
+    if manifest.get("immutable") is not True or manifest.get("package_id") != package.name:
+        raise ValueError(f"unsupported or mutable report package: {package}")
+    artifacts = manifest.get("artifacts")
+    if not isinstance(artifacts, dict) or not artifacts:
+        raise ValueError(f"report package lacks artifact hashes: {package}")
+    verified: dict[str, str] = {}
+    for name, expected in sorted(artifacts.items()):
+        relative = Path(name)
+        if not isinstance(name, str) or relative.is_absolute() or ".." in relative.parts:
+            raise ValueError(f"report package artifact escapes package: {name}")
+        artifact = (package / relative).resolve()
+        if package not in artifact.parents or not artifact.is_file():
+            raise ValueError(f"missing report package artifact: {name}")
+        actual = hashlib.sha256(artifact.read_bytes()).hexdigest()
+        if actual != expected:
+            raise ValueError(f"report package artifact hash mismatch: {name}")
+        verified[name] = actual
+    return manifest, verified
+
+
 def _reviews(history_dir: str | Path | None, artifact_id: str) -> dict[str, Any]:
     if history_dir is None:
         return {"review_count": 0, "latest_decision": None}
@@ -56,22 +80,7 @@ def _research_record(path: Path, history_dir: str | Path | None) -> ArtifactReco
 
 
 def _package_record(path: Path, history_dir: str | Path | None) -> ArtifactRecord:
-    manifest_path = path / "package-manifest.json"
-    manifest = _read_json(manifest_path)
-    if manifest.get("immutable") is not True or manifest.get("package_id") != path.name:
-        raise ValueError(f"unsupported or mutable report package: {path}")
-    artifacts = manifest.get("artifacts")
-    if not isinstance(artifacts, dict):
-        raise ValueError(f"report package lacks artifact hashes: {path}")
-    for name, expected in sorted(artifacts.items()):
-        relative = Path(name)
-        if relative.is_absolute() or ".." in relative.parts:
-            raise ValueError(f"report package artifact escapes package: {name}")
-        artifact = (path / relative).resolve()
-        if path.resolve() not in artifact.parents or not artifact.is_file():
-            raise ValueError(f"missing report package artifact: {name}")
-        if hashlib.sha256(artifact.read_bytes()).hexdigest() != expected:
-            raise ValueError(f"report package artifact hash mismatch: {name}")
+    manifest, _ = verify_package(path)
     inputs = manifest.get("inputs", {})
     if not isinstance(inputs, dict):
         raise ValueError(f"report package inputs are malformed: {path}")
