@@ -103,6 +103,18 @@ def freeze_hypothesis_family(spec: ExperimentSpec) -> FrozenHypothesisFamily:
     )
 
 
+def verify_frozen_family_identity(family: FrozenHypothesisFamily) -> None:
+    """Fail closed if a frozen family's content no longer matches its own identity.
+
+    Shared by :func:`evaluate_hypothesis_family` and Slice 8R.7a's
+    significance-evidence validation (``significance.py``) so both refuse a
+    family whose content was mutated after freezing, without duplicating the
+    identity check.
+    """
+    if family.manifest_version != FAMILY_MANIFEST_VERSION or _content_id(_family_payload(family)) != family.family_id:
+        raise ValueError("hypothesis family content does not match its frozen identity")
+
+
 def evaluate_hypothesis_family(
     family: FrozenHypothesisFamily,
     raw_p_values: Mapping[str, float | None],
@@ -112,8 +124,7 @@ def evaluate_hypothesis_family(
     date_tested: str,
 ) -> FamilyEvaluation:
     """Correct a complete result set without permitting family redefinition."""
-    if family.manifest_version != FAMILY_MANIFEST_VERSION or _content_id(_family_payload(family)) != family.family_id:
-        raise ValueError("hypothesis family content does not match its frozen identity")
+    verify_frozen_family_identity(family)
     if stage not in {"discovery", "confirmation"}:
         raise ValueError("hypothesis-family stage must be discovery or confirmation")
     if not dataset_version.strip() or not date_tested.strip():

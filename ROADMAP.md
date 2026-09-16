@@ -2,9 +2,10 @@
 
 **Status:** Active execution authority for forward work  
 **Current phase:** Phase 8R empirical research readiness
-**Baseline:** `main` at `460a521` (479 passed after Slice 8R.6 campaign execution)
-**Last reconciled:** 2026-09-16 (Slice 8R.7 self-review complete and BLOCKED on an unavailable
-independent reviewer; Phase 8R remains open pending that review; Phases 9–10 remain deferred)
+**Baseline:** `main` at `1656dd9` (Slice 8R.7b focused evidence: 141 passed)
+**Last reconciled:** 2026-09-16 (Slice 8R.7b integrates validated significance evidence into
+immutable experiment runs; Slice 8R.7c is ACTIVE and 8R.7 remains subject to the unavailable
+independent methodological reviewer; Phase 8R remains open; Phases 9–10 remain deferred)
 
 This file is the durable forward roadmap for `ccxt-crypto-pipeline`. It exists so a new agent can determine the repository's actual execution frontier without reconstructing intent from chat history, stale phase prose, or commit messages.
 
@@ -1595,7 +1596,39 @@ below.
   would be new research logic, not orchestration — this is a real design tension for 8R.7a's
   candidate B below, not resolved here.
 
-**Slice 8R.7a — Significance-evidence contract.** Define the governed contract by which
+**Slice 8R.7a — Significance-evidence contract.** **Status: DONE (contract only; Blocker B is
+NOT resolved).** Candidate A (externally supplied raw significance evidence) is adopted.
+`analysis/experiments/significance.py` defines `SignificanceEvidence` (one caller-supplied raw
+p-value per frozen hypothesis, content-addressed as `evidence_id`, carrying hypothesis identity,
+frozen `family_id`, `experiment_spec_id`, `dataset_version`, `stage` (`discovery`/`confirmation`
+only — no invented validation-stage p-value), `raw_p_value`, `statistical_test`/`test_version`
+identity, an `observed_through` temporal boundary, `parameters`, an optional non-negative `seed`,
+and a required `provenance` string) and `SignificanceEvidenceBundle`
+(`build_significance_evidence_bundle`), which validates a caller-supplied entry set against one
+`FrozenHypothesisFamily` before exposing `raw_p_values()` — the exact `Mapping[str, float | None]`
+shape `evaluate_hypothesis_family` (`hypotheses.py`) already consumes. The frozen-family identity
+check itself was extracted into `hypotheses.verify_frozen_family_identity` and reused by both
+`evaluate_hypothesis_family` and the new bundle validator rather than duplicated. Fail-closed
+cases covered by `tests/test_phase8r_significance.py`: non-finite/out-of-range p-values, an
+unsupported stage, missing/incomplete family evidence, evidence for a hypothesis outside the
+frozen family, duplicate/conflicting evidence for one hypothesis, and evidence bound to the wrong
+dataset version, hypothesis family, or experiment spec. `runner.py`/`campaign.py` are unchanged —
+this evidence is not wired into governed execution, `PromotionEvidence.discovery_adjusted_p_value`
+is still never set by `run_experiment`, and `MISSING_DISCOVERY_CORRECTION` fail-closed behavior is
+unchanged (`tests/test_phase6.py`). No multiple-testing correction is implemented or duplicated
+here. Manifest identity: this evidence is observed result data, not pre-registered methodology, so
+it deliberately does not join `ExperimentSpec.spec_version` or `runner.py`'s `MANIFEST_VERSION`;
+it versions its own identity (`SIGNIFICANCE_MANIFEST_VERSION = "phase8r-significance-evidence-v1"`).
+Whether run/campaign identity must absorb this evidence once it is actually consumed is deferred to
+8R.7b, which is where that consumption happens. Blocker B is unchanged by this slice — the
+governed path still cannot reach `discovery_promoted` — and remains open pending 8R.7b/8R.7c.
+
+The remainder of this entry is the original pre-implementation design record; it is retained for
+context on the two candidates considered and the questions this slice had to answer. Candidate A
+was selected; Candidate B was not implemented and remains available to a future slice if Candidate
+A's approach is later found insufficient.
+
+Original scope: define the governed contract by which
 statistically meaningful raw significance evidence enters experiment execution, before any
 implementation. Must answer: source of raw p-values (caller-supplied vs. internally computed);
 stage association (discovery vs. confirmation/holdout; validation's status given no existing
@@ -1631,7 +1664,17 @@ repository-authority decision:
 
 No statistical methodology is selected or implemented by this roadmap entry.
 
-**Slice 8R.7b — Frozen-family correction integration.** Once 8R.7a's contract is decided, wire
+**Slice 8R.7b — Frozen-family correction integration.** **Status: DONE (focused evidence:
+`tests/test_phase8r_significance.py`, 141 passed with `tests/test_phase6.py`).** `run_experiment`
+accepts a validated `SignificanceEvidenceBundle`, revalidates its frozen-family/spec/dataset/stage
+bindings, feeds its complete raw p-value map only through `evaluate_hypothesis_family`, and binds
+the candidate's matching corrected value to `PromotionEvidence` for discovery evidence only.
+Confirmation evidence is persisted and corrected but cannot satisfy discovery. Raw evidence and its
+corrected evaluation are immutable run artifacts, and evidence identity participates in run identity;
+omitted or unavailable p-values remain fail-closed. Mixed observation boundaries and ambiguous
+candidate-to-hypothesis mappings fail closed. The next slice is 8R.7c.
+
+Original scope: wire
 authorized raw significance evidence into the existing `freeze_hypothesis_family`/
 `evaluate_hypothesis_family` machinery so the governed path obtains corrected discovery/confirmation
 values only through the repository's already-declared family/correction semantics — never by

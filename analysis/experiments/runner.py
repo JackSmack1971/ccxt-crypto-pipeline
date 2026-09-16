@@ -30,7 +30,10 @@ from analysis.alpha import (FeatureRegistry, PromotionEvidence, baseline_familie
 from analysis.datasets.snapshot import DatasetSnapshot
 
 from .spec import ExperimentSpec, experiment_spec_dict, experiment_spec_id
-from .hypotheses import freeze_hypothesis_family
+from .hypotheses import (FrozenHypothesisFamily, evaluate_hypothesis_family,
+                         freeze_hypothesis_family)
+from .significance import (SIGNIFICANCE_MANIFEST_VERSION, SignificanceEvidenceBundle,
+                           build_significance_evidence_bundle)
 from .walk_forward import build_walk_forward_evaluation
 from .uncertainty import bootstrap_mean
 from .stress import _build_stress_matrix
@@ -114,6 +117,17 @@ def _selected_token_ids(feature_rows: tuple[dict[str, Any], ...], rule: str) -> 
                      if isinstance(value, (int, float)) and math.isfinite(value) and compare(value, threshold))
 
 
+def _candidate_hypothesis(family: FrozenHypothesisFamily, rule: str, horizon: str):
+    feature, operator, percentile = _parse_selection_rule(rule)
+    threshold = f"{operator}p{int(percentile)}"
+    matches = tuple(item for item in family.hypotheses
+                    if item.feature == feature and item.threshold == threshold
+                    and item.horizon == horizon and item.subgroup is None)
+    if len(matches) != 1:
+        raise ValueError("candidate selection does not identify exactly one frozen hypothesis")
+    return matches[0]
+
+
 def _walk_forward_results(evaluation: Any, feature_rows: tuple[dict[str, Any], ...],
                           labels: tuple[Any, ...], spec: ExperimentSpec) -> dict[str, Any]:
     """Score each fold using a threshold learned from that fold's training data.
@@ -184,7 +198,8 @@ def _dump(value: Any) -> bytes:
     return (json.dumps(_safe(value), default=str, sort_keys=True, separators=(",", ":")) + "\n").encode()
 
 
-def run_experiment(spec: ExperimentSpec, snapshot: DatasetSnapshot, output_dir: str | Path) -> Path:
+def run_experiment(spec: ExperimentSpec, snapshot: DatasetSnapshot, output_dir: str | Path,
+                   significance_evidence: SignificanceEvidenceBundle | None = None) -> Path:
     """Execute ``spec`` against ``snapshot`` and write one immutable run directory.
 
     The run identity is keyed by the spec's own content-addressed identity
@@ -194,6 +209,28 @@ def run_experiment(spec: ExperimentSpec, snapshot: DatasetSnapshot, output_dir: 
     """
     # Commit the family before any research result is inspected.
     hypothesis_family = freeze_hypothesis_family(spec)
+    significance_bundle = None
+    significance_evaluation = None
+    candidate_adjusted_p_value = None
+    if significance_evidence is not None:
+        if significance_evidence.manifest_version != SIGNIFICANCE_MANIFEST_VERSION:
+            raise ValueError("unsupported significance evidence manifest version")
+        significance_bundle = build_significance_evidence_bundle(
+            hypothesis_family, significance_evidence.entries,
+            stage=significance_evidence.stage, dataset_version=snapshot.dataset_identity)
+        significance_evaluation = evaluate_hypothesis_family(
+            hypothesis_family, significance_bundle.raw_p_values(), stage=significance_bundle.stage,
+            dataset_version=snapshot.dataset_identity,
+            date_tested=significance_bundle.entries[0].observed_through)
+        candidate_hypothesis = _candidate_hypothesis(
+            hypothesis_family, spec.candidate.selection_rule, spec.candidate.horizon)
+        candidate_result = next(item for item in significance_evaluation.hypotheses
+                                if (item.feature, item.threshold, item.horizon, item.subgroup,
+                                    item.model_specification) == (
+                                        candidate_hypothesis.feature, candidate_hypothesis.threshold,
+                                        candidate_hypothesis.horizon, candidate_hypothesis.subgroup,
+                                        candidate_hypothesis.model_specification))
+        candidate_adjusted_p_value = candidate_result.adjusted_value
     cohort = extract_cohort(snapshot, spec.cohort)
     registry = resolve_feature_registry(spec)
     feature_rows = compute_features(snapshot, cohort, registry)
@@ -241,6 +278,9 @@ def run_experiment(spec: ExperimentSpec, snapshot: DatasetSnapshot, output_dir: 
     ci95_low = candidate.uncertainty.get("ci95_low")
     evidence = PromotionEvidence(
         target_stage="discovery",
+        discovery_adjusted_p_value=(candidate_adjusted_p_value
+                                    if significance_bundle is not None
+                                    and significance_bundle.stage == "discovery" else None),
         effect_size=difference,
         baseline_superior=difference is not None and difference > 0,
         uncertainty_supports_effect=ci95_low is not None and ci95_low > 0,
@@ -272,6 +312,9 @@ def run_experiment(spec: ExperimentSpec, snapshot: DatasetSnapshot, output_dir: 
         negative_controls=negative_controls, walk_forward=walk_forward_evidence)
     inputs = {"experiment_spec_id": spec_id, "dataset_identity": snapshot.dataset_identity,
               "code_version": spec.code_version, "manifest_version": MANIFEST_VERSION}
+    if significance_bundle is not None:
+        inputs["significance_evidence_id"] = hashlib.sha256(
+            _dump(significance_bundle)).hexdigest()[:24]
     if spec.research_question_id is not None:
         inputs["research_question_id"] = spec.research_question_id
         inputs["research_hypothesis_id"] = spec.research_hypothesis_id
@@ -304,6 +347,9 @@ def run_experiment(spec: ExperimentSpec, snapshot: DatasetSnapshot, output_dir: 
         "falsification.json": falsification,
         "validation_closure.json": validation_closure,
     }
+    if significance_bundle is not None:
+        artifacts["significance_evidence.json"] = significance_bundle
+        artifacts["significance_evaluation.json"] = significance_evaluation
     if walk_forward is not None:
         artifacts["walk_forward.json"] = walk_forward_evidence
     manifest = {"manifest_version": MANIFEST_VERSION, "run_id": run_id, "immutable": True,
