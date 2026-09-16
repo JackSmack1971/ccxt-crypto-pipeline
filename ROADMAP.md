@@ -1179,9 +1179,23 @@ Evidence:
 
 ## Slice 8.2 — Rich deterministic output
 
-**Status:** ACTIVE
+**Status:** DONE
 
 Add HTML and/or PDF only if explicitly selected, with reproducible rendering/versioning and accessibility checks.
+
+Evidence:
+
+- Approved handoffs now emit a deterministic, self-contained `article.html`
+  artifact with escaped claims, methodology/limitations, pending-review state,
+  and inline SVG charts that retain the existing chart accessibility metadata.
+- Package identity includes the HTML renderer version and output-format set;
+  `package-manifest.json` records both, while immutable artifact conflict and
+  secret/path scanning remain unchanged. PDF remains unselected and deferred.
+- `tests/test_phase4.py` covers HTML replay, missing-state preservation, and
+  escaping of title/claim text. The existing Phase 4 package fixture continues
+  to exercise offline approved-input generation.
+
+The next eligible slice is Slice 8.3 — Artifact catalog/navigation.
 
 ## Slice 8.3 — Artifact catalog/navigation
 

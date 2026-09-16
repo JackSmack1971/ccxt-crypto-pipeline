@@ -103,6 +103,8 @@ def test_phase4_replay_is_byte_identical_and_review_gated(tmp_path, monkeypatch)
     }
     assert json.loads((first / "review.json").read_text())['status'] == "pending"
     assert '<title>returns</title>' in (first / "charts" / "returns.svg").read_text()
+    assert '<meta name="review-status" content="pending">' in (first / "article.html").read_text()
+    assert '<svg ' in (first / "article.html").read_text()
 
 
 @pytest.mark.parametrize(("operation", "values", "expected"), [
@@ -309,6 +311,31 @@ def test_phase4_missing_chart_values_are_explicit_not_zero(tmp_path):
     svg = (package / "charts" / "returns.svg").read_text()
     assert "No supported observations" in svg
     assert ">0<" not in svg
+
+
+def test_phase8_html_preserves_accessible_missing_state_and_is_deterministic(tmp_path):
+    input_dir = approved_input(tmp_path, missing=True)
+    first = generate_package(input_dir, tmp_path / "out")
+    html = (first / "article.html").read_text()
+    assert '<html lang="en">' in html
+    assert "pending human review" in html
+    assert "No supported observations" in html
+    assert "<h2 id=\"methodology-heading\">Methodology and limitations</h2>" in html
+    second = generate_package(input_dir, tmp_path / "out")
+    assert (first / "article.html").read_bytes() == (second / "article.html").read_bytes()
+
+
+def test_phase8_html_escapes_claim_text(tmp_path):
+    input_dir = approved_input(tmp_path)
+    manifest = json.loads((input_dir / "manifest.json").read_text())
+    manifest["title"] = "<unsafe title>"
+    manifest["claims"][0]["text"] = "Observed <value> was 1.5%."
+    rekey_handoff(manifest)
+    (input_dir / "manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
+    package = generate_package(input_dir, tmp_path / "out")
+    html = (package / "article.html").read_text()
+    assert "&lt;unsafe title&gt;" in html and "&lt;value&gt;" in html
+    assert "<unsafe title>" not in html and "<value>" not in html
 
 
 def test_phase4_rejects_changed_staged_content(tmp_path):

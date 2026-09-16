@@ -9,6 +9,7 @@ from typing import Any
 
 from reporting.charts.spec import validate_chart
 from reporting.claims.model import validate_claims
+from reporting.render.html import HTML_RENDERER_VERSION, render_html
 from reporting.render.static import RENDERER_VERSION, render_svg, validate_accessibility
 from .handoff import validate_approved_handoff
 
@@ -154,11 +155,18 @@ def generate_package(input_dir: str | Path, output_dir: str | Path) -> Path:
                     f"- Limitations: {methodology.get('limitations', 'not supplied')}"]
     article = "\n".join([f"# {manifest.get('title', 'Research results')}", "", *[f"{c['text']}" for c in claims], "", *method_lines, ""])
     _security_scan({"article": article, "claims": claims, "methodology": methodology})
-    package_key = hashlib.sha256(_json({"manifest": manifest, "claims": claims, "charts": [{k:v for k,v in c.items() if k != "_svg"} for c in charts]})).hexdigest()[:24]
+    html_document = render_html(manifest.get("title", "Research results"), claims, method_lines, charts)
+    _security_scan(html_document)
+    presentation_identity = {"svg_renderer": RENDERER_VERSION, "html_renderer": HTML_RENDERER_VERSION,
+                             "formats": ["markdown", "html", "svg"]}
+    package_key = hashlib.sha256(_json({"manifest": manifest, "claims": claims,
+                                        "charts": [{k:v for k,v in c.items() if k != "_svg"} for c in charts],
+                                        "presentation": presentation_identity})).hexdigest()[:24]
     output_root = Path(output_dir).resolve()
     target = _safe_output_path(output_root, package_key)
     target.mkdir(parents=True, exist_ok=True)
-    files: dict[str, bytes] = {"article.md": article.encode(), "claim-ledger.json": _json(claims),
+    files: dict[str, bytes] = {"article.md": article.encode(), "article.html": html_document.encode(),
+                               "claim-ledger.json": _json(claims),
                                "chart-specs.json": _json([{k:v for k,v in c.items() if k != "_svg"} for c in charts]),
                                "methodology-limitations.md": ("\n".join(method_lines) + "\n").encode(),
                                "review.json": _json({"status": "pending", "approval_required": True, "package_id": package_key})}
@@ -175,8 +183,9 @@ def generate_package(input_dir: str | Path, output_dir: str | Path) -> Path:
                   p.relative_to(target).as_posix() not in checksums and p.name != "package-manifest.json"]
     if unexpected:
         raise FileExistsError(f"immutable package contains unexpected artifacts: {unexpected[0].name}")
-    package_manifest = {"package_version": "phase4-v1", "package_id": package_key, "immutable": True,
-                        "review_status": "pending", "inputs": inputs, "renderer_version": RENDERER_VERSION,
+    package_manifest = {"package_version": "phase8-v1", "package_id": package_key, "immutable": True,
+                        "review_status": "pending", "inputs": inputs, "renderer_version": presentation_identity,
+                        "output_formats": presentation_identity["formats"],
                         "chart_semantics": {c["id"]: {"transformations": c.get("transformations", ()),
                                                        "annotations": c.get("annotations", ())} for c in charts},
                         "staged_inputs": manifest.get("staged_tables", {}),
