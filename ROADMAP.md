@@ -2,8 +2,9 @@
 
 **Status:** Active execution authority for forward work  
 **Current phase:** Phase 8R empirical research readiness
-**Baseline:** `main` at `97c5dc5` (454 passed after Phase 8 closure)
-**Last reconciled:** 2026-09-16 (Phase 8 closed; Phase 8R is the next frontier; Phases 9–10 remain deferred)
+**Baseline:** `main` at `460a521` (479 passed after Slice 8R.6 campaign execution)
+**Last reconciled:** 2026-09-16 (Slice 8R.7 self-review complete and BLOCKED on an unavailable
+independent reviewer; Phase 8R remains open pending that review; Phases 9–10 remain deferred)
 
 This file is the durable forward roadmap for `ccxt-crypto-pipeline`. It exists so a new agent can determine the repository's actual execution frontier without reconstructing intent from chat history, stale phase prose, or commit messages.
 
@@ -1482,7 +1483,7 @@ The next eligible slice is **8R.7 — Independent methodological audit**.
 
 ## Slice 8R.7 — Independent methodological audit
 
-**Status:** PLANNED
+**Status:** BLOCKED
 
 Close Phase 8R with an independent audit before Phase 9 may become active. The
 audit must verify point-in-time and holdout integrity, deterministic identities,
@@ -1494,6 +1495,28 @@ This should build upon, rather than duplicate, the repository's existing
 `experiment-change-validation` workflow and any applicable
 `experiment_integrity_reviewer` procedure available in the governing review
 environment.
+
+The self-review portion is complete and recorded in
+[`docs/audits/phase-8r-methodological-audit.md`](docs/audits/phase-8r-methodological-audit.md):
+479 repository tests pass, every reviewed contract in the audit's table is `VERIFIED` or
+`UNAFFECTED`, and no demonstrated methodological-integrity violation was found. That document also
+records one material completeness finding: the governed runner (`analysis/experiments/runner.py`)
+never evaluates `target_stage="validation"` or `"holdout"`, so `execute_campaign` cannot yet produce
+a genuine `holdout_confirmed` promoted outcome — only negative/rejected campaign outcomes are
+currently reachable end-to-end through the governed path.
+
+`.agents/skills/experiment-change-validation`'s `REVIEWER_HANDOFF.md` requires an independent
+`experiment_integrity_reviewer` verdict and is explicit that self-review does not satisfy it: *"If
+the named reviewer is not configured or cannot be invoked, the parent workflow returns `BLOCKED`."*
+No such reviewer is configured in the environment this audit ran in (`ListAgents` returned no
+reachable agents). The audit therefore terminates `BLOCKED`, not `PASS`, per that skill's own
+completion table. This slice does **not** close Phase 8R.
+
+Next eligible action: either (a) run the named independent reviewer against
+`docs/audits/phase-8r-methodological-audit.md` when that role becomes available and record its
+verdict here, or (b) an explicit repository-authority decision to accept an alternative review path
+— and, orthogonally, a follow-up slice to wire validation/holdout evaluation into the governed
+runner so a positive campaign outcome is actually reachable (see the audit's §4 finding).
 
 ## Phase 8R exit criteria
 
