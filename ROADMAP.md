@@ -1500,10 +1500,15 @@ The self-review portion is complete and recorded in
 [`docs/audits/phase-8r-methodological-audit.md`](docs/audits/phase-8r-methodological-audit.md):
 479 repository tests pass, every reviewed contract in the audit's table is `VERIFIED` or
 `UNAFFECTED`, and no demonstrated methodological-integrity violation was found. That document also
-records one material completeness finding: the governed runner (`analysis/experiments/runner.py`)
-never evaluates `target_stage="validation"` or `"holdout"`, so `execute_campaign` cannot yet produce
-a genuine `holdout_confirmed` promoted outcome — only negative/rejected campaign outcomes are
-currently reachable end-to-end through the governed path.
+records one material completeness finding, **corrected** after this text's initial version (which
+understated it): the governed runner (`analysis/experiments/runner.py`) never sets
+`discovery_adjusted_p_value` on the `PromotionEvidence` it constructs, so every governed run fails
+closed at `insufficient_evidence`/`MISSING_DISCOVERY_CORRECTION` — this is documented, deliberate
+honesty (`tests/test_phase6.py`), not an accidental gap, and it means the governed path cannot
+currently reach even `discovery_promoted`, let alone `validation_confirmed`/`holdout_confirmed`.
+Separately, `target_stage` is hardcoded to `"discovery"` and never advanced to `"validation"`/
+`"holdout"` even though `evaluate_candidate_promotion` implements and unit-tests both. Only
+negative/rejected campaign outcomes are currently reachable end-to-end through the governed path.
 
 `.agents/skills/experiment-change-validation`'s `REVIEWER_HANDOFF.md` requires an independent
 `experiment_integrity_reviewer` verdict and is explicit that self-review does not satisfy it: *"If
@@ -1521,69 +1526,139 @@ the named independent reviewer against
 available and record its verdict here, or (b) an explicit, documented repository-authority decision
 to accept an alternative review path.
 
-**Blocker B — material audit finding.** The governed campaign execution path
-(`analysis/experiments/runner.py:run_experiment`, called from `campaign.py:execute_campaign`)
-cannot currently demonstrate a fully promoted positive candidate through validation and sealed
-holdout: `target_stage` is hardcoded to `"discovery"`, so `execute_campaign` can only ever reach
-`discovery_promoted`, never `validation_confirmed`/`holdout_confirmed`, even though
-`evaluate_candidate_promotion` implements and unit-tests both later stages
-(`analysis/alpha/evaluation.py`; see the audit's §4). Resolution: a follow-up remediation slice
-(see [§5 handoff below](#next-remediation-slice-8r7a-governed-validationholdout-promotion)) to wire
-validation/holdout evaluation into the governed runner so a positive campaign outcome is actually
-reachable, with the same fail-closed evidence discipline the discovery stage already has.
+**Blocker B — material audit finding (corrected).** Governed campaign execution
+(`analysis/experiments/runner.py:run_experiment`, called from `campaign.py:execute_campaign`) lacks
+an authorized, provenance-bound source of discovery/confirmation significance evidence.
+`run_experiment` never sets `PromotionEvidence.discovery_adjusted_p_value`, so
+`evaluate_candidate_promotion` fails closed at `insufficient_evidence`/`MISSING_DISCOVERY_CORRECTION`
+before a run can ever reach `discovery_promoted` — this is documented, deliberate fail-closed
+behavior (`tests/test_phase6.py`'s `test_runner_executes_the_declared_sequence_and_honestly_withholds_significance`),
+not a defect in itself. The already-implemented BH/Holm correction machinery
+(`analysis/experiments/hypotheses.py`'s `evaluate_hypothesis_family`) is never invoked from the
+governed path because nothing computes or supplies a raw p-value for it to correct.
+`target_stage` is also, separately, hardcoded to `"discovery"` and never advanced to
+`"validation"`/`"holdout"`, even though `evaluate_candidate_promotion` implements and unit-tests
+both later stages (`analysis/alpha/evaluation.py`). Consequently, an end-to-end governed positive
+promotion path is currently unreachable beginning at the discovery gate — see the audit's §4 for
+the full correction. Resolution: the dependency-ordered Slice 8R.7a → 8R.7b → 8R.7c chain below.
 
 Neither blocker resolves the other: an independent `PASS` verdict on the current methodology does
 not make Blocker B disappear, and fixing Blocker B does not by itself satisfy Blocker A. Phase 8R
 closes only when both are resolved.
 
-### Next remediation slice: 8R.7a — governed validation/holdout promotion
+### Next remediation slices: 8R.7a → 8R.7b → 8R.7c
 
-Not implemented in this slice (scope discipline). Implementation-ready description for a future
-slice:
+None of these are implemented in this documentation slice (scope discipline). They are
+dependency-ordered: 8R.7b cannot be usefully implemented before 8R.7a's contract is decided, and
+8R.7c's positive-outcome fixture depends on both. A prior version of this roadmap entry described a
+single "8R.7a — governed validation/holdout promotion" slice; that description assumed
+`discovery_promoted` was already reachable, which the corrected audit finding (§4 of
+`docs/audits/phase-8r-methodological-audit.md`) shows is false. It is replaced by the three slices
+below.
 
-- **Affected contracts:** candidate promotion state machine (Slice 4R.3's contract in
-  `analysis/alpha/evaluation.py`); governed experiment execution (`analysis/experiments/runner.py`,
-  `control.py`, `campaign.py`); deterministic run/campaign identity and immutable artifacts
-  (`runner.py`'s `manifest.json`, `campaign.py`'s `verify_campaign`).
-- **Relevant files:** `analysis/experiments/runner.py` (`run_experiment`, currently hardcodes
-  `PromotionEvidence(target_stage="discovery", ...)` before writing `promotion.json`);
-  `analysis/alpha/evaluation.py` (`evaluate_candidate_promotion`, `PromotionEvidence` — already
-  supports `target_stage="validation"`/`"holdout"` and the `validation_replicated`,
-  `validation_semantics_frozen`, `holdout_adjusted_p_value` fields, unused today);
-  `analysis/experiments/campaign.py` (`verify_campaign`'s promoted-outcome check, which already
-  requires `promotion.state == "holdout_confirmed"` and a passed `validation_closure.json`).
-- **Relevant tests:** `tests/test_phase6.py` (existing standalone `target_stage="holdout"` unit
-  coverage to extend, not replace); `tests/test_research_campaign.py` (currently only
-  `test_execute_campaign_rejects_unclosed_promoted_outcome` exercises the rejection path — needs a
-  new positive-path test); `tests/test_phase6_closure.py`, `tests/test_phase7.py` for any shared
-  fixtures.
-- **Expected promotion sequence:** discovery evaluation continues exactly as today
-  (`split.discovery`); the same frozen selection threshold (not recomputed) must then be applied to
-  `split.validation` to score a candidate for `validation_replicated`/`validation_semantics_frozen`
-  evidence, and separately to the sealed `split.holdout` partition for a
-  `holdout_adjusted_p_value`, following whatever corrected-testing contract
-  `PromotionPolicy.confirmation_correction` already declares. Holdout scoring MUST NOT influence
-  discovery/validation results (no re-selection from holdout data) — this repeats the existing
-  sealed-holdout discipline already enforced by `SplitResult.sealed` and `build_split`.
-- **Required negative cases:** validation-stage failure (replication or frozen-semantics evidence
-  absent/failed) must still yield `insufficient_evidence`/`rejected` and must not silently retry at
-  a lower bar; holdout correction failure must still yield `rejected`, not a partial promotion.
-- **Required positive case:** at least one deterministic fixture where discovery, validation, and
-  holdout all pass, producing a real `holdout_confirmed` promotion.json and a campaign that
-  `execute_campaign`/`verify_campaign` accepts as promoted end-to-end (extends
-  `test_research_campaign.py`).
-- **Deterministic/artifact implications:** `run_experiment`'s `manifest.json`/`promotion.json`
-  identity discipline (content-addressed, immutable-overwrite-rejecting) must be preserved; adding
-  validation/holdout evidence to the written artifacts is an additive, backward-compatible change
-  to the run contract, not a new artifact system.
-- **`experiment-change-validation` requirements:** this slice squarely affects "candidate scoring or
-  promotion" and "experiment/artifact identity" per that skill's own scope — it MUST be run through
-  `.agents/skills/experiment-change-validation` before merge, including temporal/holdout boundary
-  re-verification (§3 of that skill) given holdout data becomes newly consumed by the governed path.
-- **Independent reviewer:** yes — after implementation, `experiment_integrity_reviewer` should be
-  invoked per that skill's §6, both because this changes promotion/identity contracts and because it
-  directly remediates Blocker B recorded above; if still unavailable, report `BLOCKED` rather than
-  self-certifying the remediation, consistent with how this audit itself was handled.
+**Current statistical responsibility map** (established by this reconciliation, not assumed):
+
+- Raw p-value computation: **owned by nobody today.** No component computes or accepts a raw
+  significance p-value for a candidate. `ExperimentSpec` (`analysis/experiments/spec.py`) is purely
+  declarative and has no p-value/statistical-test-identity field.
+- Multiple-testing correction: owned by `analysis/experiments/hypotheses.py`'s
+  `evaluate_hypothesis_family`, which takes a caller-supplied raw-p-value map keyed to the exact
+  frozen family (`freeze_hypothesis_family`) and applies BH/FDR (`stage="discovery"`) or
+  Holm-Bonferroni (`stage="confirmation"`) — implemented and tested, but never called from the
+  governed path.
+- Discovery vs. confirmation use different correction policies: yes —
+  `HypothesisFamily.discovery_correction`/`discovery_q` vs. `confirmation_correction`/
+  `confirmation_alpha` (`spec.py`), matching `PromotionPolicy`'s equivalent fields
+  (`evaluation.py`). `evaluate_candidate_promotion`'s `"holdout"` stage consumes
+  `holdout_adjusted_p_value` against `confirmation_alpha` — i.e. holdout uses the *confirmation*
+  correction, not a third policy. `"validation"` uses no p-value at all, only the boolean
+  `validation_replicated`/`validation_semantics_frozen` fields — the repository does not currently
+  define a validation-stage correction; preserve that rather than inventing a symmetric one.
+- Frozen hypothesis-family membership: represented by `FrozenHypothesisFamily`/`HypothesisIdentity`
+  (`hypotheses.py`), keyed by `feature`/`threshold`/`horizon`/`subgroup`/`model_specification`, with
+  a content-derived `family_id`. `run_experiment` already freezes this per run
+  (`hypothesis_family.json`) but never evaluates it.
+- Stage-specific raw p-value provenance type: **does not exist.** No dataclass or artifact records
+  which statistical test produced a raw p-value, its parameters, or its seed.
+- p-values in immutable identities/artifacts today: none — `hypothesis_family.json` records only the
+  frozen grid and correction policy, not any evaluated p-value; `promotion.json` records whatever
+  `PromotionEvidence` was passed in (currently always `discovery_adjusted_p_value: null`).
+- Whether externally-supplied significance evidence needs a schema/manifest/version change: likely
+  yes at the `ExperimentSpec`/`run_experiment` boundary (a new declarative or input field) and
+  possibly `MANIFEST_VERSION` (`runner.py`, currently `"phase8r-run-v1"`), since the run's content
+  identity would gain a new semantically-relevant input; this is a design question for 8R.7a, not
+  answered here.
+- Whether computing empirical p-values inside the runner would violate the runner/orchestration
+  boundary: `AGENTS.md`'s `analysis/` scope requires point-in-time-safe, non-fabricating research
+  logic; `runner.py`'s own module docstring says it "never redefines cohort, feature, label, split,
+  or candidate-evaluation semantics." Introducing a concrete significance test inside `runner.py`
+  would be new research logic, not orchestration — this is a real design tension for 8R.7a's
+  candidate B below, not resolved here.
+
+**Slice 8R.7a — Significance-evidence contract.** Define the governed contract by which
+statistically meaningful raw significance evidence enters experiment execution, before any
+implementation. Must answer: source of raw p-values (caller-supplied vs. internally computed);
+stage association (discovery vs. confirmation/holdout; validation's status given no existing
+p-value field); hypothesis association (must key to `HypothesisIdentity`, matching
+`freeze_hypothesis_family`'s exact-membership contract); dataset/campaign association; statistical-
+test identity and parameters/seed where applicable; provenance representation; explicit
+missing/unavailable behavior (must stay `insufficient_evidence`, never a fabricated default);
+deterministic-identity implications (does the raw evidence or its test identity become part of run
+identity, and does `MANIFEST_VERSION` need to change); and compatibility with the existing frozen
+hypothesis-family machinery. Document at least these two candidates without selecting one absent a
+repository-authority decision:
+
+- **Candidate A — externally supplied raw p-values.** The caller supplies raw statistical evidence;
+  the governed experiment layer validates provenance/family membership and performs the existing
+  correction via `evaluate_hypothesis_family`. Matches the current separation of responsibilities
+  (correction is already externalized from raw-evidence computation) and does not make the runner
+  invent a new statistical test. Open questions: caller trust/provenance verification, binding test
+  identity and parameters into the run's content identity, preventing arbitrary post-hoc p-value
+  selection, and whether validation needs an analogous externally-supplied contract for
+  `validation_replicated`/`validation_semantics_frozen`.
+- **Candidate B — repository-computed empirical significance.** A declared statistical method
+  (potentially permutation-based, reusing `negative_controls.py`'s existing label-shuffle
+  machinery, e.g. an empirical p-value = fraction of permuted-label differences at or above the
+  observed difference) computes raw p-values inside an appropriate methodological component.
+  Stronger end-to-end reproducibility, but introduces a substantive statistical methodology into the
+  governed path for the first time; needs an explicit test definition and stated assumptions; must
+  not casually reuse `negative_controls.py`'s machinery if permutation-based falsification and
+  permutation-based inferential significance testing turn out to have different required semantics
+  (they answer different questions — "would this look different under the null" vs. "is this
+  difference statistically significant" — even though both shuffle labels); and, given its
+  research-integrity weight, likely requires its own `experiment_integrity_reviewer` pass before
+  being wired into the governed path.
+
+No statistical methodology is selected or implemented by this roadmap entry.
+
+**Slice 8R.7b — Frozen-family correction integration.** Once 8R.7a's contract is decided, wire
+authorized raw significance evidence into the existing `freeze_hypothesis_family`/
+`evaluate_hypothesis_family` machinery so the governed path obtains corrected discovery/confirmation
+values only through the repository's already-declared family/correction semantics — never by
+computing a corrected value ad hoc. Requires tests proving: exact family membership is enforced
+(missing/extra hypothesis evidence fails closed, per `hypotheses.py:121-127`'s existing contract);
+correction is deterministic; corrected values are provenance-bound (traceable to the raw evidence
+and test identity that produced them); and methodology-significant evidence participates in run/
+artifact identity where the 8R.7a design requires it.
+
+**Slice 8R.7c — Sequential governed promotion.** Only after significance evidence can legitimately
+satisfy discovery should `run_experiment`/`execute_campaign` advance the frozen candidate through
+`discovery` → `validation` → `holdout` using the existing, unmodified `evaluate_candidate_promotion`
+API and `target_stage` contract (`analysis/alpha/evaluation.py`). Requires: a successful positive
+fixture reaching `holdout_confirmed` end-to-end through `execute_campaign`/`verify_campaign`; a
+discovery-failure case; a validation-failure case; a holdout-failure case; frozen candidate identity
+preserved across stages (no re-selection); no validation/holdout reselection from later-partition
+data; sealed-holdout isolation preserved (`SplitResult.sealed`, `build_split`); and deterministic
+replay. If the repository's actual promotion contract does not require a validation-stage p-value
+(as observed above — `PromotionEvidence` has no such field), preserve that asymmetry rather than
+inventing one for symmetry with discovery/holdout.
+
+Each of 8R.7a/8R.7b/8R.7c that changes promotion, correction, or run/campaign identity semantics
+MUST be run through `.agents/skills/experiment-change-validation` before merge, including
+temporal/holdout boundary re-verification (that skill's §3) once holdout data becomes newly consumed
+by the governed path. After implementation, `experiment_integrity_reviewer` should be invoked per
+that skill's §6; if still unavailable, report `BLOCKED` rather than self-certifying the remediation,
+consistent with how the 8R.7 audit itself was handled.
 
 ## Phase 8R exit criteria
 

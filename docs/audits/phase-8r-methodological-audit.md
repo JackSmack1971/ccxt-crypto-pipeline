@@ -4,6 +4,9 @@
 environment). Phase 8R does not close on this document alone — see
 [Outcome](#outcome), [Candidate-state binding](#7-candidate-state-binding),
 [Independent-review handoff](#8-independent-review-handoff), and [ROADMAP.md](../../ROADMAP.md).
+§4's finding was corrected after this document's initial PR #66 merge — see the correction note at
+the top of that section; the correction does not change §3's `PASS`/`VERIFIED` rows, only how far
+the governed promotion path actually reaches.
 
 This document is the executable record required by Slice 8R.7. It follows the structure of
 `.agents/skills/experiment-change-validation`'s handoff contract, applied to the full Phase 8R
@@ -53,49 +56,96 @@ contract-by-contract review below is the substantive evidence.
 
 ## 4. Finding: the governed runner cannot produce a holdout-confirmed outcome
 
+> **Correction (recorded during 8R.7a scoping, see candidate state in §7):** the original text of
+> this section, as merged in PR #66, understated the finding. It read the governed path as reaching
+> `discovery_promoted` and stopping there. Closer inspection (prompted by attempting to spec the
+> validation/holdout remediation slice) shows the governed path does not reach `discovery_promoted`
+> either — it fails closed one gate earlier, at `insufficient_evidence`. The corrected finding
+> below replaces the original text; nothing else in this document's §3 table is affected.
+
 `evaluate_candidate_promotion` (`analysis/alpha/evaluation.py:191-259`) correctly implements the
-full `discovery → validation → holdout` sequence and is unit-tested standalone at each stage
-(`tests/test_phase6.py:170-186` exercises `target_stage="holdout"` directly).
+full `discovery → validation → holdout` sequence and is unit-tested standalone at each stage,
+including `target_stage="discovery"` with a supplied `discovery_adjusted_p_value`
+(`tests/test_phase6.py:152-157`, `test_promotion_discovery_q_boundary_approves_at_or_below`) and
+`target_stage="holdout"` (`tests/test_phase6.py:168-176`,
+`test_promotion_holdout_alpha_boundary_confirms_at_or_below`).
 
 However, the only place that calls it from the governed experiment path,
-`run_experiment` (`analysis/experiments/runner.py:242-250`), hardcodes:
+`run_experiment` (`analysis/experiments/runner.py:242-250`), constructs:
 
 ```python
 evidence = PromotionEvidence(
     target_stage="discovery",
-    ...
+    effect_size=difference,
+    baseline_superior=difference is not None and difference > 0,
+    uncertainty_supports_effect=ci95_low is not None and ci95_low > 0,
+    cost_sensitivity_passed=bool(candidate.cost_sensitivity)
+    and all(value is not None and value > 0 for value in candidate.cost_sensitivity.values()),
 )
 decision = evaluate_candidate_promotion(candidate, evidence, spec.promotion_policy)
 ```
 
-`target_stage` is never `"validation"` or `"holdout"` anywhere else in `analysis/experiments/`
-(`control.py`'s `execute_experiment` calls `run_experiment` directly; `campaign.py`'s
-`execute_campaign` calls `run_experiment` once per spec and never re-invokes evaluation at a later
-stage). Consequently:
+`discovery_adjusted_p_value` — a required, non-defaultable field of `PromotionEvidence` — is never
+set here, so it stays `None`. `evaluate_candidate_promotion` treats a `None`
+`discovery_adjusted_p_value` as `MISSING_DISCOVERY_CORRECTION` and returns
+`insufficient_evidence` **before ever reaching the discovery-promoted branch**, regardless of how
+strong the candidate's effect size, uncertainty, or cost sensitivity are. This is not accidental:
+`tests/test_phase6.py:465-474` (`test_runner_executes_the_declared_sequence_and_honestly_withholds_significance`)
+asserts exactly this outcome and documents why in its own comment: *"The runner never invents
+hypothesis-family significance testing (that is Slice 6.4's job), so promotion must stay honestly
+unresolved rather than a fabricated pass."*
 
-- A run produced through `execute_experiment` or `execute_campaign` can reach at most
-  `discovery_promoted`; it can never reach `validation_confirmed` or `holdout_confirmed`.
+**Implemented statistical correction machinery vs. missing governed source of significance
+evidence — these are two different things, and only the second is a gap:**
+
+- **Implemented:** `analysis/experiments/hypotheses.py` fully implements frozen-family
+  identification (`freeze_hypothesis_family`) and BH/Holm correction of a *supplied* raw-p-value
+  map (`evaluate_hypothesis_family`), with fail-closed behavior on missing/extra cells
+  (`hypotheses.py:121-127`). This machinery is correct and already covered by
+  `tests/test_phase6.py`.
+- **Missing:** nothing in the governed path (`runner.py`, `control.py`, `campaign.py`) ever calls
+  `evaluate_hypothesis_family`, and nothing computes or accepts a raw p-value to correct in the
+  first place. `run_experiment` freezes the hypothesis family (`hypotheses.py:196`,
+  `hypothesis_family.json`) purely for provenance/identity — it is never evaluated. There is
+  currently **no governed, provenance-bound source of raw significance evidence anywhere in the
+  codebase** that could legitimately populate `discovery_adjusted_p_value` or
+  `holdout_adjusted_p_value`. `ExperimentSpec` (`analysis/experiments/spec.py`) is purely
+  declarative and carries no p-value or statistical-test-identity field at all.
+
+Consequently:
+
+- A run produced through `execute_experiment` or `execute_campaign` today reaches only
+  `insufficient_evidence` (`MISSING_DISCOVERY_CORRECTION`); it cannot currently reach
+  `discovery_promoted`, `validation_confirmed`, or `holdout_confirmed`.
+- The previously-identified `target_stage` hardcoding in `run_experiment` (still true — see the
+  code excerpt above) is a *second*, downstream gap: even if discovery evidence were supplied,
+  `target_stage` would still need to advance to `"validation"`/`"holdout"` for a campaign to reach
+  `holdout_confirmed`. Fixing only the `target_stage` wiring, without also addressing the missing
+  significance-evidence source, would not make a positive outcome reachable.
 - `ResearchCampaign`'s promoted-hypothesis verification (`campaign.py:182-187`, requiring
   `promotion.state == "holdout_confirmed"` and a passed `validation_closure.json`) is exercised in
   the test suite only by `test_execute_campaign_rejects_unclosed_promoted_outcome`, which proves the
   *fail-closed rejection* works. There is no test — and, given the above, none is currently
   possible — that exercises a **successful** promoted campaign produced by the governed path.
 
-This is not a correctness bug: every fail-closed gate observed behaves safely, and no evidence was
-found of look-ahead, silent missingness coercion, or identity weakening. It is a **completeness
-gap** directly relevant to 8R.7's audit scope ("holdout integrity", "falsification completeness",
-"reproducibility", "positive... outcomes... represented honestly"): the repository has never
-demonstrated, because it cannot yet produce, an actual positive (promoted) research campaign
-through `execute_campaign`. Slice 8R.6's claim that promoted outcomes "fail closed unless holdout
-confirmation and validation closure both pass" is accurate but currently vacuous — no input can
-satisfy that condition through the governed runner as written. Phase 8R's exit criterion "positive
-and negative outcomes are represented honestly" is met only for negative outcomes today.
+This is not a correctness bug: every fail-closed gate observed behaves safely (including the
+`MISSING_DISCOVERY_CORRECTION` gate itself, which is honest rather than defective), and no evidence
+was found of look-ahead, silent missingness coercion, or identity weakening. It is a **completeness
+gap spanning two dependent layers** — (1) no governed source of significance evidence, and (2) no
+governed advancement past the discovery target stage — directly relevant to 8R.7's audit scope
+("holdout integrity", "falsification completeness", "reproducibility", "positive... outcomes...
+represented honestly"): the repository has never demonstrated, because it cannot yet produce, an
+actual positive (promoted) research campaign through `execute_campaign`. Slice 8R.6's claim that
+promoted outcomes "fail closed unless holdout confirmation and validation closure both pass" is
+accurate but currently vacuous — no input can satisfy that condition through the governed runner as
+written. Phase 8R's exit criterion "positive and negative outcomes are represented honestly" is met
+only for negative outcomes today.
 
-**Recommendation (not implemented in this slice, to preserve scope discipline):** a follow-up
-slice should extend the governed runner/control boundary to drive a candidate through validation
-and sealed-holdout evaluation (reusing `evaluate_candidate_promotion`'s existing `target_stage`
-contract) so that a legitimate `holdout_confirmed` outcome is actually reachable and testable
-end-to-end, before any positive campaign result is treated as evidence-backed.
+**Recommendation (not implemented in this slice, to preserve scope discipline):** see
+`ROADMAP.md`'s Slice 8R.7a/8R.7b/8R.7c dependency chain, added alongside this correction. The
+significance-evidence contract (8R.7a) must be decided — and, if it requires a new statistical
+methodology, independently reviewed — before frozen-family correction integration (8R.7b) or
+sequential governed promotion (8R.7c) can produce a legitimate `holdout_confirmed` outcome.
 
 ## 5. Independent reviewer
 
@@ -132,7 +182,8 @@ document.
 
 | Field | Value |
 | --- | --- |
-| Git commit SHA (reviewed) | `411cd27471625166bf0e9e90ecfe2c8928e7e322` (merge of PR #66, `docs/phase-8r-methodological-audit`) |
+| Git commit SHA (this correction) | prepared on `main` at `cd1a1a88e24263e01302ee10c348b3d896c3f0dc` (merge of PR #67, `docs/8r7-audit-candidate-binding`); this document's §4 correction and this table are part of the next commit on top of that SHA |
+| Git commit SHA (originally reviewed, PR #66) | `411cd27471625166bf0e9e90ecfe2c8928e7e322` — §3's contract table was built against this state and remains valid; only §4's characterization of how far the governed path reaches was corrected |
 | Branch | `main` |
 | Working tree | Clean at the reviewed SHA except one untracked, repository-unrelated file (`CLAUDE.md`, a Claude Code project-instructions file with no effect on `analysis/experiments`, `analysis/alpha`, or any pipeline contract) |
 | Local vs. `origin/main` | Identical (`git reset --hard origin/main` performed as part of this follow-up; no local-only commits remain) |
@@ -157,26 +208,35 @@ existing contract rather than through a new or parallel review procedure defined
 **Reviewer instructions:**
 
 1. **Bind to state, don't trust this document's claims.** Start from the candidate state in §7
-   (`411cd27...` on `main`, or an explicitly newer commit you have separately verified and rebound).
-   Re-run `git status`, `git log -1`, and the commands in §2 yourself before relying on any
-   pass/fail claim made here.
+   (`cd1a1a8...`/`411cd27...` on `main`, or an explicitly newer commit you have separately verified
+   and rebound). Re-run `git status`, `git log -1`, and the commands in §2 yourself before relying
+   on any pass/fail claim made here.
 2. **Independently verify the high-risk methodological contracts**, not just re-read this table:
    point-in-time/no-look-ahead in `analysis/alpha/evaluation.py` and `analysis/experiments/runner.py`;
    deterministic content-addressed identity and immutable-overwrite rejection in `campaign.py`,
    `research.py`, `catalog.py`; multiple-testing family-freezing in `hypotheses.py`; falsification
    completeness in `falsification.py`; negative-result handling in `campaign.py`. Treat every
    `VERIFIED`/`UNAFFECTED` row in §3 as a claim to falsify, not a fact to accept.
-3. **Inspect the material campaign-promotion finding in §4 directly.** Confirm for yourself, by
-   reading `runner.py`'s `run_experiment` and `campaign.py`'s `execute_campaign`/`verify_campaign`,
-   that (a) `target_stage` is hardcoded to `"discovery"` in the governed path, (b)
-   `evaluate_candidate_promotion` at `"validation"`/`"holdout"` is otherwise correctly implemented
-   and unit-tested, and (c) no positive (`holdout_confirmed`) campaign outcome can currently be
-   produced end-to-end through `execute_campaign`. Confirm this is a completeness gap (no reachable
-   unsafe state), not a silently-weakened gate.
-4. **If the candidate state has changed** (e.g. a remediation slice implementing validation/holdout
-   promotion has since landed), do not reuse this document's verdicts. Re-run the focused suites in
-   §2 against the new SHA, re-check whether §4's finding still holds, and re-bind a new §7 table
-   before forming a verdict.
+3. **Inspect the material campaign-promotion finding in §4 directly**, including its correction.
+   Confirm for yourself, by reading `runner.py`'s `run_experiment`, `hypotheses.py`'s
+   `evaluate_hypothesis_family`, and `campaign.py`'s `execute_campaign`/`verify_campaign`, that (a)
+   `run_experiment` never sets `discovery_adjusted_p_value`, so every governed run currently fails
+   closed at `insufficient_evidence`/`MISSING_DISCOVERY_CORRECTION`; (b) no governed, provenance-bound
+   source of raw significance evidence exists anywhere in the codebase to populate that field or
+   `holdout_adjusted_p_value`; (c) `target_stage` is separately hardcoded to `"discovery"` in the
+   governed path even though `evaluate_candidate_promotion` at `"validation"`/`"holdout"` is
+   otherwise correctly implemented and unit-tested; and (d) no positive (`holdout_confirmed`)
+   campaign outcome can currently be produced end-to-end through `execute_campaign` for either
+   reason. Confirm this is a completeness gap (no reachable unsafe state, and the current
+   `MISSING_DISCOVERY_CORRECTION` fail-closed behavior is itself correct), not a silently-weakened
+   gate. If a significance-evidence contract (`ROADMAP.md` Slice 8R.7a) has since been proposed or
+   implemented, independently evaluate whether its design introduces any look-ahead, p-hacking, or
+   post-hoc family redefinition risk — this is exactly the kind of methodology decision this
+   review exists to catch.
+4. **If the candidate state has changed** (e.g. the 8R.7a/8R.7b/8R.7c remediation slices have since
+   landed), do not reuse this document's verdicts. Re-run the focused suites in §2 against the new
+   SHA, re-check whether §4's corrected finding still holds, and re-bind a new §7 table before
+   forming a verdict.
 5. **Classify findings by severity** (e.g. blocking / material / advisory) rather than a single
    pass/fail label, so a partial remediation can be tracked precisely.
 6. **Return exactly one of `PASS`, `FAIL`, or `INCONCLUSIVE`**, consistent with
