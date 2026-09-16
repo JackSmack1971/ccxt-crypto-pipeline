@@ -12,7 +12,7 @@ from analysis.alpha.labels import HORIZONS as LABEL_HORIZONS
 from analysis.alpha.registry import feature_policy_versions
 from .uncertainty import UncertaintyPolicy
 
-SPEC_VERSION = "phase6-experiment-v1"
+SPEC_VERSION = "phase8r-experiment-v1"
 SUPPORTED_DISCOVERY_CORRECTIONS = ("benjamini-hochberg",)
 SUPPORTED_CONFIRMATION_CORRECTIONS = ("holm-bonferroni",)
 SUPPORTED_BASELINE_FAMILIES = ("no_trade", "market_chain", "age_liquidity", "momentum")
@@ -219,6 +219,39 @@ class NegativeControlPolicy:
         return asdict(self)
 
 
+FALSIFICATION_METHODS = (
+    "label_permutation", "known_null", "placebo_timestamp", "delayed_signal",
+    "shuffled_identity", "randomized_event_time", "source_substitution",
+    "alternative_universe", "leave_chain_out", "leave_provider_out",
+    "liquidity_stratification", "regime_stratification", "era_stratification",
+    "cost_robustness", "leave_one_out",
+)
+
+
+@dataclass(frozen=True)
+class FalsificationPolicy:
+    """Pre-result declaration of the falsification tests for one experiment."""
+
+    version: str = "phase8r-falsification-v1"
+    methods: tuple[str, ...] = ("label_permutation", "known_null", "leave_one_out")
+    inapplicable_methods: tuple[str, ...] = ()
+
+    def __post_init__(self):
+        if self.version != "phase8r-falsification-v1":
+            raise ValueError("invalid falsification policy")
+        if not self.methods or any(method not in FALSIFICATION_METHODS for method in self.methods):
+            raise ValueError("unsupported falsification method")
+        if len(set(self.methods)) != len(self.methods):
+            raise ValueError("falsification methods must be unique")
+        if any(method not in self.methods for method in self.inapplicable_methods):
+            raise ValueError("inapplicable falsification method was not declared")
+        if set(self.inapplicable_methods) & (set(self.methods) - set(self.inapplicable_methods)):
+            raise ValueError("falsification methods cannot be both applicable and inapplicable")
+
+    def as_dict(self) -> dict[str, Any]:
+        return asdict(self)
+
+
 @dataclass(frozen=True)
 class BaselinePolicy:
     """Declares which mandatory baseline families this experiment requires."""
@@ -262,6 +295,7 @@ class ExperimentSpec:
     promotion_policy: PromotionPolicy
     code_version: str
     config_identity: str
+    falsification: FalsificationPolicy
     uncertainty: UncertaintyPolicy = UncertaintyPolicy()
     stress: StressPolicy = StressPolicy()
     stability: StabilityPolicy = StabilityPolicy()
@@ -395,6 +429,9 @@ def experiment_spec_from_dict(value: dict[str, Any]) -> ExperimentSpec:
                                          "liquidity_bands_usd": tuple(value.get("stability", {}).get("liquidity_bands_usd", StabilityPolicy().liquidity_bands_usd))}),
             negative_controls=NegativeControlPolicy(**{**value.get("negative_controls", {}),
                                                         "methods": tuple(value.get("negative_controls", {}).get("methods", NegativeControlPolicy().methods))}),
+            falsification=FalsificationPolicy(**{**value.get("falsification", {}),
+                                                 "methods": tuple(value.get("falsification", {}).get("methods", FalsificationPolicy().methods)),
+                                                 "inapplicable_methods": tuple(value.get("falsification", {}).get("inapplicable_methods", ())) }),
         )
     except (KeyError, TypeError, AttributeError) as exc:
         raise ValueError("invalid experiment spec structure") from exc

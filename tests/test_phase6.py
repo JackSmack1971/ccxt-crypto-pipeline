@@ -16,6 +16,8 @@ from analysis.alpha import (CandidateResult, CohortConfig, FeatureDefinition, Hy
 from analysis.datasets import Asset, Bar, DatasetPolicy, DatasetSnapshot
 from analysis.experiments import (BaselinePolicy, CandidateDefinition, CostPolicy,
                                   ExperimentSpec, HypothesisFamily, SPEC_VERSION, SplitPolicy,
+                                  MANIFEST_VERSION,
+                                  FalsificationPolicy,
                                   evaluate_hypothesis_family, freeze_hypothesis_family,
                                   experiment_spec_dict, experiment_spec_id, resolve_feature_registry,
                                   run_experiment, catalog_runs, compare_runs, load_run,
@@ -46,6 +48,7 @@ def build_spec(**overrides) -> ExperimentSpec:
         "promotion_policy": PromotionPolicy(),
         "code_version": "abc123",
         "config_identity": "config-v1",
+        "falsification": FalsificationPolicy(),
     }
     fields.update(overrides)
     return ExperimentSpec(**fields)
@@ -447,6 +450,7 @@ def runner_spec(**overrides) -> ExperimentSpec:
         "promotion_policy": PromotionPolicy(minimum_sample_size=1, minimum_independent_launches=1, minimum_coverage=0.2),
         "code_version": "test-code-v1",
         "config_identity": "test-config-v1",
+        "falsification": FalsificationPolicy(),
     }
     fields.update(overrides)
     return ExperimentSpec(**fields)
@@ -474,7 +478,7 @@ def test_runner_executes_the_declared_sequence_and_honestly_withholds_significan
     assert promotion["inputs"]["discovery_adjusted_p_value"] is None
 
     manifest = json.loads((run / "manifest.json").read_text())
-    assert manifest["manifest_version"] == "phase7-run-v4"
+    assert manifest["manifest_version"] == MANIFEST_VERSION
     assert manifest["inputs"]["dataset_identity"] == "runner-fixture"
     assert set(manifest["artifacts"]) == {
         "spec.json", "cohort.json", "features.json", "labels.json",
@@ -483,9 +487,10 @@ def test_runner_executes_the_declared_sequence_and_honestly_withholds_significan
         "hypothesis_family.json",
         "uncertainty.json",
         "stress_matrix.json",
-        "stability.json",
-        "negative_controls.json",
-        "validation_closure.json",
+            "stability.json",
+            "negative_controls.json",
+            "falsification.json",
+            "validation_closure.json",
     }
 
     definitions = json.loads((run / "definitions.json").read_text())

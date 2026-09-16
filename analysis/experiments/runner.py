@@ -37,8 +37,9 @@ from .stress import _build_stress_matrix
 from .stability import build_stability_evidence
 from .negative_controls import build_negative_control_evidence
 from .closure import build_validation_closure
+from .falsification import build_falsification_evidence
 
-MANIFEST_VERSION = "phase7-run-v4"
+MANIFEST_VERSION = "phase8r-run-v1"
 
 
 def resolve_feature_registry(spec: ExperimentSpec) -> FeatureRegistry:
@@ -259,6 +260,8 @@ def run_experiment(spec: ExperimentSpec, snapshot: DatasetSnapshot, output_dir: 
         turnover=spec.costs.turnover, costs=spec.costs.scenarios,
         min_coverage=spec.candidate.min_coverage, policy=spec.negative_controls,
         score_candidate=score_candidate, baseline_families=baseline_families)
+    falsification = build_falsification_evidence(
+        policy=spec.falsification, negative_controls=negative_controls, stability=stability)
 
     spec_id = experiment_spec_id(spec)
     walk_forward_evidence = (_walk_forward_results(walk_forward, feature_rows, candidate_labels, spec)
@@ -298,6 +301,7 @@ def run_experiment(spec: ExperimentSpec, snapshot: DatasetSnapshot, output_dir: 
         "stress_matrix.json": stress_matrix,
         "stability.json": stability,
         "negative_controls.json": negative_controls,
+        "falsification.json": falsification,
         "validation_closure.json": validation_closure,
     }
     if walk_forward is not None:

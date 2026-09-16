@@ -10,6 +10,7 @@ from analysis.alpha import CohortConfig, LabelDefinition, PromotionPolicy
 from analysis.datasets import Asset, Bar, DatasetPolicy, DatasetSnapshot
 from analysis.experiments import (BaselinePolicy, CandidateDefinition, CostPolicy,
                                   ExperimentSpec, HypothesisFamily, SPEC_VERSION, SplitPolicy,
+                                  FalsificationPolicy,
                                   compare_runs, inspect_experiment_run, load_experiment_spec,
                                   run_experiment)
 
@@ -40,6 +41,7 @@ def _spec(**overrides):
                                              minimum_coverage=0.2),
         "code_version": "phase6-closure-code-v1",
         "config_identity": "phase6-closure-config-v1",
+        "falsification": FalsificationPolicy(),
     }
     values.update(overrides)
     return ExperimentSpec(**values)
