@@ -385,6 +385,17 @@ def test_validation_closure_is_deterministic_and_passes_only_complete_suite():
     }
 
 
+def test_validation_closure_keeps_missing_negative_control_evidence_explicit():
+    values = _closure_inputs()
+    values["negative_controls"] = {"version": "n1", "status": "available", "results": [
+        {"candidate": {"baseline_comparison": {"difference": None}}}]}
+    result = build_validation_closure(**values)
+    assert result["status"] == "failed"
+    assert result["reason"] == "ROBUSTNESS_COMPONENT_FAILED"
+    control = next(item for item in result["components"] if item["name"] == "negative_controls")
+    assert control["reason"] == "NEGATIVE_CONTROL_INSUFFICIENT_EVIDENCE"
+
+
 def test_validation_closure_includes_configured_walk_forward_evidence():
     values = _closure_inputs()
     values["walk_forward"] = {"version": "wf1", "folds": [1], "results": [1]}

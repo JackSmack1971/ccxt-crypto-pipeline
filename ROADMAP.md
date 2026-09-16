@@ -1145,8 +1145,8 @@ Evidence:
   catalog retains read-only compatibility for prior Phase 6/7 manifests.
 - `tests/test_phase7.py` covers premature-promotion rejection, failed and
   unavailable components, deterministic replay, and walk-forward inclusion;
-  Phase 6/7 focused verification passed with 143 tests. The locked full suite
-  passed with 437 tests; byte-compilation, whitespace validation, and offline
+  Phase 3/6/7 focused verification passed with 188 tests. The locked full suite
+  passed with 439 tests; byte-compilation, whitespace validation, and offline
   fixture/network-denial coverage passed. Live-provider behavior remains
   outside scope and unverified.
 

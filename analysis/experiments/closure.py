@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 from typing import Any
 
 
@@ -66,12 +67,18 @@ def build_validation_closure(*, spec_id: str, selected_token_ids: frozenset[str]
                                  reason=None if stability_passed else "STABILITY_DOMINANCE_OR_UNAVAILABLE"))
 
     controls = negative_controls.get("results", [])
-    control_failures = [row for row in controls
-                        if row.get("candidate", {}).get("baseline_comparison", {}).get("difference") is not None
-                        and row["candidate"]["baseline_comparison"]["difference"] > 0]
-    controls_passed = negative_controls.get("status") == "available" and bool(controls) and not control_failures
+    differences = [row.get("candidate", {}).get("baseline_comparison", {}).get("difference")
+                   for row in controls]
+    insufficient_controls = any(not isinstance(value, (int, float)) or not math.isfinite(value)
+                                for value in differences)
+    control_failures = [value for value in differences
+                        if isinstance(value, (int, float)) and math.isfinite(value) and value > 0]
+    controls_passed = (negative_controls.get("status") == "available" and bool(controls)
+                       and not insufficient_controls and not control_failures)
     components.append(_component("negative_controls", negative_controls, passed=controls_passed,
-                                 reason=None if controls_passed else "NEGATIVE_CONTROL_REJECTED"))
+                                 reason=None if controls_passed else
+                                 "NEGATIVE_CONTROL_INSUFFICIENT_EVIDENCE" if insufficient_controls else
+                                 "NEGATIVE_CONTROL_REJECTED"))
 
     failed = [item["name"] for item in components if item["status"] == "failed"]
     unavailable = [item["name"] for item in components if item["status"] == "unavailable"]
