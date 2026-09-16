@@ -3,7 +3,7 @@
 **Status:** Active execution authority for forward work  
 **Current phase:** Phase 7 robust validation and research scaling
 **Baseline:** `main` at `23dbd389af88cade4584cb5fdc10b60dc17fcc3b`
-**Last reconciled:** 2026-09-15 (Slice 7.3 closed; Slice 7.4 active)
+**Last reconciled:** 2026-09-15 (Slice 7.4 closed; Slice 7.5 active)
 
 This file is the durable forward roadmap for `ccxt-crypto-pipeline`. It exists so a new agent can determine the repository's actual execution frontier without reconstructing intent from chat history, stale phase prose, or commit messages.
 
@@ -1190,7 +1190,7 @@ For a fresh agent, the intended pickup sequence is:
 
 `AGENTS.md` → `ROADMAP.md` → active `docs/plans/phase-*.md` → relevant code/tests → Git history/status.
 
-The current frontier is **Slice 7.4 — Cost/liquidity stress matrix**.
+The current frontier is **Slice 7.5 — Cohort/chain stability analysis**.
 
 Phase 5 is DONE. Slice 5.7 closed the phase with
 `docs/plans/phase-5-data-plane-closure-matrix.md` and
