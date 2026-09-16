@@ -8,10 +8,13 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any, Mapping
 
+from analysis.datasets.snapshot import DatasetSnapshot
 from analysis.datasets.profile import verify_dataset_profile
 
 from .catalog import load_run
 from .research import ResearchRegistry
+from .runner import run_experiment
+from .spec import ExperimentSpec, experiment_spec_id
 
 
 CAMPAIGN_VERSION = "phase8r-research-campaign-v1"
@@ -144,14 +147,28 @@ def verify_campaign(campaign: ResearchCampaign, *, registry: ResearchRegistry,
     if registry.identity() != campaign.registry_identity:
         raise ValueError("research campaign registry identity mismatch")
     question = registry.question(campaign.research_question_id)
-    if not set(campaign.hypothesis_ids) <= {item.hypothesis_id for item in registry.hypotheses}:
+    hypotheses = {item.hypothesis_id: item for item in registry.hypotheses}
+    if not set(campaign.hypothesis_ids) <= set(hypotheses):
         raise ValueError("research campaign references an unknown hypothesis")
+    if any(hypotheses[item].question_id != campaign.research_question_id
+           for item in campaign.hypothesis_ids):
+        raise ValueError("research campaign hypothesis question mismatch")
     if campaign.dataset_identity not in question.applicable_datasets:
         raise ValueError("research campaign dataset is not declared by the question")
     if profile.get("profile_identity") != campaign.dataset_profile_identity:
         raise ValueError("research campaign dataset profile identity mismatch")
     verify_dataset_profile(profile, campaign.dataset_identity)
     records = [load_run(Path(run_root) / run_id) for run_id in campaign.run_ids]
+    if campaign.artifact_identities.get("registry") not in {None, registry.identity()}:
+        raise ValueError("research campaign registry artifact identity mismatch")
+    if campaign.artifact_identities.get("dataset_profile") not in {None, campaign.dataset_profile_identity}:
+        raise ValueError("research campaign profile artifact identity mismatch")
+    for record in records:
+        declared = campaign.artifact_identities.get(f"run:{record.run_id}:manifest")
+        if declared is not None:
+            expected = hashlib.sha256((record.path / "manifest.json").read_bytes()).hexdigest()
+            if declared != expected:
+                raise ValueError("research campaign run artifact identity mismatch")
     if {record.run_id for record in records} != set(campaign.run_ids):
         raise ValueError("research campaign run identity mismatch")
     if any(record.dataset_identity != campaign.dataset_identity for record in records):
@@ -162,8 +179,60 @@ def verify_campaign(campaign: ResearchCampaign, *, registry: ResearchRegistry,
         raise ValueError("research campaign run question mismatch")
     if any(record.research_hypothesis_id not in campaign.hypothesis_ids for record in records):
         raise ValueError("research campaign run hypothesis is not declared")
+    for hypothesis_id in campaign.promoted_hypothesis_ids:
+        record = next(record for record in records if record.research_hypothesis_id == hypothesis_id)
+        promotion = json.loads((record.path / "promotion.json").read_text(encoding="utf-8"))
+        closure = json.loads((record.path / "validation_closure.json").read_text(encoding="utf-8"))
+        if promotion.get("state") != "holdout_confirmed" or closure.get("passed") is not True:
+            raise ValueError("research campaign promoted outcome lacks complete holdout closure")
     return campaign
 
 
+def execute_campaign(registry: ResearchRegistry, specs: tuple[ExperimentSpec, ...],
+                     snapshot: DatasetSnapshot, profile: Mapping[str, Any], *,
+                     run_root: str | Path, campaign_root: str | Path,
+                     rejected_hypothesis_ids: tuple[str, ...] = (),
+                     promoted_hypothesis_ids: tuple[str, ...] = (),
+                     conclusion: str, limitations: tuple[str, ...],
+                     provenance: Mapping[str, Any] | None = None) -> Path:
+    """Run one complete, locally replayable campaign through governed boundaries."""
+    if not specs:
+        raise ValueError("research campaign requires at least one experiment spec")
+    verify_dataset_profile(profile, snapshot.dataset_identity)
+    bound_specs = []
+    for spec in specs:
+        if spec.research_hypothesis_id is None:
+            raise ValueError("campaign experiment specs must bind a research hypothesis")
+        bound_specs.append(registry.bind_experiment(spec, spec.research_hypothesis_id))
+    question_ids = {registry.hypothesis(spec.research_hypothesis_id).question_id
+                    for spec in bound_specs}
+    if len(question_ids) != 1:
+        raise ValueError("campaign specs must belong to one research question")
+    run_paths = tuple(run_experiment(spec, snapshot, run_root) for spec in bound_specs)
+    records = tuple(load_run(path) for path in run_paths)
+    hypothesis_ids = tuple(record.research_hypothesis_id for record in records)
+    if None in hypothesis_ids or len(set(hypothesis_ids)) != len(hypothesis_ids):
+        raise ValueError("campaign specs must test each hypothesis at most once")
+    spec_ids = tuple(experiment_spec_id(spec) for spec in bound_specs)
+    artifact_identities = {
+        "registry": registry.identity(),
+        "dataset_profile": profile["profile_identity"],
+        **{f"run:{record.run_id}:manifest": hashlib.sha256(
+            (record.path / "manifest.json").read_bytes()).hexdigest() for record in records},
+    }
+    campaign = ResearchCampaign(
+        research_question_id=next(iter(question_ids)), registry_identity=registry.identity(),
+        dataset_identity=snapshot.dataset_identity,
+        dataset_profile_identity=profile["profile_identity"], hypothesis_ids=tuple(hypothesis_ids),
+        experiment_spec_ids=spec_ids, run_ids=tuple(record.run_id for record in records),
+        rejected_hypothesis_ids=rejected_hypothesis_ids,
+        promoted_hypothesis_ids=promoted_hypothesis_ids, limitations=limitations,
+        conclusion=conclusion, artifact_identities=artifact_identities,
+        provenance=provenance or {"execution": "local-governed-campaign"})
+    verify_campaign(campaign, registry=registry, profile=profile, run_root=run_root)
+    return write_campaign(campaign, campaign_root)
+
+
 __all__ = ["CAMPAIGN_VERSION", "ResearchCampaign", "campaign_dict", "campaign_identity",
-           "research_campaign_from_dict", "write_campaign", "load_campaign", "verify_campaign"]
+           "research_campaign_from_dict", "write_campaign", "load_campaign", "verify_campaign",
+           "execute_campaign"]

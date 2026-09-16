@@ -204,6 +204,12 @@ and limitations into one immutable provenance object. Campaign validation is
 local and replayable; rejected hypotheses remain part of the record, and a
 campaign is research evidence only, not an execution authorization.
 
+Use `execute_campaign(...)` to run bound experiment specs against a persisted
+`DatasetSnapshot`, verify the resulting run artifacts and dataset profile, and
+write one immutable campaign. A promoted outcome is accepted only when its run
+has holdout confirmation and a passing validation closure; rejected outcomes
+remain valid research results.
+
 Experiment runs also emit deterministic `uncertainty.json` evidence using the
 configured moving-block bootstrap policy. The policy records its method,
 dependence structure, resample count, block size, and seed; unsupported

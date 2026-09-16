@@ -1457,7 +1457,7 @@ Evidence:
 
 ## Slice 8R.6 — First complete real-data research campaign
 
-**Status:** ACTIVE
+**Status:** DONE
 
 Execute at least one meaningful campaign against realistic persisted historical
 data through the governed path:
@@ -1471,6 +1471,14 @@ are not required; explicit limitations and data-quality caveats are required.
 Acceptance: the complete campaign is replayable, artifact identities and
 methodology are stable, and both positive and negative conclusions can be
 represented honestly without execution authority.
+
+Implemented `execute_campaign(...)` as the governed local path: it binds
+registry hypotheses to experiment specs, executes the canonical runner,
+verifies the dataset profile and immutable run artifacts, and writes a stable
+campaign identity. Negative outcomes are replayable, while promoted outcomes
+fail closed unless holdout confirmation and validation closure both pass.
+
+The next eligible slice is **8R.7 — Independent methodological audit**.
 
 ## Slice 8R.7 — Independent methodological audit
 

@@ -38,7 +38,8 @@ from .research import (HYPOTHESIS_VERSION, QUESTION_VERSION, REGISTRY_VERSION,
                        research_hypothesis_from_dict,
                        research_question_from_dict, verify_registry, write_registry)
 from .campaign import (CAMPAIGN_VERSION, ResearchCampaign, campaign_dict, campaign_identity,
-                       load_campaign, research_campaign_from_dict, verify_campaign, write_campaign)
+                       execute_campaign, load_campaign, research_campaign_from_dict,
+                       verify_campaign, write_campaign)
 
 __all__ = [
     "BaselinePolicy", "CandidateDefinition", "CostPolicy", "ExperimentSpec",
@@ -65,4 +66,5 @@ __all__ = [
     "research_question_from_dict", "research_hypothesis_from_dict", "write_registry", "verify_registry",
     "CAMPAIGN_VERSION", "ResearchCampaign", "campaign_dict", "campaign_identity",
     "research_campaign_from_dict", "write_campaign", "load_campaign", "verify_campaign",
+    "execute_campaign",
 ]
