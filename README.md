@@ -77,7 +77,7 @@ The status command prints JSON derived from the `runs` table. A live cycle can s
 - Contract-address-based DEX↔CEX lineage reconciliation, data-quality reporting, and structured scheduler health.
 - A local governed-experiment interface that validates declarative specs, runs
   them against read-only persisted snapshots, verifies immutable results, and
-  records separate human approval attestations.
+  records separate human approval attestations and immutable review history.
 - Optional, explicitly configured purged walk-forward folds with expanding
   training windows, non-overlapping validation windows, and a sealed holdout.
 
@@ -127,6 +127,8 @@ docs/                   Architecture and local operations documentation
 | `python -m analysis.experiments run SPEC.json --db DB --output RUNS [--timeframe 1h] [--source SOURCE]` | Execute the canonical experiment runner against a read-only local snapshot |
 | `python -m analysis.experiments inspect RUN_DIR` | Hash-verify and inspect one immutable experiment run |
 | `python -m analysis.experiments approve RUN_DIR --approval-dir APPROVALS --reviewer NAME --reviewed-at ISO_TIME --rationale TEXT` | Record a separate, immutable human approval attestation |
+| `python -m reporting.package record TARGET --target-kind research_run\|package --history-dir HISTORY --decision approved\|rejected\|superseded\|note --reviewer NAME --reviewed-at ISO_TIME` | Record an immutable review decision bound to an exact research run or report package |
+| `python -m reporting.package show TARGET_ID --history-dir HISTORY` | Verify and list review history deterministically |
 | `python -m scheduler --once` | Run all stages once and exit |
 | `python -m scheduler.status` | Print JSON health status |
 
@@ -181,6 +183,13 @@ uncertainty, stress, stability, and negative-control evidence all pass after
 holdout confirmation; configured walk-forward evidence is included as well. A
 passing closure is replayable research evidence, not a profitability claim or
 authorization to trade.
+
+Review history is stored separately from immutable research runs and report
+packages. Each record is content-addressed and linked to the target's exact
+manifest hash; supported decisions are `approved`, `rejected`, `superseded`,
+and reviewer `note`. Supersession must reference an existing review for the
+same target. Review history does not publish packages or change research
+promotion state.
 
 ## Configuration
 
@@ -247,10 +256,10 @@ Read [`CONTRIBUTING.md`](CONTRIBUTING.md) before opening an issue or pull reques
 
 The canonical forward execution roadmap is [`ROADMAP.md`](ROADMAP.md). It records the current phase frontier, dependency-ordered implementation slices, per-slice acceptance gates, phase exit criteria, deferred boundaries, and the maintenance contract agents must follow as work lands.
 
-The current frontier is Phase 7 robust validation. Phase 6 governed experiment
-control is complete, and Phase 7 now includes deterministic purged walk-forward,
-uncertainty, stress, stability, and negative-control evidence while preserving a
-sealed holdout.
+The current frontier is Phase 8 review/approval history. Phase 7 robust
+validation is complete, including deterministic purged walk-forward,
+uncertainty, stress, stability, negative-control, and closure evidence while
+preserving a sealed holdout.
 
 ## License
 
