@@ -198,6 +198,11 @@ inline validated SVG charts, chart specifications, the claim ledger, and
 methodology/limitations. The HTML renderer is deterministic and offline; its
 renderer and output-format identities are recorded in `package-manifest.json`.
 
+Optional assisted drafts can be generated from a package's validated claim ledger
+with `reporting.package.generate_assisted_draft`. The caller supplies the model
+function and model identifier; the isolated suggestion rejects numbers and
+comparisons, never changes the deterministic article, and remains pending review.
+
 ## Configuration
 
 Safe examples are provided in [`.env.example`](.env.example). YAML settings live in `config/cex.yaml`, `config/chains.yaml`, `config/evm.yaml`, and `config/solana.yaml`. The complete variable and credential setup is in [`docs/RUNBOOK.md`](docs/RUNBOOK.md).
