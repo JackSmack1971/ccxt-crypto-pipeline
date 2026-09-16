@@ -2,8 +2,8 @@
 
 **Status:** Active execution authority for forward work  
 **Current phase:** Phase 8 research product and publication operations
-**Baseline:** `main` at `a01eaed` (453 passed after Slice 8.5; 449 passed before it)
-**Last reconciled:** 2026-09-16 (Slice 8.5 closed; Slice 8.6 active)
+**Baseline:** `main` at `97c5dc5` (454 passed after Phase 8 closure)
+**Last reconciled:** 2026-09-16 (Phase 8 closed; Phase 9 remains deferred)
 
 This file is the durable forward roadmap for `ccxt-crypto-pipeline`. It exists so a new agent can determine the repository's actual execution frontier without reconstructing intent from chat history, stale phase prose, or commit messages.
 
