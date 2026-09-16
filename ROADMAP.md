@@ -1155,7 +1155,7 @@ Evidence:
 
 # Phase 8 — Research Product & Publication Operations
 
-**Status:** ACTIVE
+**Status:** DONE
 **Depends on:** Phase 7 for claims of validated research; descriptive packages may continue under Phase 4 rules.  
 **Goal:** Turn approved evidence into maintainable research products without weakening provenance or human review.
 
@@ -1247,9 +1247,22 @@ Evidence:
 
 ## Slice 8.6 — Publication closure matrix
 
-**Status:** ACTIVE
+**Status:** DONE
 
 Prove source-to-claim traceability, review history, renderer replay, accessibility, secret hygiene, and supersession behavior.
+
+Evidence:
+
+- `docs/plans/phase-8-publication-closure-matrix.md` records the executable
+  closure criteria and their evidence boundaries.
+- `tests/test_phase8_closure.py::test_phase8_publication_closure` exercises the
+  canonical approved handoff through deterministic package replay, claim and
+  derivation traceability, SVG accessibility, immutable review supersession,
+  content-addressed export replay, independent checksums, secret/path hygiene,
+  and network denial.
+- Focused Phase 4/8 verification, the reporting guard, byte compilation,
+  whitespace checks, and the locked full repository suite passed. External
+  publication and live-provider behavior remain outside scope and unverified.
 
 ---
 
@@ -1315,7 +1328,9 @@ For a fresh agent, the intended pickup sequence is:
 
 `AGENTS.md` → `ROADMAP.md` → active `docs/plans/phase-*.md` → relevant code/tests → Git history/status.
 
-The current frontier is **Slice 8.6 — Publication closure matrix**.
+The current frontier is **Phase 8 complete**. Phase 9 remains deferred and is
+not part of the current product commitment; no optional execution slice is
+activated by Phase 8 closure.
 
 Phase 5 is DONE. Slice 5.7 closed the phase with
 `docs/plans/phase-5-data-plane-closure-matrix.md` and
