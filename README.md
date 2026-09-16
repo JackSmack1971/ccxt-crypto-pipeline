@@ -230,6 +230,14 @@ practical effect are separate gates: a statistically supported result below
 the effect floor is rejected, while missing effect evidence remains
 unavailable.
 
+When caller-supplied significance evidence is available, pass a validated
+`SignificanceEvidenceBundle` to `run_experiment(...)`. The runner rechecks its
+frozen-family, experiment-spec, dataset, stage, and temporal bindings, applies
+the declared family correction, persists the raw evidence and corrected
+evaluation, and includes the evidence in immutable run identity. Omitted or
+explicitly unavailable p-values remain fail-closed and cannot promote a
+candidate.
+
 Runs also emit `stress_matrix.json`, a deterministic Cartesian matrix of the
 spec's approved fee, slippage, minimum-liquidity, and missingness scenarios.
 The matrix reuses the discovery-selected token ids, keeps incomplete evidence

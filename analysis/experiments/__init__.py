@@ -12,7 +12,10 @@ from .runner import MANIFEST_VERSION, resolve_feature_registry, run_experiment
 from .catalog import RunComparison, RunRecord, catalog_runs, compare_runs, load_run
 from .hypotheses import (FAMILY_MANIFEST_VERSION, FamilyEvaluation, FrozenHypothesisFamily,
                          HypothesisIdentity, evaluate_hypothesis_family,
-                         freeze_hypothesis_family)
+                         freeze_hypothesis_family, verify_frozen_family_identity)
+from .significance import (SIGNIFICANCE_MANIFEST_VERSION, SIGNIFICANCE_STAGES,
+                           SignificanceEvidence, SignificanceEvidenceBundle,
+                           build_significance_evidence, build_significance_evidence_bundle)
 from .spec import (BaselinePolicy, CandidateDefinition, CostPolicy, ExperimentSpec,
                    HypothesisFamily, SPEC_VERSION, SplitPolicy,
                    StressPolicy,
@@ -49,6 +52,9 @@ __all__ = [
     "MANIFEST_VERSION", "resolve_feature_registry", "run_experiment",
     "FAMILY_MANIFEST_VERSION", "FamilyEvaluation", "FrozenHypothesisFamily",
     "HypothesisIdentity", "evaluate_hypothesis_family", "freeze_hypothesis_family",
+    "verify_frozen_family_identity",
+    "SIGNIFICANCE_MANIFEST_VERSION", "SIGNIFICANCE_STAGES", "SignificanceEvidence",
+    "SignificanceEvidenceBundle", "build_significance_evidence", "build_significance_evidence_bundle",
     "RunComparison", "RunRecord", "catalog_runs", "compare_runs", "load_run",
     "APPROVAL_VERSION", "approve_experiment_run", "execute_experiment",
     "inspect_experiment_run", "load_experiment_spec", "validate_experiment_spec",
