@@ -1154,7 +1154,7 @@ Evidence:
 
 # Phase 8 — Research Product & Publication Operations
 
-**Status:** ACTIVE  
+**Status:** ACTIVE
 **Depends on:** Phase 7 for claims of validated research; descriptive packages may continue under Phase 4 rules.  
 **Goal:** Turn approved evidence into maintainable research products without weakening provenance or human review.
 
