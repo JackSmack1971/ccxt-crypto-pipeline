@@ -2,7 +2,8 @@
 
 **Status:** self-review complete; independent review **BLOCKED** (reviewer unavailable in this
 environment). Phase 8R does not close on this document alone — see
-[Outcome](#outcome) and [ROADMAP.md](../../ROADMAP.md).
+[Outcome](#outcome), [Candidate-state binding](#7-candidate-state-binding),
+[Independent-review handoff](#8-independent-review-handoff), and [ROADMAP.md](../../ROADMAP.md).
 
 This document is the executable record required by Slice 8R.7. It follows the structure of
 `.agents/skills/experiment-change-validation`'s handoff contract, applied to the full Phase 8R
@@ -122,3 +123,69 @@ repository-authority decision to accept an alternative review path. Neither has 
 audit.
 
 This audit itself does not authorize any execution-phase activation.
+
+## 7. Candidate-state binding
+
+This audit binds to the exact repository state below. An independent reviewer MUST re-verify
+against this state (or an explicitly re-bound successor state) rather than trust the values in this
+document.
+
+| Field | Value |
+| --- | --- |
+| Git commit SHA (reviewed) | `411cd27471625166bf0e9e90ecfe2c8928e7e322` (merge of PR #66, `docs/phase-8r-methodological-audit`) |
+| Branch | `main` |
+| Working tree | Clean at the reviewed SHA except one untracked, repository-unrelated file (`CLAUDE.md`, a Claude Code project-instructions file with no effect on `analysis/experiments`, `analysis/alpha`, or any pipeline contract) |
+| Local vs. `origin/main` | Identical (`git reset --hard origin/main` performed as part of this follow-up; no local-only commits remain) |
+| Methodology/schema versions in scope | `CAMPAIGN_VERSION = "phase8r-research-campaign-v1"` (`campaign.py`); `MANIFEST_VERSION = "phase8r-run-v1"` (`runner.py`); `PromotionPolicy.version = "candidate-promotion-v1"` (`evaluation.py`); storage `SCHEMA_VERSION` unaffected by this audit's scope |
+| Research campaign ID | **None** — no `campaign.json` artifact exists anywhere in the repository tree at this commit. `execute_campaign(...)` writes to a caller-supplied `campaign_root` (see `README.md`'s `write-campaign`/`execute_campaign` usage); no default in-repo output directory is defined, and per `AGENTS.md`/this repo's ephemeral-artifact convention such run/campaign output is expected to stay untracked and local. This audit's §4 finding is therefore established by static/code review and by the unit-level evidence in `tests/test_phase6.py` and `tests/test_research_campaign.py`, not by inspecting a concrete persisted campaign. |
+| Dataset-profile identity/hash | **None bound** — no `profile.json` is checked into the repository; profiles are content-addressed per `analysis/datasets/profile.py`'s `write_dataset_profile` but, like campaigns, are written to a caller-chosen local directory and are not repository artifacts. |
+| Campaign/run manifest hashes | **None available** — no `manifest.json` exists in-tree to hash (see above). If a specific reviewer run does produce one, bind it here (`sha256` of `manifest.json`, per `campaign.py`'s own `artifact_identities["run:<run_id>:manifest"]` convention) rather than inventing a separate hash scheme. |
+| Experiment/hypothesis registry identity | **None bound** — `ResearchRegistry.identity()` is likewise computed from a registry only at construction/write time; no registry JSON is checked into the repository at this commit. |
+| Verification results | See §2 (repository-wide and focused suite, both PASS at this SHA) and §8 below. |
+
+If a future reviewer (or this repository) produces a concrete campaign/profile/registry artifact
+for review, bind its identities into a copy of this table rather than editing this one in place —
+this document's own identity should remain replayable to exactly the state in the row above.
+
+## 8. Independent-review handoff
+
+This section is the exact instruction set for the independent reviewer required to close Slice
+8R.7. It supersedes no part of `.agents/skills/experiment-change-validation`; where that skill's
+`experiment_integrity_reviewer` contract applies, the reviewer should be invoked through that
+existing contract rather than through a new or parallel review procedure defined here.
+
+**Reviewer instructions:**
+
+1. **Bind to state, don't trust this document's claims.** Start from the candidate state in §7
+   (`411cd27...` on `main`, or an explicitly newer commit you have separately verified and rebound).
+   Re-run `git status`, `git log -1`, and the commands in §2 yourself before relying on any
+   pass/fail claim made here.
+2. **Independently verify the high-risk methodological contracts**, not just re-read this table:
+   point-in-time/no-look-ahead in `analysis/alpha/evaluation.py` and `analysis/experiments/runner.py`;
+   deterministic content-addressed identity and immutable-overwrite rejection in `campaign.py`,
+   `research.py`, `catalog.py`; multiple-testing family-freezing in `hypotheses.py`; falsification
+   completeness in `falsification.py`; negative-result handling in `campaign.py`. Treat every
+   `VERIFIED`/`UNAFFECTED` row in §3 as a claim to falsify, not a fact to accept.
+3. **Inspect the material campaign-promotion finding in §4 directly.** Confirm for yourself, by
+   reading `runner.py`'s `run_experiment` and `campaign.py`'s `execute_campaign`/`verify_campaign`,
+   that (a) `target_stage` is hardcoded to `"discovery"` in the governed path, (b)
+   `evaluate_candidate_promotion` at `"validation"`/`"holdout"` is otherwise correctly implemented
+   and unit-tested, and (c) no positive (`holdout_confirmed`) campaign outcome can currently be
+   produced end-to-end through `execute_campaign`. Confirm this is a completeness gap (no reachable
+   unsafe state), not a silently-weakened gate.
+4. **If the candidate state has changed** (e.g. a remediation slice implementing validation/holdout
+   promotion has since landed), do not reuse this document's verdicts. Re-run the focused suites in
+   §2 against the new SHA, re-check whether §4's finding still holds, and re-bind a new §7 table
+   before forming a verdict.
+5. **Classify findings by severity** (e.g. blocking / material / advisory) rather than a single
+   pass/fail label, so a partial remediation can be tracked precisely.
+6. **Return exactly one of `PASS`, `FAIL`, or `INCONCLUSIVE`**, consistent with
+   `.agents/skills/experiment-change-validation/SKILL.md` §6's accepted outcomes. Do not return a
+   novel status.
+7. **State explicitly whether Phase 8R may close.** Per `ROADMAP.md`'s Phase 8R exit criteria,
+   closure requires both a `PASS` independent verdict *and* resolution (or an explicit,
+   documented repository-authority acceptance) of §4's material finding. A `PASS` verdict on
+   methodological soundness alone does not, by itself, close Phase 8R while §4 remains open.
+8. **Bind the verdict to the exact state reviewed.** Record the Git SHA (and, if applicable,
+   campaign/run/profile/registry identities) the verdict applies to, using the same fields as §7,
+   so the verdict cannot be silently carried forward to a different, unreviewed candidate state.
