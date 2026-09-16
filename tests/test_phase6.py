@@ -329,6 +329,7 @@ def test_runner_executes_the_declared_sequence_and_honestly_withholds_significan
         "definitions.json",
         "hypothesis_family.json",
         "uncertainty.json",
+        "stress_matrix.json",
     }
 
     definitions = json.loads((run / "definitions.json").read_text())

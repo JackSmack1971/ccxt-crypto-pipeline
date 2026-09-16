@@ -157,6 +157,13 @@ practical effect are separate gates: a statistically supported result below
 the effect floor is rejected, while missing effect evidence remains
 unavailable.
 
+Runs also emit `stress_matrix.json`, a deterministic Cartesian matrix of the
+spec's approved fee, slippage, minimum-liquidity, and missingness scenarios.
+The matrix reuses the discovery-selected token ids, keeps incomplete evidence
+explicit, and never reselects a candidate from validation or sealed holdout
+rows. Change the declarative `stress` policy in a spec to change its
+content-addressed methodology identity.
+
 ## Configuration
 
 Safe examples are provided in [`.env.example`](.env.example). YAML settings live in `config/cex.yaml`, `config/chains.yaml`, `config/evm.yaml`, and `config/solana.yaml`. The complete variable and credential setup is in [`docs/RUNBOOK.md`](docs/RUNBOOK.md).
