@@ -1,16 +1,18 @@
 import json
 import subprocess
 import sys
-from dataclasses import replace
+from dataclasses import asdict, replace
 from datetime import datetime, timedelta
 
 import pytest
 
-from analysis.alpha import (CohortConfig, FeatureDefinition, LabelDefinition, PromotionPolicy,
+from analysis.alpha import (CandidateResult, CohortConfig, FeatureDefinition, Hypothesis,
+                            LabelDefinition, PromotionDecision, PromotionEvidence, PromotionPolicy,
                             assert_feature_versions_compatible, assert_label_versions_compatible,
                             compute_features, extract_cohort, feature_definition_id,
                             feature_policy_versions, generate_labels, label_definition_id,
-                            resolve_feature_definition)
+                            resolve_feature_definition, apply_bh_fdr, apply_holm,
+                            evaluate_candidate_promotion)
 from analysis.datasets import Asset, Bar, DatasetPolicy, DatasetSnapshot
 from analysis.experiments import (BaselinePolicy, CandidateDefinition, CostPolicy,
                                   ExperimentSpec, HypothesisFamily, SPEC_VERSION, SplitPolicy,
@@ -47,6 +49,157 @@ def build_spec(**overrides) -> ExperimentSpec:
     }
     fields.update(overrides)
     return ExperimentSpec(**fields)
+
+
+def promotion_candidate(**overrides) -> CandidateResult:
+    values = {
+        "name": "candidate",
+        "horizon": "24h",
+        "sample_size": 10,
+        "independent_launches": 10,
+        "coverage": 0.8,
+        "missingness": 0.0,
+        "mean_return": 0.02,
+        "uncertainty": {"ci95_low": 0.01},
+        "baseline_comparison": {"difference": 0.02},
+        "cost_sensitivity": {"base": 0.01},
+        "promotion": None,
+    }
+    values.update(overrides)
+    return CandidateResult(**values)
+
+
+def promotion_evidence(**overrides) -> PromotionEvidence:
+    values = {
+        "target_stage": "discovery",
+        "discovery_adjusted_p_value": 0.05,
+        "effect_size": 0.02,
+        "baseline_superior": True,
+        "uncertainty_supports_effect": True,
+        "cost_sensitivity_passed": True,
+    }
+    values.update(overrides)
+    return PromotionEvidence(**values)
+
+
+def expected_decision(state, reasons, evidence, policy=PromotionPolicy()):
+    return PromotionDecision(state, tuple(reasons), asdict(policy), asdict(evidence))
+
+
+@pytest.mark.parametrize(
+    ("field", "below", "at", "above", "reason"),
+    [
+        ("sample_size", 9, 10, 11, "MINIMUM_SAMPLE_SIZE"),
+        ("independent_launches", 9, 10, 11, "MINIMUM_INDEPENDENT_LAUNCHES"),
+    ],
+)
+def test_promotion_count_thresholds_have_exact_three_point_decisions(field, below, at, above, reason):
+    evidence = promotion_evidence()
+    policy = PromotionPolicy()
+    for value in (at, above):
+        candidate = promotion_candidate(**{field: value})
+        assert evaluate_candidate_promotion(candidate, evidence, policy) == expected_decision(
+            "discovery_promoted", (), evidence, policy)
+    candidate = promotion_candidate(**{field: below})
+    assert evaluate_candidate_promotion(candidate, evidence, policy) == expected_decision(
+        "insufficient_coverage", (reason,), evidence, policy)
+
+
+@pytest.mark.parametrize("coverage", (0.8, 0.8 + 1e-12))
+def test_promotion_coverage_at_and_above_threshold_is_discovery_promoted(coverage):
+    evidence = promotion_evidence()
+    policy = PromotionPolicy()
+    candidate = promotion_candidate(coverage=coverage)
+    assert evaluate_candidate_promotion(candidate, evidence, policy) == expected_decision(
+        "discovery_promoted", (), evidence, policy)
+
+
+def test_promotion_coverage_just_below_threshold_changes_reason():
+    evidence = promotion_evidence()
+    policy = PromotionPolicy()
+    candidate = promotion_candidate(coverage=policy.minimum_coverage - 1e-12)
+    assert evaluate_candidate_promotion(candidate, evidence, policy) == expected_decision(
+        "insufficient_coverage", ("MINIMUM_COVERAGE",), evidence, policy)
+
+
+@pytest.mark.parametrize("effect_size", (0.01, 0.01 + 1e-12))
+def test_promotion_effect_threshold_at_and_above_is_approved(effect_size):
+    policy = PromotionPolicy(minimum_effect_size=0.01)
+    candidate = promotion_candidate(
+        uncertainty={"ci95_low": effect_size},
+        baseline_comparison={"difference": effect_size},
+    )
+    evidence = promotion_evidence(effect_size=effect_size)
+    assert evaluate_candidate_promotion(candidate, evidence, policy) == expected_decision(
+        "discovery_promoted", (), evidence, policy)
+
+
+def test_promotion_effect_just_below_threshold_changes_reason():
+    policy = PromotionPolicy(minimum_effect_size=0.01)
+    effect_size = policy.minimum_effect_size - 1e-12
+    candidate = promotion_candidate(
+        uncertainty={"ci95_low": effect_size},
+        baseline_comparison={"difference": effect_size},
+    )
+    evidence = promotion_evidence(effect_size=effect_size)
+    assert evaluate_candidate_promotion(candidate, evidence, policy) == expected_decision(
+        "rejected", ("PRACTICAL_EFFECT_TOO_SMALL",), evidence, policy)
+
+
+@pytest.mark.parametrize("p_value", (0.05, 0.05 - 1e-12))
+def test_promotion_discovery_q_boundary_approves_at_or_below(p_value):
+    policy = PromotionPolicy(discovery_q=0.05)
+    evidence = promotion_evidence(discovery_adjusted_p_value=p_value)
+    candidate = promotion_candidate()
+    assert evaluate_candidate_promotion(candidate, evidence, policy) == expected_decision(
+        "discovery_promoted", (), evidence, policy)
+
+
+def test_promotion_discovery_q_just_above_changes_reason():
+    policy = PromotionPolicy(discovery_q=0.05)
+    evidence = promotion_evidence(discovery_adjusted_p_value=policy.discovery_q + 1e-12)
+    candidate = promotion_candidate()
+    assert evaluate_candidate_promotion(candidate, evidence, policy) == expected_decision(
+        "rejected", ("DISCOVERY_CORRECTION_FAILED",), evidence, policy)
+
+
+@pytest.mark.parametrize("p_value", (0.05, 0.05 - 1e-12))
+def test_promotion_holdout_alpha_boundary_confirms_at_or_below(p_value):
+    policy = PromotionPolicy(confirmation_alpha=0.05)
+    evidence = promotion_evidence(
+        target_stage="holdout", validation_replicated=True,
+        validation_semantics_frozen=True, holdout_adjusted_p_value=p_value)
+    candidate = promotion_candidate()
+    assert evaluate_candidate_promotion(candidate, evidence, policy) == expected_decision(
+        "holdout_confirmed", (), evidence, policy)
+
+
+def test_promotion_holdout_alpha_just_above_changes_reason():
+    policy = PromotionPolicy(confirmation_alpha=0.05)
+    evidence = promotion_evidence(
+        target_stage="holdout", validation_replicated=True,
+        validation_semantics_frozen=True,
+        holdout_adjusted_p_value=policy.confirmation_alpha + 1e-12)
+    candidate = promotion_candidate()
+    assert evaluate_candidate_promotion(candidate, evidence, policy) == expected_decision(
+        "rejected", ("HOLDOUT_CORRECTION_FAILED",), evidence, policy)
+
+
+def _hypothesis(p_value):
+    return Hypothesis("experiment", "feature", (), "threshold", "24h", None,
+                      "model", "2025-01-01", "dataset", p_value)
+
+
+def test_bh_fdr_promotes_a_p_value_exactly_at_corrected_q_threshold():
+    original = _hypothesis(0.05)
+    assert apply_bh_fdr([original], q=0.05) == (
+        replace(original, adjusted_value=0.05, decision="promoted"),)
+
+
+def test_holm_promotes_a_p_value_exactly_at_corrected_alpha_threshold():
+    original = _hypothesis(0.05)
+    assert apply_holm([original], alpha=0.05) == (
+        replace(original, adjusted_value=0.05, decision="confirmed"),)
 
 
 def test_valid_spec_builds_and_normalizes_feature_set_order():

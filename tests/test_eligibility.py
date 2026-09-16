@@ -77,3 +77,56 @@ def test_policy_rejects_invalid_thresholds():
         EligibilityPolicy(max_observed_gap_seconds=0)
     with pytest.raises(ValueError, match="max_expected_interval_multiple"):
         EligibilityPolicy(max_expected_interval_multiple=0)
+
+
+@pytest.mark.parametrize(
+    ("completeness", "expected"),
+    [
+        (0.9 - 1e-12, ChainEligibility("ethereum", False, "BELOW_COMPLETENESS_THRESHOLD", ())),
+        (0.9, ChainEligibility("ethereum", True, None, ())),
+        (0.9 + 1e-12, ChainEligibility("ethereum", True, None, ())),
+    ],
+)
+def test_completeness_threshold_has_exact_below_at_above_results(completeness, expected):
+    rows = [_row("evm_rpc", "ethereum", completeness_ratio=completeness)]
+    expected = ChainEligibility(expected.chain, expected.eligible, expected.reason, (rows[0],))
+    assert evaluate_chain_eligibility(
+        rows, {"ethereum": [("evm_rpc", "ethereum")]},
+        policy=EligibilityPolicy(min_completeness_ratio=0.9),
+    ) == {"ethereum": expected}
+
+
+@pytest.mark.parametrize(
+    ("gap", "expected_reason"),
+    [
+        (300.0 - 1e-12, None),
+        (300.0, None),
+        (300.0 + 1e-12, "OBSERVED_GAP_EXCEEDS_LIMIT"),
+    ],
+)
+def test_explicit_gap_threshold_has_exact_below_at_above_results(gap, expected_reason):
+    rows = [_row("evm_rpc", "ethereum", max_observed_gap_seconds=gap,
+                 expected_interval_seconds=10_000.0)]
+    expected = ChainEligibility("ethereum", expected_reason is None, expected_reason, (rows[0],))
+    assert evaluate_chain_eligibility(
+        rows, {"ethereum": [("evm_rpc", "ethereum")]},
+        policy=EligibilityPolicy(max_observed_gap_seconds=300.0),
+    ) == {"ethereum": expected}
+
+
+@pytest.mark.parametrize(
+    ("gap", "expected_reason"),
+    [
+        (180.0 - 1e-12, None),
+        (180.0, None),
+        (180.0 + 1e-12, "OBSERVED_GAP_EXCEEDS_EXPECTED_INTERVAL"),
+    ],
+)
+def test_expected_interval_multiple_threshold_has_exact_below_at_above_results(gap, expected_reason):
+    rows = [_row("evm_rpc", "ethereum", max_observed_gap_seconds=gap,
+                 expected_interval_seconds=60.0)]
+    expected = ChainEligibility("ethereum", expected_reason is None, expected_reason, (rows[0],))
+    assert evaluate_chain_eligibility(
+        rows, {"ethereum": [("evm_rpc", "ethereum")]},
+        policy=EligibilityPolicy(max_observed_gap_seconds=None, max_expected_interval_multiple=3.0),
+    ) == {"ethereum": expected}
