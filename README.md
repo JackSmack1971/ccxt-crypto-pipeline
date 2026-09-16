@@ -275,10 +275,10 @@ Read [`CONTRIBUTING.md`](CONTRIBUTING.md) before opening an issue or pull reques
 
 The canonical forward execution roadmap is [`ROADMAP.md`](ROADMAP.md). It records the current phase frontier, dependency-ordered implementation slices, per-slice acceptance gates, phase exit criteria, deferred boundaries, and the maintenance contract agents must follow as work lands.
 
-The current frontier is Phase 8 publication closure. Phase 7 robust
-validation is complete, including deterministic purged walk-forward,
-uncertainty, stress, stability, negative-control, and closure evidence while
-preserving a sealed holdout.
+Phase 8 research product and publication operations are complete, including
+deterministic report output, local catalog/navigation, review history, and
+human-gated publication export. Phase 9 paper execution and Phase 10 live
+execution remain deferred pending separate product and safety decisions.
 
 ## License
 
