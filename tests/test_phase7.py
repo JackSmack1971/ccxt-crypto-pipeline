@@ -338,7 +338,8 @@ def _closure_inputs():
         promotion={"state": "holdout_confirmed"},
         uncertainty={"version": "u1", "status": "available", "ci95_low": 0.01},
         stress={"version": "s1", "passed": True},
-        stability={"version": "st1", "status": "available", "dominated": False},
+        stability={"version": "st1", "status": "available", "dominated": False,
+                   "dimensions": {"chain": []}},
         negative_controls={"version": "n1", "status": "available", "results": [
             {"candidate": {"baseline_comparison": {"difference": 0.0}}}]},
     )
@@ -350,7 +351,9 @@ def test_validation_closure_requires_holdout_confirmation():
     result = build_validation_closure(**values)
     assert result["status"] == "ineligible"
     assert result["reason"] == "PROMOTION_NOT_HOLDOUT_CONFIRMED"
-    assert result["components"] == []
+    assert [item["name"] for item in result["components"]] == [
+        "uncertainty", "stress_matrix", "stability", "negative_controls"]
+    assert all(item["status"] == "ineligible" for item in result["components"])
 
 
 @pytest.mark.parametrize(("field", "expected"), [
@@ -394,6 +397,17 @@ def test_validation_closure_keeps_missing_negative_control_evidence_explicit():
     assert result["reason"] == "ROBUSTNESS_COMPONENT_FAILED"
     control = next(item for item in result["components"] if item["name"] == "negative_controls")
     assert control["reason"] == "NEGATIVE_CONTROL_INSUFFICIENT_EVIDENCE"
+
+
+def test_validation_closure_rejects_non_positive_uncertainty_and_incomplete_stability():
+    values = _closure_inputs()
+    values["uncertainty"] = {"version": "u1", "status": "available", "ci95_low": -1.0}
+    values["stability"] = {"version": "st1", "status": "available", "dominated": False}
+    result = build_validation_closure(**values)
+    assert result["status"] == "failed"
+    assert {item["reason"] for item in result["components"] if not item["passed"]} == {
+        "UNCERTAINTY_UNAVAILABLE", "STABILITY_DOMINANCE_OR_UNAVAILABLE"
+    }
 
 
 def test_validation_closure_includes_configured_walk_forward_evidence():

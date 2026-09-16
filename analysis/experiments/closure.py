@@ -21,6 +21,11 @@ def _component(name: str, evidence: dict[str, Any], *, passed: bool | None,
     }
 
 
+def _ineligible_component(name: str, evidence: dict[str, Any]) -> dict[str, Any]:
+    return {"name": name, "version": evidence.get("version"), "status": "ineligible",
+            "passed": False, "reason": "PROMOTION_NOT_HOLDOUT_CONFIRMED"}
+
+
 def build_validation_closure(*, spec_id: str, selected_token_ids: frozenset[str],
                              promotion: dict[str, Any], uncertainty: dict[str, Any],
                              stress: dict[str, Any], stability: dict[str, Any],
@@ -34,6 +39,11 @@ def build_validation_closure(*, spec_id: str, selected_token_ids: frozenset[str]
     components: list[dict[str, Any]] = []
     promotion_state = promotion.get("state")
     if promotion_state != "holdout_confirmed":
+        evidence = [("uncertainty", uncertainty), ("stress_matrix", stress),
+                    ("stability", stability), ("negative_controls", negative_controls)]
+        if walk_forward is not None:
+            evidence.insert(0, ("walk_forward", walk_forward))
+        components = [_ineligible_component(name, value) for name, value in evidence]
         return {
             "version": CLOSURE_VERSION,
             "spec_id": spec_id,
@@ -54,7 +64,8 @@ def build_validation_closure(*, spec_id: str, selected_token_ids: frozenset[str]
             reason=None if walk_forward_passed else "WALK_FORWARD_EVIDENCE_UNAVAILABLE"))
 
     uncertainty_passed = (uncertainty.get("status") == "available" and
-                          uncertainty.get("ci95_low") is not None)
+                          isinstance(uncertainty.get("ci95_low"), (int, float)) and
+                          math.isfinite(uncertainty["ci95_low"]) and uncertainty["ci95_low"] > 0)
     components.append(_component("uncertainty", uncertainty, passed=uncertainty_passed,
                                  reason=None if uncertainty_passed else "UNCERTAINTY_UNAVAILABLE"))
 
@@ -62,7 +73,10 @@ def build_validation_closure(*, spec_id: str, selected_token_ids: frozenset[str]
     components.append(_component("stress_matrix", stress, passed=stress_passed,
                                  reason=None if stress_passed else "STRESS_SCENARIO_FAILED"))
 
-    stability_passed = stability.get("status") == "available" and not stability.get("dominated", False)
+    dimensions = stability.get("dimensions")
+    stability_passed = (stability.get("status") == "available" and isinstance(dimensions, dict)
+                        and bool(dimensions) and all(isinstance(items, list) for items in dimensions.values())
+                        and not stability.get("dominated", False))
     components.append(_component("stability", stability, passed=stability_passed,
                                  reason=None if stability_passed else "STABILITY_DOMINANCE_OR_UNAVAILABLE"))
 

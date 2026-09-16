@@ -3,7 +3,7 @@
 **Status:** Active execution authority for forward work  
 **Current phase:** Phase 7 robust validation and research scaling
 **Baseline:** `main` at `23dbd389af88cade4584cb5fdc10b60dc17fcc3b`
-**Last reconciled:** 2026-09-16 (Slice 7.5 closed; Slice 7.6 active)
+**Last reconciled:** 2026-09-16 (Slice 7.6 closed; Slice 7.7 active)
 
 This file is the durable forward roadmap for `ccxt-crypto-pipeline`. It exists so a new agent can determine the repository's actual execution frontier without reconstructing intent from chat history, stale phase prose, or commit messages.
 
@@ -1145,8 +1145,8 @@ Evidence:
   catalog retains read-only compatibility for prior Phase 6/7 manifests.
 - `tests/test_phase7.py` covers premature-promotion rejection, failed and
   unavailable components, deterministic replay, and walk-forward inclusion;
-  Phase 3/6/7 focused verification passed with 188 tests. The locked full suite
-  passed with 439 tests; byte-compilation, whitespace validation, and offline
+  Phase 3/6/7 focused verification passed with 189 tests. The locked full suite
+  passed with 440 tests; byte-compilation, whitespace validation, and offline
   fixture/network-denial coverage passed. Live-provider behavior remains
   outside scope and unverified.
 
@@ -1246,7 +1246,7 @@ For a fresh agent, the intended pickup sequence is:
 
 `AGENTS.md` → `ROADMAP.md` → active `docs/plans/phase-*.md` → relevant code/tests → Git history/status.
 
-The current frontier is **Slice 7.6 — Negative controls and falsification suite**.
+The current frontier is **Slice 7.7 — Validation closure matrix**.
 
 Phase 5 is DONE. Slice 5.7 closed the phase with
 `docs/plans/phase-5-data-plane-closure-matrix.md` and
