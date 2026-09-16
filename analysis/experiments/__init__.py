@@ -16,6 +16,7 @@ from .hypotheses import (FAMILY_MANIFEST_VERSION, FamilyEvaluation, FrozenHypoth
 from .spec import (BaselinePolicy, CandidateDefinition, CostPolicy, ExperimentSpec,
                    HypothesisFamily, SPEC_VERSION, SplitPolicy,
                    StressPolicy,
+                   StabilityPolicy,
                    SUPPORTED_BASELINE_FAMILIES, SUPPORTED_CONFIRMATION_CORRECTIONS,
                    SUPPORTED_DISCOVERY_CORRECTIONS, experiment_spec_dict, experiment_spec_from_dict,
                    experiment_spec_id)
@@ -25,10 +26,11 @@ from .walk_forward import (WalkForwardEvaluation, WalkForwardFold,
                            build_walk_forward_evaluation)
 from .uncertainty import UncertaintyPolicy, bootstrap_mean
 from .stress import STRESS_MATRIX_VERSION
+from .stability import STABILITY_VERSION, build_stability_evidence
 
 __all__ = [
     "BaselinePolicy", "CandidateDefinition", "CostPolicy", "ExperimentSpec",
-    "HypothesisFamily", "SPEC_VERSION", "SplitPolicy", "StressPolicy",
+    "HypothesisFamily", "SPEC_VERSION", "SplitPolicy", "StressPolicy", "StabilityPolicy",
     "SUPPORTED_BASELINE_FAMILIES", "SUPPORTED_CONFIRMATION_CORRECTIONS",
     "SUPPORTED_DISCOVERY_CORRECTIONS", "experiment_spec_dict", "experiment_spec_from_dict", "experiment_spec_id",
     "MANIFEST_VERSION", "resolve_feature_registry", "run_experiment",
@@ -40,4 +42,5 @@ __all__ = [
     "WalkForwardEvaluation", "WalkForwardFold", "build_walk_forward_evaluation",
     "UncertaintyPolicy", "bootstrap_mean",
     "STRESS_MATRIX_VERSION",
+    "STABILITY_VERSION", "build_stability_evidence",
 ]

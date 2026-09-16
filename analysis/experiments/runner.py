@@ -34,8 +34,9 @@ from .hypotheses import freeze_hypothesis_family
 from .walk_forward import build_walk_forward_evaluation
 from .uncertainty import bootstrap_mean
 from .stress import _build_stress_matrix
+from .stability import build_stability_evidence
 
-MANIFEST_VERSION = "phase6-run-v1"
+MANIFEST_VERSION = "phase7-run-v1"
 
 
 def resolve_feature_registry(spec: ExperimentSpec) -> FeatureRegistry:
@@ -248,6 +249,9 @@ def run_experiment(spec: ExperimentSpec, snapshot: DatasetSnapshot, output_dir: 
         selected_token_ids=selected_ids, labels=discovery_labels,
         feature_rows=discovery_features, horizon=spec.candidate.horizon,
         turnover=spec.costs.turnover, policy=spec.stress)
+    stability = build_stability_evidence(
+        selected_token_ids=selected_ids, labels=discovery_labels, cohort=cohort,
+        feature_rows=discovery_features, horizon=spec.candidate.horizon, policy=spec.stability)
 
     spec_id = experiment_spec_id(spec)
     inputs = {"experiment_spec_id": spec_id, "dataset_identity": snapshot.dataset_identity,
@@ -276,6 +280,7 @@ def run_experiment(spec: ExperimentSpec, snapshot: DatasetSnapshot, output_dir: 
         "hypothesis_family.json": hypothesis_family,
         "uncertainty.json": uncertainty,
         "stress_matrix.json": stress_matrix,
+        "stability.json": stability,
     }
     if walk_forward is not None:
         artifacts["walk_forward.json"] = _walk_forward_results(

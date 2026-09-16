@@ -12,6 +12,8 @@ from analysis.alpha import assert_feature_versions_compatible, assert_label_vers
 
 from .runner import MANIFEST_VERSION
 
+LEGACY_MANIFEST_VERSION = "phase6-run-v1"
+
 
 @dataclass(frozen=True)
 class RunRecord:
@@ -52,7 +54,8 @@ def load_run(run_dir: str | Path) -> RunRecord:
     """Verify an immutable run and return its catalog metadata without writing it."""
     path = Path(run_dir)
     manifest = _read_json(path / "manifest.json")
-    if manifest.get("manifest_version") != MANIFEST_VERSION or manifest.get("immutable") is not True:
+    manifest_version = manifest.get("manifest_version")
+    if manifest_version not in {LEGACY_MANIFEST_VERSION, MANIFEST_VERSION} or manifest.get("immutable") is not True:
         raise ValueError(f"unsupported or mutable experiment run manifest: {path}")
     run_id = manifest.get("run_id")
     inputs = manifest.get("inputs")
@@ -72,6 +75,8 @@ def load_run(run_dir: str | Path) -> RunRecord:
             raise ValueError(f"experiment run artifact hash mismatch: {artifact_path}")
 
     required = {"spec.json", "candidate.json", "promotion.json", "definitions.json"}
+    if manifest_version == MANIFEST_VERSION:
+        required.add("stability.json")
     if not required <= set(artifacts):
         raise ValueError(f"experiment run manifest lacks required artifacts: {path}")
     spec = _read_json(path / "spec.json")

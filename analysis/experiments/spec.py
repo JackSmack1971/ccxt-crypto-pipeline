@@ -165,6 +165,35 @@ class StressPolicy:
 
 
 @dataclass(frozen=True)
+class StabilityPolicy:
+    """Declared subgroup and leave-one-out stability evidence."""
+
+    version: str = "phase7-stability-v1"
+    dimensions: tuple[str, ...] = ("chain", "era", "liquidity_band", "provider", "leave_one_out")
+    era_days: int = 30
+    liquidity_bands_usd: tuple[float, ...] = (10_000.0, 25_000.0, 50_000.0)
+    minimum_group_size: int = 2
+    dominance_threshold: float = 0.75
+
+    def __post_init__(self):
+        if self.version != "phase7-stability-v1" or self.era_days <= 0 or self.minimum_group_size <= 0:
+            raise ValueError("invalid stability policy configuration")
+        allowed = {"chain", "era", "liquidity_band", "provider", "leave_one_out"}
+        if not self.dimensions or any(item not in allowed for item in self.dimensions):
+            raise ValueError("unsupported stability dimension")
+        if len(set(self.dimensions)) != len(self.dimensions):
+            raise ValueError("stability dimensions must be unique")
+        if (not self.liquidity_bands_usd or
+                any(type(value) not in (int, float) or not math.isfinite(value) or value < 0
+                    for value in self.liquidity_bands_usd) or
+                tuple(sorted(self.liquidity_bands_usd)) != self.liquidity_bands_usd or
+                len(set(self.liquidity_bands_usd)) != len(self.liquidity_bands_usd)):
+            raise ValueError("stability liquidity bands must be sorted and unique")
+        if not 0 < self.dominance_threshold <= 1:
+            raise ValueError("stability dominance threshold must be in (0, 1]")
+
+
+@dataclass(frozen=True)
 class BaselinePolicy:
     """Declares which mandatory baseline families this experiment requires."""
 
@@ -209,6 +238,7 @@ class ExperimentSpec:
     config_identity: str
     uncertainty: UncertaintyPolicy = UncertaintyPolicy()
     stress: StressPolicy = StressPolicy()
+    stability: StabilityPolicy = StabilityPolicy()
 
     def __post_init__(self):
         if self.spec_version != SPEC_VERSION:
@@ -284,7 +314,7 @@ def experiment_spec_from_dict(value: dict[str, Any]) -> ExperimentSpec:
     if not isinstance(value, dict):
         raise ValueError("experiment spec must be a JSON object")
     required = {field.name for field in ExperimentSpec.__dataclass_fields__.values()}
-    required_without_defaults = required - {"uncertainty", "stress"}
+    required_without_defaults = required - {"uncertainty", "stress", "stability"}
     if not required_without_defaults <= set(value) or set(value) - required:
         missing = sorted(required_without_defaults - set(value))
         extra = sorted(set(value) - required)
@@ -323,6 +353,9 @@ def experiment_spec_from_dict(value: dict[str, Any]) -> ExperimentSpec:
                                    "slippage_bps": tuple(value.get("stress", {}).get("slippage_bps", StressPolicy().slippage_bps)),
                                    "minimum_liquidity_usd": tuple(value.get("stress", {}).get("minimum_liquidity_usd", StressPolicy().minimum_liquidity_usd)),
                                    "missingness_modes": tuple(value.get("stress", {}).get("missingness_modes", StressPolicy().missingness_modes))}),
+            stability=StabilityPolicy(**{**value.get("stability", {}),
+                                         "dimensions": tuple(value.get("stability", {}).get("dimensions", StabilityPolicy().dimensions)),
+                                         "liquidity_bands_usd": tuple(value.get("stability", {}).get("liquidity_bands_usd", StabilityPolicy().liquidity_bands_usd))}),
         )
     except (KeyError, TypeError, AttributeError) as exc:
         raise ValueError("invalid experiment spec structure") from exc
