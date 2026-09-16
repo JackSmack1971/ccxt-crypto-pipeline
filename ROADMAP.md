@@ -1060,9 +1060,27 @@ Evidence:
 
 ## Slice 7.4 — Cost/liquidity stress matrix
 
-**Status:** ACTIVE
+**Status:** DONE
 
 Evaluate candidate robustness across approved fee, slippage, liquidity, and missingness scenarios without changing the underlying candidate after holdout exposure.
+
+Evidence:
+
+- `StressPolicy` adds a versioned, declarative set of approved fee-rate,
+  slippage, minimum-liquidity, and explicit missingness dimensions to the
+  content-addressed experiment spec. Unsupported, negative, duplicate, or
+  empty dimensions fail closed.
+- `analysis/experiments/stress.py` evaluates the Cartesian stress matrix
+  against the discovery-selected token ids only. It reprices the fixed
+  candidate for fee/slippage, applies liquidity exclusions from the resolved
+  feature rows, and reports incomplete evidence as explicit unavailable
+  scenarios rather than imputing it. No validation or sealed-holdout row can
+  influence selection or stress membership.
+- The runner persists hash-bound `stress_matrix.json` in every run, including
+  the policy, fixed selection, scenario status/reasons, missingness, and
+  pass/fail result. README documents the new run artifact and spec boundary.
+  Focused Phase 6/7 tests pass with 109 tests, including fixed-selection,
+  missingness, and holdout-isolation coverage.
 
 ## Slice 7.5 — Cohort/chain stability analysis
 

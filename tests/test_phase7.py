@@ -9,7 +9,8 @@ import pytest
 
 from analysis.experiments import (SplitPolicy, UncertaintyPolicy, bootstrap_mean,
                                   build_walk_forward_evaluation, experiment_spec_dict,
-                                  experiment_spec_from_dict, run_experiment)
+                                  experiment_spec_from_dict, run_experiment, StressPolicy)
+from analysis.experiments.stress import _build_stress_matrix
 from test_phase6 import runner_snapshot, runner_spec
 
 
@@ -122,3 +123,44 @@ def test_phase6_spec_without_uncertainty_remains_loadable():
     legacy.pop("uncertainty")
     restored = experiment_spec_from_dict(legacy)
     assert restored.uncertainty == UncertaintyPolicy()
+
+
+def test_stress_matrix_keeps_selection_fixed_and_reports_missingness():
+    labels = (
+        SimpleNamespace(token_id="a", horizon="24h", status="COMPLETE", value=0.10),
+        SimpleNamespace(token_id="b", horizon="24h", status="DATA_CENSORED", value=None),
+    )
+    features = ({"token_id": "a", "launch_liquidity_usd": 10_000.0},
+                {"token_id": "b", "launch_liquidity_usd": 20_000.0})
+    result = _build_stress_matrix(
+        selected_token_ids=frozenset({"a", "b"}), labels=labels,
+        feature_rows=features, horizon="24h", turnover=1.0,
+        policy=StressPolicy(fee_rates=(0.001,), slippage_bps=(100.0,),
+                            minimum_liquidity_usd=(5_000.0, 15_000.0),
+                            missingness_modes=("exclude_incomplete", "fail_closed")))
+
+    assert result["selected_token_ids"] == ["a", "b"]
+    assert len(result["scenarios"]) == 4
+    excluded = [row for row in result["scenarios"] if row["missingness_mode"] == "exclude_incomplete"]
+    failed = [row for row in result["scenarios"] if row["missingness_mode"] == "fail_closed"]
+    assert excluded[0]["status"] == "available" and excluded[0]["sample_size"] == 1
+    assert excluded[1]["status"] == "unavailable" and excluded[1]["reason"] == "NO_COMPLETE_OBSERVATIONS"
+    assert all(row["status"] == "unavailable" and row["reason"] == "MISSINGNESS_FAIL_CLOSED" for row in failed)
+
+    invalid = _build_stress_matrix(
+        selected_token_ids=frozenset({"nan"}),
+        labels=(SimpleNamespace(token_id="nan", horizon="24h", status="COMPLETE", value=float("nan")),),
+        feature_rows=({"token_id": "nan", "launch_liquidity_usd": 10_000.0},),
+        horizon="24h", turnover=0.0,
+        policy=StressPolicy(fee_rates=(0.0,), slippage_bps=(0.0,),
+                            minimum_liquidity_usd=(0.0,), missingness_modes=("exclude_incomplete",)))
+    assert invalid["scenarios"][0]["status"] == "unavailable"
+    assert invalid["scenarios"][0]["reason"] == "INVALID_NONFINITE_LABEL"
+
+
+def test_runner_stress_matrix_does_not_expose_holdout_ids(tmp_path):
+    run = run_experiment(runner_spec(), runner_snapshot(), tmp_path / "runs")
+    evidence = json.loads((run / "stress_matrix.json").read_text())
+    assert evidence["selected_token_ids"] == ["ethereum:0xtok3"]
+    assert all("ethereum:0xtok06" not in row["liquidity_excluded_token_ids"]
+               for row in evidence["scenarios"])

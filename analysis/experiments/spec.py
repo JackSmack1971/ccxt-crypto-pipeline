@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 from dataclasses import asdict, dataclass
 from datetime import datetime
 from typing import Any
@@ -137,6 +138,33 @@ class CostPolicy:
 
 
 @dataclass(frozen=True)
+class StressPolicy:
+    """Approved fee, execution, liquidity, and missingness stress dimensions."""
+
+    version: str = "phase7-stress-v1"
+    fee_rates: tuple[float, ...] = (0.001, 0.003)
+    slippage_bps: tuple[float, ...] = (0.0, 25.0, 100.0)
+    minimum_liquidity_usd: tuple[float, ...] = (5_000.0, 25_000.0, 50_000.0)
+    missingness_modes: tuple[str, ...] = ("exclude_incomplete", "fail_closed")
+
+    def __post_init__(self):
+        if not self.version.strip():
+            raise ValueError("stress policy requires a version")
+        for label, values in (("fee rates", self.fee_rates), ("slippage", self.slippage_bps),
+                              ("liquidity", self.minimum_liquidity_usd)):
+            if not values or any(type(value) not in (int, float) or not math.isfinite(value) or value < 0
+                                  for value in values):
+                raise ValueError(f"stress policy {label} must be non-negative")
+            if len(set(values)) != len(values):
+                raise ValueError(f"stress policy {label} must be unique")
+        if not self.missingness_modes or any(mode not in {"exclude_incomplete", "fail_closed"}
+                                             for mode in self.missingness_modes):
+            raise ValueError("unsupported stress missingness mode")
+        if len(set(self.missingness_modes)) != len(self.missingness_modes):
+            raise ValueError("stress missingness modes must be unique")
+
+
+@dataclass(frozen=True)
 class BaselinePolicy:
     """Declares which mandatory baseline families this experiment requires."""
 
@@ -180,6 +208,7 @@ class ExperimentSpec:
     code_version: str
     config_identity: str
     uncertainty: UncertaintyPolicy = UncertaintyPolicy()
+    stress: StressPolicy = StressPolicy()
 
     def __post_init__(self):
         if self.spec_version != SPEC_VERSION:
@@ -255,7 +284,7 @@ def experiment_spec_from_dict(value: dict[str, Any]) -> ExperimentSpec:
     if not isinstance(value, dict):
         raise ValueError("experiment spec must be a JSON object")
     required = {field.name for field in ExperimentSpec.__dataclass_fields__.values()}
-    required_without_defaults = required - {"uncertainty"}
+    required_without_defaults = required - {"uncertainty", "stress"}
     if not required_without_defaults <= set(value) or set(value) - required:
         missing = sorted(required_without_defaults - set(value))
         extra = sorted(set(value) - required)
@@ -289,6 +318,11 @@ def experiment_spec_from_dict(value: dict[str, Any]) -> ExperimentSpec:
             promotion_policy=PromotionPolicy(**value["promotion_policy"]),
             code_version=value["code_version"], config_identity=value["config_identity"],
             uncertainty=UncertaintyPolicy(**value.get("uncertainty", {})),
+            stress=StressPolicy(**{**value.get("stress", {}),
+                                   "fee_rates": tuple(value.get("stress", {}).get("fee_rates", StressPolicy().fee_rates)),
+                                   "slippage_bps": tuple(value.get("stress", {}).get("slippage_bps", StressPolicy().slippage_bps)),
+                                   "minimum_liquidity_usd": tuple(value.get("stress", {}).get("minimum_liquidity_usd", StressPolicy().minimum_liquidity_usd)),
+                                   "missingness_modes": tuple(value.get("stress", {}).get("missingness_modes", StressPolicy().missingness_modes))}),
         )
     except (KeyError, TypeError, AttributeError) as exc:
         raise ValueError("invalid experiment spec structure") from exc
