@@ -3,7 +3,7 @@
 **Status:** Active execution authority for forward work  
 **Current phase:** Phase 8 research product and publication operations
 **Baseline:** `main` at `23dbd389af88cade4584cb5fdc10b60dc17fcc3b`
-**Last reconciled:** 2026-09-16 (Slice 7.7 closed; Slice 8.1 active)
+**Last reconciled:** 2026-09-16 (Slice 8.1 closed; Slice 8.2 active)
 
 This file is the durable forward roadmap for `ccxt-crypto-pipeline`. It exists so a new agent can determine the repository's actual execution frontier without reconstructing intent from chat history, stale phase prose, or commit messages.
 
@@ -1161,13 +1161,25 @@ Evidence:
 
 ## Slice 8.1 — Review/approval history
 
-**Status:** ACTIVE
+**Status:** DONE
 
 Represent approval, rejection, supersession, and reviewer notes as immutable records linked to exact research/package identities.
 
+Evidence:
+
+- `reporting/package/review_history.py` verifies immutable research runs or
+  report packages, records content-addressed review decisions, enforces
+  same-target supersession, and returns deterministic verified history.
+- `python -m reporting.package record/show` exposes the local review-history
+  boundary without changing research promotion or package publication state.
+- `tests/test_phase8.py` covers verified target binding, all decision shapes,
+  immutable replay, same-target supersession, and fail-closed tampering.
+- Focused and full repository verification passed; live-provider behavior and
+  external publication remain outside scope and unverified.
+
 ## Slice 8.2 — Rich deterministic output
 
-**Status:** PLANNED
+**Status:** ACTIVE
 
 Add HTML and/or PDF only if explicitly selected, with reproducible rendering/versioning and accessibility checks.
 
@@ -1251,7 +1263,7 @@ For a fresh agent, the intended pickup sequence is:
 
 `AGENTS.md` → `ROADMAP.md` → active `docs/plans/phase-*.md` → relevant code/tests → Git history/status.
 
-The current frontier is **Slice 7.7 — Validation closure matrix**.
+The current frontier is **Slice 8.2 — Rich deterministic output**.
 
 Phase 5 is DONE. Slice 5.7 closed the phase with
 `docs/plans/phase-5-data-plane-closure-matrix.md` and
