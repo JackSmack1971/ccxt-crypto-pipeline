@@ -129,6 +129,7 @@ docs/                   Architecture and local operations documentation
 | `python -m analysis.experiments approve RUN_DIR --approval-dir APPROVALS --reviewer NAME --reviewed-at ISO_TIME --rationale TEXT` | Record a separate, immutable human approval attestation |
 | `python -m reporting.package record TARGET --target-kind research_run\|package --history-dir HISTORY --decision approved\|rejected\|superseded\|note --reviewer NAME --reviewed-at ISO_TIME` | Record an immutable review decision bound to an exact research run or report package |
 | `python -m reporting.package show TARGET_ID --history-dir HISTORY` | Verify and list review history deterministically |
+| `python -m reporting.package catalog --research-root RUNS --package-root PACKAGES [--history-dir HISTORY] [--query TEXT]` | Verify, list, and search immutable research runs and report packages locally |
 | `python -m scheduler --once` | Run all stages once and exit |
 | `python -m scheduler.status` | Print JSON health status |
 

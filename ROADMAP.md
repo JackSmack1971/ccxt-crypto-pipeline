@@ -3,7 +3,7 @@
 **Status:** Active execution authority for forward work  
 **Current phase:** Phase 8 research product and publication operations
 **Baseline:** `main` at `23dbd389af88cade4584cb5fdc10b60dc17fcc3b`
-**Last reconciled:** 2026-09-16 (Slice 8.1 closed; Slice 8.2 active)
+**Last reconciled:** 2026-09-16 (Slice 8.3 closed; Slice 8.4 active)
 
 This file is the durable forward roadmap for `ccxt-crypto-pipeline`. It exists so a new agent can determine the repository's actual execution frontier without reconstructing intent from chat history, stale phase prose, or commit messages.
 
@@ -1195,13 +1195,29 @@ Evidence:
   escaping of title/claim text. The existing Phase 4 package fixture continues
   to exercise offline approved-input generation.
 
-The next eligible slice is Slice 8.3 — Artifact catalog/navigation.
-
 ## Slice 8.3 — Artifact catalog/navigation
+
+**Status:** DONE
 
 Provide local searchable metadata for research and report packages while preserving immutable underlying artifacts.
 
+Evidence:
+
+- `reporting/package/catalog.py` verifies immediate immutable research runs through
+  the canonical experiment catalog and verifies report-package artifact hashes
+  before exposing deterministic metadata records. Optional review-history
+  summaries are read-only and remain linked to the target identity.
+- `python -m reporting.package catalog` lists or case-insensitively searches
+  both artifact kinds without writing catalog/index state. Invalid or tampered
+  entries fail closed.
+- `tests/test_phase8.py` covers deterministic replay, metadata search, no-write
+  behavior, CLI JSON output, and tampered-package rejection. Focused Phase 4/8
+  tests passed and the reporting guard passed; the locked full suite passed with
+  447 tests, byte-compilation passed, and `git diff --check` passed.
+
 ## Slice 8.4 — Optional model-assisted drafting boundary
+
+**Status:** ACTIVE
 
 If authorized, an LLM may draft from the validated claim ledger only. It may not create new facts, recompute research, or bypass claim validation. Deterministic evidence-bound output remains the source of truth.
 
@@ -1277,7 +1293,7 @@ For a fresh agent, the intended pickup sequence is:
 
 `AGENTS.md` → `ROADMAP.md` → active `docs/plans/phase-*.md` → relevant code/tests → Git history/status.
 
-The current frontier is **Slice 8.2 — Rich deterministic output**.
+The current frontier is **Slice 8.4 — Optional model-assisted drafting boundary**.
 
 Phase 5 is DONE. Slice 5.7 closed the phase with
 `docs/plans/phase-5-data-plane-closure-matrix.md` and
