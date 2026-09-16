@@ -10,7 +10,10 @@ import pytest
 from analysis.experiments import (SplitPolicy, UncertaintyPolicy, bootstrap_mean,
                                   build_walk_forward_evaluation, experiment_spec_dict,
                                   experiment_spec_from_dict, run_experiment, StressPolicy)
+from analysis.experiments import StabilityPolicy
 from analysis.experiments.stress import _build_stress_matrix
+from analysis.experiments.stability import build_stability_evidence
+from analysis.experiments.catalog import load_run
 from test_phase6 import runner_snapshot, runner_spec
 
 
@@ -164,3 +167,85 @@ def test_runner_stress_matrix_does_not_expose_holdout_ids(tmp_path):
     assert evidence["selected_token_ids"] == ["ethereum:0xtok3"]
     assert all("ethereum:0xtok06" not in row["liquidity_excluded_token_ids"]
                for row in evidence["scenarios"])
+
+
+def test_stability_is_discovery_only_and_reports_concentration(tmp_path):
+    run = run_experiment(runner_spec(), runner_snapshot(), tmp_path / "runs")
+    evidence = json.loads((run / "stability.json").read_text())
+    assert evidence["version"] == "phase7-stability-v1"
+    assert evidence["selected_token_ids"] == ["ethereum:0xtok3"]
+    assert evidence["dimensions"]["chain"][0]["dominant"] is True
+    assert evidence["dimensions"]["leave_one_out"][0]["remaining_sample_size"] == 0
+    assert "ethereum:0xtok06" not in evidence["selected_token_ids"]
+
+
+def test_stability_policy_rejects_ambiguous_configuration():
+    with pytest.raises(ValueError, match="unsupported stability dimension"):
+        StabilityPolicy(dimensions=("chain", "unknown"))
+    with pytest.raises(ValueError, match="dominance threshold"):
+        StabilityPolicy(dominance_threshold=0)
+    with pytest.raises(ValueError, match="invalid stability policy"):
+        StabilityPolicy(version="phase7-stability-v999")
+
+
+def test_legacy_spec_without_stability_remains_loadable():
+    legacy = experiment_spec_dict(runner_spec())
+    legacy.pop("stability")
+    assert experiment_spec_from_dict(legacy).stability == StabilityPolicy()
+
+
+def test_stability_uses_decision_time_provider_evidence_and_fails_closed_on_ambiguity():
+    t0 = datetime(2025, 1, 1)
+    member = SimpleNamespace(token_id="a", chain="ethereum", t0=t0, source_evidence=(
+        {"source": "provider-z", "timestamp": t0.isoformat()},
+        {"source": "provider-a", "timestamp": (t0 + timedelta(days=1)).isoformat()},))
+    label = SimpleNamespace(token_id="a", horizon="24h", status="COMPLETE", value=0.1)
+    result = build_stability_evidence(selected_token_ids=frozenset({"a"}), labels=(label,), cohort=(member,),
+                                      feature_rows=({"token_id": "a", "launch_liquidity_usd": 20_000.0},),
+                                      horizon="24h", policy=StabilityPolicy(dimensions=("provider",)))
+    assert result["dimensions"]["provider"][0]["group"] == "provider-z"
+
+    offset_future = SimpleNamespace(token_id="a", chain="ethereum", t0=t0, source_evidence=(
+        {"source": "provider-z", "timestamp": "2024-12-31T23:30:00-02:00"},))
+    result = build_stability_evidence(selected_token_ids=frozenset({"a"}), labels=(label,), cohort=(offset_future,),
+                                      feature_rows=(), horizon="24h", policy=StabilityPolicy(dimensions=("provider",)))
+    assert result["dimensions"]["provider"][0]["group"] == "unavailable"
+
+    ambiguous = SimpleNamespace(token_id="a", chain="ethereum", t0=t0, source_evidence=(
+        {"source": "provider-a", "timestamp": t0.isoformat()},
+        {"source": "provider-b", "timestamp": t0.isoformat()},))
+    result = build_stability_evidence(selected_token_ids=frozenset({"a"}), labels=(label,), cohort=(ambiguous,),
+                                      feature_rows=(), horizon="24h", policy=StabilityPolicy(dimensions=("provider",)))
+    assert result["dimensions"]["provider"][0]["group"] == "ambiguous"
+
+
+def test_stability_does_not_call_censored_evidence_available_or_dominant():
+    result = build_stability_evidence(
+        selected_token_ids=frozenset({"a"}),
+        labels=(SimpleNamespace(token_id="a", horizon="24h", status="DATA_CENSORED", value=None),),
+        cohort=(SimpleNamespace(token_id="a", chain="ethereum", t0=datetime(2025, 1, 1), source_evidence=()),),
+        feature_rows=(), horizon="24h", policy=StabilityPolicy(dimensions=("chain",)))
+    assert result["status"] == "unavailable"
+    assert result["reason"] == "NO_COMPLETE_OBSERVATIONS"
+    assert result["dominated"] is False
+    assert result["dimensions"]["chain"][0]["dominant"] is False
+
+
+def test_stability_rejects_missing_subgroup_metadata_as_dominance():
+    result = build_stability_evidence(
+        selected_token_ids=frozenset({"a"}),
+        labels=(SimpleNamespace(token_id="a", horizon="24h", status="COMPLETE", value=0.1),),
+        cohort=(SimpleNamespace(token_id="a", chain="", t0=datetime(2025, 1, 1), source_evidence=()),),
+        feature_rows=(), horizon="24h", policy=StabilityPolicy(dimensions=("provider",)))
+    assert result["dimensions"]["provider"][0]["group"] == "unavailable"
+    assert result["dimensions"]["provider"][0]["dominant"] is False
+
+
+def test_current_run_requires_stability_artifact_at_catalog_boundary(tmp_path):
+    run = run_experiment(runner_spec(), runner_snapshot(), tmp_path / "runs")
+    manifest_path = run / "manifest.json"
+    manifest = json.loads(manifest_path.read_text())
+    manifest["artifacts"].pop("stability.json")
+    manifest_path.write_text(json.dumps(manifest, sort_keys=True, separators=(",", ":")) + "\n")
+    with pytest.raises(ValueError, match="lacks required artifacts"):
+        load_run(run)

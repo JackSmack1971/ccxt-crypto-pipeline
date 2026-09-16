@@ -164,6 +164,12 @@ explicit, and never reselects a candidate from validation or sealed holdout
 rows. Change the declarative `stress` policy in a spec to change its
 content-addressed methodology identity.
 
+Runs also emit `stability.json`, discovery-only evidence for the selected
+candidate's concentration by chain, fixed-length era, launch-liquidity band,
+provider, and leave-one-out launch. The declared `stability` policy controls
+these dimensions and the dominance threshold; missing or empty evidence stays
+explicit and the analysis never reselects a candidate from validation or holdout.
+
 ## Configuration
 
 Safe examples are provided in [`.env.example`](.env.example). YAML settings live in `config/cex.yaml`, `config/chains.yaml`, `config/evm.yaml`, and `config/solana.yaml`. The complete variable and credential setup is in [`docs/RUNBOOK.md`](docs/RUNBOOK.md).
