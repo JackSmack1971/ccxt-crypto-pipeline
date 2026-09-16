@@ -2,8 +2,8 @@
 
 **Status:** Active execution authority for forward work  
 **Current phase:** Phase 8 research product and publication operations
-**Baseline:** `main` at `23dbd389af88cade4584cb5fdc10b60dc17fcc3b`
-**Last reconciled:** 2026-09-16 (Slice 8.3 closed; Slice 8.4 active)
+**Baseline:** `main` at `a01eaed` (453 passed after Slice 8.5; 449 passed before it)
+**Last reconciled:** 2026-09-16 (Slice 8.5 closed; Slice 8.6 active)
 
 This file is the durable forward roadmap for `ccxt-crypto-pipeline`. It exists so a new agent can determine the repository's actual execution frontier without reconstructing intent from chat history, stale phase prose, or commit messages.
 
@@ -447,7 +447,7 @@ Evidence:
 
 # Phase 5 — Research-Grade Data Reliability
 
-**Status:** ACTIVE
+**Status:** DONE
 **Depends on:** Phase 4R complete.  
 **Goal:** Move from a correct local research chain to a measurable, recoverable observation system suitable for longitudinal studies.
 
@@ -987,7 +987,7 @@ Evidence:
 
 # Phase 7 — Robust Validation & Research Scaling
 
-**Status:** ACTIVE
+**Status:** DONE
 **Depends on:** Phase 6.  
 **Goal:** Broaden statistical confidence without turning the repository into an automated optimizer that rewards overfitting.
 
@@ -1230,7 +1230,24 @@ model input, isolation, tamper rejection, and fact-like output rejection.
 
 Create exportable packages for human publication. External posting remains a separate explicit authorization and SHOULD NOT be coupled directly to research execution.
 
+**Status:** DONE
+
+Evidence:
+
+- `reporting/package/export.py` verifies the immutable source package through the
+  catalog boundary, resolves effective review decisions through immutable
+  supersession links, and writes a deterministic content-addressed bundle with
+  source/artifact/reviewer/renderer/file hashes. It is local-only and excludes
+  claim-ledger/model-draft material from publication files.
+- `reporting/package/__main__.py` exposes the required JSON CLI; `tests/test_phase8.py`
+  covers approval gating, deterministic replay, immutable conflicts, rejection and
+  tampering, source/history isolation, draft exclusion, and CLI failure behavior.
+- The locked full suite passed with 453 tests; reporting guard, byte compilation,
+  and whitespace checks passed. Hosted CI remains the merge-time confirmation.
+
 ## Slice 8.6 — Publication closure matrix
+
+**Status:** ACTIVE
 
 Prove source-to-claim traceability, review history, renderer replay, accessibility, secret hygiene, and supersession behavior.
 
@@ -1298,7 +1315,7 @@ For a fresh agent, the intended pickup sequence is:
 
 `AGENTS.md` → `ROADMAP.md` → active `docs/plans/phase-*.md` → relevant code/tests → Git history/status.
 
-The current frontier is **Slice 8.4 — Optional model-assisted drafting boundary**.
+The current frontier is **Slice 8.6 — Publication closure matrix**.
 
 Phase 5 is DONE. Slice 5.7 closed the phase with
 `docs/plans/phase-5-data-plane-closure-matrix.md` and

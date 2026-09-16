@@ -130,6 +130,7 @@ docs/                   Architecture and local operations documentation
 | `python -m reporting.package record TARGET --target-kind research_run\|package --history-dir HISTORY --decision approved\|rejected\|superseded\|note --reviewer NAME --reviewed-at ISO_TIME` | Record an immutable review decision bound to an exact research run or report package |
 | `python -m reporting.package show TARGET_ID --history-dir HISTORY` | Verify and list review history deterministically |
 | `python -m reporting.package catalog --research-root RUNS --package-root PACKAGES [--history-dir HISTORY] [--query TEXT]` | Verify, list, and search immutable research runs and report packages locally |
+| `python -m reporting.package export --package PACKAGE --history-dir HISTORY --output-root EXPORTS` | Export an approved, immutable package for manual human publication preparation |
 | `python -m scheduler --once` | Run all stages once and exit |
 | `python -m scheduler.status` | Print JSON health status |
 
@@ -203,6 +204,12 @@ with `reporting.package.generate_assisted_draft`. The caller supplies the model
 function and model identifier; the isolated suggestion rejects numbers and
 comparisons, never changes the deterministic article, and remains pending review.
 
+An export requires a verified package with a current, unsuperseded effective
+approval and no later effective rejection in its immutable review history. It
+copies only deterministic publication artifacts into a self-verifying local
+bundle; it does not post, upload, contact a network, or record publication, and
+it makes no profitability or alpha claim.
+
 ## Configuration
 
 Safe examples are provided in [`.env.example`](.env.example). YAML settings live in `config/cex.yaml`, `config/chains.yaml`, `config/evm.yaml`, and `config/solana.yaml`. The complete variable and credential setup is in [`docs/RUNBOOK.md`](docs/RUNBOOK.md).
@@ -268,7 +275,7 @@ Read [`CONTRIBUTING.md`](CONTRIBUTING.md) before opening an issue or pull reques
 
 The canonical forward execution roadmap is [`ROADMAP.md`](ROADMAP.md). It records the current phase frontier, dependency-ordered implementation slices, per-slice acceptance gates, phase exit criteria, deferred boundaries, and the maintenance contract agents must follow as work lands.
 
-The current frontier is Phase 8 review/approval history. Phase 7 robust
+The current frontier is Phase 8 publication closure. Phase 7 robust
 validation is complete, including deterministic purged walk-forward,
 uncertainty, stress, stability, negative-control, and closure evidence while
 preserving a sealed holdout.
