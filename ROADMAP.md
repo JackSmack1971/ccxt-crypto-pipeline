@@ -1330,11 +1330,7 @@ Evidence:
 
 ## Slice 8R.2 — Scientific benchmark corpus
 
-**Status:** ACTIVE
-
-## Slice 8R.2 — Scientific benchmark corpus
-
-**Status:** PLANNED
+**Status:** DONE
 
 Define a deterministic synthetic or fixture-controlled corpus for offline/CI
 validation of methodological behavior, not profitability. It must include a
@@ -1347,9 +1343,23 @@ results, missing conversion evidence, and ambiguous identity evidence.
 Acceptance: the benchmark suite is deterministic, offline, and produces the
 expected reject/block/pass behavior for each declared case.
 
+Evidence:
+
+- `analysis/benchmarks/` defines the versioned 12-case corpus, deterministic
+  content identity, exact-result validator, and read-only CLI entry point.
+- `docs/plans/phase-8r-scientific-benchmark-corpus.md` records the corpus
+  contract and evidence boundary; README documents the CLI.
+- `tests/test_benchmark_corpus.py` verifies the complete case set, all three
+  dispositions, mismatch rejection, deterministic identity, and CLI replay.
+  Focused tests, compilation, and whitespace checks pass offline. The corpus
+  is methodological evidence only and does not establish alpha or execution
+  readiness.
+
+The next eligible slice is **8R.3 — Research question and hypothesis registry**.
+
 ## Slice 8R.3 — Research question and hypothesis registry
 
-**Status:** PLANNED
+**Status:** ACTIVE
 
 Define durable, non-generic contracts for research questions and hypotheses.
 Where applicable they must declare a stable ID, human-readable claim, universe,
