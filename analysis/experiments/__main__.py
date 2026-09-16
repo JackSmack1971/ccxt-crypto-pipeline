@@ -13,6 +13,8 @@ from .control import (approve_experiment_run, execute_experiment, inspect_experi
                       load_experiment_spec, validate_experiment_spec)
 from .research import (ResearchRegistry, research_hypothesis_from_dict,
                        research_question_from_dict, hypothesis_identity, question_identity, write_registry)
+from .campaign import (ResearchCampaign, campaign_identity, load_campaign,
+                       research_campaign_from_dict, write_campaign)
 
 
 def main() -> None:
@@ -37,6 +39,13 @@ def main() -> None:
     registry = commands.add_parser("write-registry", help="write an immutable research registry")
     registry.add_argument("path", help="JSON object with questions and hypotheses arrays")
     registry.add_argument("--output", required=True)
+    campaign = commands.add_parser("validate-campaign", help="validate and identify a research campaign")
+    campaign.add_argument("path")
+    write_campaign_cmd = commands.add_parser("write-campaign", help="write an immutable research campaign")
+    write_campaign_cmd.add_argument("path")
+    write_campaign_cmd.add_argument("--output", required=True)
+    inspect_campaign = commands.add_parser("inspect-campaign", help="verify an immutable research campaign")
+    inspect_campaign.add_argument("path")
     args = parser.parse_args()
 
     if args.command == "validate":
@@ -59,6 +68,16 @@ def main() -> None:
     elif args.command == "validate-hypothesis":
         hypothesis = research_hypothesis_from_dict(json.loads(Path(args.path).read_text(encoding="utf-8")))
         result = {"hypothesis_id": hypothesis.hypothesis_id, "identity": hypothesis_identity(hypothesis), "valid": True}
+    elif args.command == "validate-campaign":
+        campaign = research_campaign_from_dict(json.loads(Path(args.path).read_text(encoding="utf-8")))
+        result = {"campaign_id": campaign.campaign_id, "identity": campaign_identity(campaign), "valid": True}
+    elif args.command == "write-campaign":
+        campaign = research_campaign_from_dict(json.loads(Path(args.path).read_text(encoding="utf-8")))
+        path = write_campaign(campaign, args.output)
+        result = {"campaign_id": path.parent.name, "path": str(path)}
+    elif args.command == "inspect-campaign":
+        campaign = load_campaign(args.path)
+        result = {"campaign_id": campaign.campaign_id, "path": str(args.path), "valid": True}
     else:
         payload = json.loads(Path(args.path).read_text(encoding="utf-8"))
         questions = tuple(research_question_from_dict(item) for item in payload.get("questions", ()))

@@ -1429,7 +1429,7 @@ The next eligible slice is **8R.5 — Research campaign abstraction**.
 
 ## Slice 8R.5 — Research campaign abstraction
 
-**Status:** PLANNED
+**Status:** DONE
 
 Introduce a reproducible research provenance object above individual
 experiments. A campaign binds the research question, dataset snapshot/profile,
@@ -1441,9 +1441,23 @@ dashboard.
 Acceptance: a campaign can be verified and replayed from its declared immutable
 identities, including rejected hypotheses and limitations.
 
+Evidence:
+
+- `analysis/experiments/campaign.py` defines the versioned `ResearchCampaign`
+  contract, deterministic identity, immutable artifact writer/loader, and
+  verification boundary for the exact registry, dataset profile, and governed
+  experiment runs. Rejected/promoted hypotheses are explicit and disjoint;
+  limitations and conclusion are mandatory.
+- `python -m analysis.experiments validate-campaign`, `write-campaign`, and
+  `inspect-campaign` provide local campaign entry points. README usage documents
+  the interface.
+- `tests/test_research_campaign.py` proves deterministic identity, outcome
+  validation, immutable replay, and CLI validation/writing. Focused and full
+  offline verification pass.
+
 ## Slice 8R.6 — First complete real-data research campaign
 
-**Status:** PLANNED
+**Status:** ACTIVE
 
 Execute at least one meaningful campaign against realistic persisted historical
 data through the governed path:
