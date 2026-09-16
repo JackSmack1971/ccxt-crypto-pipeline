@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "ccxt-crypto-pipeline"
 version = "0.1.0"
-description = "Local CEX and DEX crypto data-ingestion pipeline"
+description = "Local-first crypto quantitative research system for point-in-time data, governed experiments, and evidence-bound reporting"
 requires-python = ">=3.10"
 dependencies = [
     "ccxt==4.5.10",

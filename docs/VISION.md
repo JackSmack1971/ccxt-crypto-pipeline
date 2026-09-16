@@ -61,17 +61,15 @@ like this same profile, not a general retail audience.
 
 ## Product Direction
 
-The near-term frontier (Phase 7) is proving that any research result which
-survives initial validation also survives deliberate attempts to break it:
-effect-size gates, cost/liquidity stress, cohort and chain stability checks,
-and negative/permutation controls designed to surface leakage. Beyond that,
-Phase 8 turns validated research into locally reviewable, evidence-bound
-report packages — with claim-level provenance back to source data — without
-weakening any of the guarantees above. Optional paper execution (Phase 9)
-and live execution (Phase 10) sit explicitly beyond the current product
-commitment: they are not roadmap inevitabilities, they are separate future
-decisions that would each require their own threat model, risk controls,
-and authorization before a single line of order-placing code is written.
+The active frontier is Phase 8R empirical research readiness: proving that
+research questions can be evaluated against realistic historical data with
+dataset-quality evidence, durable hypothesis identity, falsification, and
+independent methodological review. Phase 8 research product and publication
+operations are complete, providing locally reviewable, evidence-bound report
+packages with claim-level provenance and human-gated export. Paper/forward
+execution (Phase 9) and live execution (Phase 10) remain separately gated,
+deferred decisions requiring their own threat models, controls, and
+authorization.
 
 ## Non-Goals
 
@@ -105,11 +103,11 @@ The vision is being honored when:
 
 ## Future Possibilities
 
-If the product commitment ever changes, the natural extensions are: richer
-deterministic reporting formats (HTML/PDF) with the same claim-provenance
-guarantees, an optional model-assisted drafting layer constrained to an
-already-validated claim ledger, and — only behind explicit, separately
-authorized design work — paper and eventually live execution with
-independent risk controls, kill switches, and audit logging. None of these
-are commitments; they are documented as the directions this foundation was
+If the product commitment ever changes, the natural extensions are additional
+deterministic reporting formats such as PDF, and — only behind explicit,
+separately authorized design work — paper and eventually live execution with
+independent risk controls, kill switches, and audit logging. HTML output and
+model-assisted drafting constrained to an already-validated claim ledger are
+implemented local capabilities, not publication or execution authority. None
+of these extensions are commitments; they are directions this foundation was
 deliberately built to support without having to be re-architected first.
