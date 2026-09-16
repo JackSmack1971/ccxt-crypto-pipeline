@@ -38,7 +38,7 @@ from .stability import build_stability_evidence
 from .negative_controls import build_negative_control_evidence
 from .closure import build_validation_closure
 
-MANIFEST_VERSION = "phase7-run-v3"
+MANIFEST_VERSION = "phase7-run-v4"
 
 
 def resolve_feature_registry(spec: ExperimentSpec) -> FeatureRegistry:

@@ -474,7 +474,7 @@ def test_runner_executes_the_declared_sequence_and_honestly_withholds_significan
     assert promotion["inputs"]["discovery_adjusted_p_value"] is None
 
     manifest = json.loads((run / "manifest.json").read_text())
-    assert manifest["manifest_version"] == "phase7-run-v3"
+    assert manifest["manifest_version"] == "phase7-run-v4"
     assert manifest["inputs"]["dataset_identity"] == "runner-fixture"
     assert set(manifest["artifacts"]) == {
         "spec.json", "cohort.json", "features.json", "labels.json",

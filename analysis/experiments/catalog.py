@@ -15,6 +15,7 @@ from .runner import MANIFEST_VERSION
 LEGACY_MANIFEST_VERSION = "phase6-run-v1"
 LEGACY_ROBUST_MANIFEST_VERSION = "phase7-run-v1"
 LEGACY_CURRENT_MANIFEST_VERSION = "phase7-run-v2"
+LEGACY_CLOSURE_MANIFEST_VERSION = "phase7-run-v3"
 
 
 @dataclass(frozen=True)
@@ -58,7 +59,8 @@ def load_run(run_dir: str | Path) -> RunRecord:
     manifest = _read_json(path / "manifest.json")
     manifest_version = manifest.get("manifest_version")
     if manifest_version not in {LEGACY_MANIFEST_VERSION, LEGACY_ROBUST_MANIFEST_VERSION,
-                                LEGACY_CURRENT_MANIFEST_VERSION, MANIFEST_VERSION} or manifest.get("immutable") is not True:
+                                LEGACY_CURRENT_MANIFEST_VERSION, LEGACY_CLOSURE_MANIFEST_VERSION,
+                                MANIFEST_VERSION} or manifest.get("immutable") is not True:
         raise ValueError(f"unsupported or mutable experiment run manifest: {path}")
     run_id = manifest.get("run_id")
     inputs = manifest.get("inputs")
@@ -83,10 +85,12 @@ def load_run(run_dir: str | Path) -> RunRecord:
             raise ValueError(f"experiment run artifact hash mismatch: {artifact_path}")
 
     required = {"spec.json", "candidate.json", "promotion.json", "definitions.json"}
-    if manifest_version in {LEGACY_ROBUST_MANIFEST_VERSION, LEGACY_CURRENT_MANIFEST_VERSION, MANIFEST_VERSION}:
+    if manifest_version in {LEGACY_ROBUST_MANIFEST_VERSION, LEGACY_CURRENT_MANIFEST_VERSION,
+                            LEGACY_CLOSURE_MANIFEST_VERSION, MANIFEST_VERSION}:
         required.add("stability.json")
-    if manifest_version == MANIFEST_VERSION:
+    if manifest_version in {LEGACY_CLOSURE_MANIFEST_VERSION, MANIFEST_VERSION}:
         required.add("negative_controls.json")
+    if manifest_version in {LEGACY_CLOSURE_MANIFEST_VERSION, MANIFEST_VERSION}:
         required.add("validation_closure.json")
     if not required <= set(artifacts):
         raise ValueError(f"experiment run manifest lacks required artifacts: {path}")
