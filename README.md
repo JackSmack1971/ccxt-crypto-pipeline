@@ -1,11 +1,39 @@
 # ccxt-crypto-pipeline
 
-`ccxt-crypto-pipeline` is a local crypto research pipeline. Phase 1 collects,
-normalizes, and persists CEX and DEX/on-chain observations; the implemented
-Phase 2 slice provides deterministic, offline backtesting over those snapshots.
+`ccxt-crypto-pipeline` is a local-first, reproducible crypto quantitative
+research system for point-in-time data, governed experimentation, validation,
+and evidence-bound research reporting. It helps a researcher move from
+external CEX/DEX/on-chain observations to canonical local datasets,
+deterministic backtests, hypothesis evaluation, robustness evidence, and
+reviewable research packages without hiding uncertainty or provenance.
 
-Ingestion remains the only provider-facing layer. Phase 2 analysis reads local
-persisted data and never calls live providers.
+The implemented product has four deliberately separated surfaces: ingestion
+collects provider observations; analysis builds point-in-time datasets and
+research results; governed experiments and validation test those results for
+leakage, instability, practical effect, and negative controls; reporting binds
+claims and charts to immutable evidence and produces deterministic local
+packages for human review/export.
+
+This is research software, not a trading system. Ingestion is the only layer
+that performs provider/network I/O. Analysis and reporting operate on
+persisted local data or approved local artifacts. Human approval does not
+promote a candidate into execution, and export prepares a bundle for manual
+publication rather than posting it. Paper/forward execution (Phase 9) and
+live execution (Phase 10) are separately gated and remain deferred.
+
+Determinism and evidence boundaries matter because a result that cannot be
+replayed from point-in-time inputs, declared methodology, and immutable
+artifacts cannot support an honest research conclusion. Tests and fixture
+success do not establish provider completeness, profitability, predictive
+alpha, or execution readiness.
+
+## Current frontier
+
+Phase 8 research product and publication operations are complete. The active
+frontier is **Phase 8R Empirical Research Readiness**, focused on dataset-
+quality evidence, scientific benchmarks, durable question/hypothesis identity,
+falsification, research campaigns, and independent methodological review. See
+the authoritative [roadmap](ROADMAP.md) for status and acceptance criteria.
 
 ## Contents
 
@@ -84,17 +112,30 @@ The status command prints JSON derived from the `runs` table. A live cycle can s
 ## Architecture
 
 ```text
-ccxt CEX adapters ------------------------> ingestion/cex -------+
-Dexscreener, GeckoTerminal, DefiLlama ---> ingestion/dex/tier0 -+
-EVM RPC endpoints ------------------------> ingestion/evm -------+--> DuckDB and OHLCV Parquet
-Etherscan V2, Routescan, MegaNode --------> ingestion/evm -------+
-Helius Enhanced, DAS, RPC ----------------> ingestion/solana ---+
-
-DuckDB and OHLCV Parquet --> normalization
-DuckDB and OHLCV Parquet --> scheduler and status
+external observations --> ingestion --> canonical DuckDB / Parquet
+                                      |
+                                      v
+                 normalization / point-in-time datasets
+                                      |
+                                      v
+       backtesting / hypothesis research / governed experiments
+                                      |
+                                      v
+          validation / falsification / robustness evidence
+                                      |
+                                      v
+        immutable artifacts --> deterministic reporting
+                                      |
+                                      v
+                         human review / manual export
 ```
 
-The scheduler coordinates existing jobs and records each job in `runs`; it does not contain provider-specific request logic. `ingestion/evm/rpc.py` observes blocks and factory logs. `ingestion/evm/providers.py` implements the normalized enrichment interface. Unsupported capabilities remain explicit rather than being fabricated or silently routed to a paid fallback. See [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) for the final data flow, schema, and routing table.
+The scheduler coordinates ingestion and normalization jobs and records each job
+in `runs`; it does not contain provider-specific request logic. The analysis
+boundary is read-only and point-in-time. Unsupported capabilities remain
+explicit rather than being fabricated or silently routed to a paid fallback.
+See [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) for the current data flow,
+schema, routing table, and research/reporting boundaries.
 
 ## Directory structure
 
@@ -127,6 +168,7 @@ docs/                   Architecture and local operations documentation
 | `python -m analysis.experiments run SPEC.json --db DB --output RUNS [--timeframe 1h] [--source SOURCE]` | Execute the canonical experiment runner against a read-only local snapshot |
 | `python -m analysis.experiments inspect RUN_DIR` | Hash-verify and inspect one immutable experiment run |
 | `python -m analysis.experiments approve RUN_DIR --approval-dir APPROVALS --reviewer NAME --reviewed-at ISO_TIME --rationale TEXT` | Record a separate, immutable human approval attestation |
+| `python -m analysis.datasets DATABASE --output PROFILES [--timeframe 1h] [--source SOURCE]` | Build and immutably write deterministic dataset-quality/coverage evidence |
 | `python -m reporting.package record TARGET --target-kind research_run\|package --history-dir HISTORY --decision approved\|rejected\|superseded\|note --reviewer NAME --reviewed-at ISO_TIME` | Record an immutable review decision bound to an exact research run or report package |
 | `python -m reporting.package show TARGET_ID --history-dir HISTORY` | Verify and list review history deterministically |
 | `python -m reporting.package catalog --research-root RUNS --package-root PACKAGES [--history-dir HISTORY] [--query TEXT]` | Verify, list, and search immutable research runs and report packages locally |
@@ -277,8 +319,9 @@ The canonical forward execution roadmap is [`ROADMAP.md`](ROADMAP.md). It record
 
 Phase 8 research product and publication operations are complete, including
 deterministic report output, local catalog/navigation, review history, and
-human-gated publication export. Phase 9 paper execution and Phase 10 live
-execution remain deferred pending separate product and safety decisions.
+human-gated publication export. Phase 8R empirical research readiness is the
+active frontier. Phase 9 paper/forward execution and Phase 10 live execution
+remain deferred pending separate product and safety decisions.
 
 ## License
 
@@ -287,5 +330,8 @@ No license file was found. Add a license before publishing or accepting contribu
 ## Phase boundary
 
 Ingestion is the only layer allowed to call external providers. Analysis reads
-persisted local data and remains offline-capable; it does not authorize live or
-paper trading, automated execution, alpha claims, or external publication.
+persisted local data and remains offline-capable; research evidence does not
+authorize trading, human approval does not promote a candidate into execution,
+and publication/export remains human-gated. No phase currently authorizes
+paper/forward execution, live execution, automated execution, alpha claims, or
+external publication.

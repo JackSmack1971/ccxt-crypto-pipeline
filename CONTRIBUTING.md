@@ -1,7 +1,8 @@
 # Contributing
 
 Thank you for contributing to `ccxt-crypto-pipeline`. This repository is a
-local-first crypto data-ingestion and research pipeline. Contributions must
+local-first crypto quantitative research system built on a provider-facing
+ingestion pipeline. Contributions must
 preserve reproducibility, point-in-time correctness, canonical asset identity,
 and the separation between provider-facing ingestion and offline analysis.
 
@@ -272,6 +273,12 @@ authorization.
 Update documentation when commands, configuration, schema, phase status,
 provider capability, or user-visible behavior changes. Documentation must
 describe implemented behavior, not an aspirational future design.
+
+`python -m pytest tests/test_documentation_consistency.py` checks selected
+public facts against `storage/schema.py`, `pyproject.toml`, and the status
+headings in `ROADMAP.md`. It covers schema version, minimum Python version, and
+high-visibility phase state; subjective documentation consistency still
+requires review.
 
 If you discover an exposed credential or secret, stop using it, revoke or
 rotate it, remove it from all affected artifacts, and notify the maintainers

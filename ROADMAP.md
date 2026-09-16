@@ -1,9 +1,9 @@
 # Engineering Roadmap
 
 **Status:** Active execution authority for forward work  
-**Current phase:** Phase 8 research product and publication operations
+**Current phase:** Phase 8R empirical research readiness
 **Baseline:** `main` at `97c5dc5` (454 passed after Phase 8 closure)
-**Last reconciled:** 2026-09-16 (Phase 8 closed; Phase 9 remains deferred)
+**Last reconciled:** 2026-09-16 (Phase 8 closed; Phase 8R is the next frontier; Phases 9–10 remain deferred)
 
 This file is the durable forward roadmap for `ccxt-crypto-pipeline`. It exists so a new agent can determine the repository's actual execution frontier without reconstructing intent from chat history, stale phase prose, or commit messages.
 
@@ -75,10 +75,12 @@ Green CI evidence is mandatory for Phase 4R.2 and every later slice.
 
 The repository has moved beyond its original phase prose. The current baseline includes:
 
-- **Phase 1 ingestion/storage:** CEX, Tier-0 DEX, EVM, Solana, normalization, scheduling, DuckDB/Parquet persistence, schema version 5, timestamped metadata/lineage observations, and source-scoped OHLCV.
+- **Phase 1 ingestion/storage:** CEX, Tier-0 DEX, EVM, Solana, normalization, scheduling, DuckDB/Parquet persistence, schema version 13, timestamped metadata/lineage observations, source-scoped OHLCV, and short-horizon DEX/on-chain observations.
 - **Phase 2 backtesting:** read-only point-in-time snapshots, a narrow strategy protocol, deterministic single-CEX next-bar-open simulation, fees/slippage, metrics, and immutable run artifacts.
 - **Phase 3 research:** cohort extraction, temporal feature registry, fixed-horizon labels, purged chronological discovery/validation/holdout partitions, governed candidate-promotion states, multiple-testing helpers, deterministic research artifacts, and Phase-2-compatible handoff metadata.
-- **Phase 4 reporting:** hash-verified Phase 3 linkage, hash-verified staged inputs, claim/chart validation, deterministic SVG rendering, Markdown package generation, secret checks, immutable package artifacts, and a pending human-review gate.
+- **Phase 4 reporting:** hash-verified Phase 3 linkage, hash-verified staged inputs, claim/chart and derivation validation, deterministic SVG/HTML rendering, Markdown package generation, secret checks, immutable package artifacts, human review attestations/history, catalog navigation, and human-gated publication export.
+- **Phase 6–7 experiment control and validation:** deterministic experiment identity, frozen hypothesis families, chronological discovery/validation/holdout separation with purge/embargo semantics, candidate promotion gates, uncertainty/effect-size evidence, stress testing, stability analysis, negative controls, optional walk-forward evaluation, and validation-closure evidence.
+- **Phase 8 research product operations:** immutable experiment/report artifacts, deterministic reporting, immutable review history, artifact catalog/navigation, and local publication export. Phase 8 is complete; these capabilities do not by themselves establish empirical research validity or authorize execution.
 - **Cross-phase evidence:** the test suite includes an offline, content-addressed Phase 1 → Phase 3 → approved Phase 4 fixture chain.
 - **Continuous verification:** GitHub Actions runs the locked fixture/unit suite, storage migration guard, byte-compilation, and whitespace checks for pull requests and `main` without provider credentials.
 
@@ -86,15 +88,22 @@ The latest hardening work fixed several earlier weaknesses: metadata/lineage his
 
 ### 2.1 What is *not* yet proven complete
 
-The following remain open and define the active frontier:
+The repository has largely built the laboratory. The active frontier is proving
+that it can produce credible empirical conclusions from realistic historical
+crypto data. In particular, the following remain open for Phase 8R:
 
-- short-horizon real-data coverage for new DEX/on-chain assets is not yet a production ingestion contract comparable to the synthetic 1h fixtures;
-- token/pool/market identity semantics still need a production-grade contract where provider events describe pools but research evaluates token-level outcomes;
-- quote-to-USD semantics are not yet a durable historical conversion contract for non-USD quote assets;
-- Phase 2 portfolio metrics need timestamp-level aggregation/frequency-aware annualization before broader multi-asset research use;
-- Phase 4 claim validation proves provenance linkage but does not yet prove that a number stated in prose is a declared derivation of the referenced evidence value;
+- deterministic dataset-quality and coverage evidence bound to exact dataset profiles;
+- a fixed scientific benchmark corpus for leakage, null, bias, identity, conversion, missingness, and robustness behavior;
+- durable research-question and hypothesis identities that preserve the question → hypothesis → experiment specification → result distinction;
+- a declared, evidence-bound falsification policy rather than post-hoc robustness selection;
+- a reproducible research-campaign provenance object spanning rejected and promoted hypotheses, evidence, limitations, and conclusion;
+- at least one complete real-data research campaign with honest positive or negative outcome handling;
+- an independent methodological audit before any execution phase can become active.
 
-These gaps are why the project is considered **in Phase 4, but not yet Phase 4-complete**.
+Earlier data-plane limitations remain research inputs and must be characterized
+by the dataset-profile evidence rather than hidden behind a generic quality
+score. Dataset correctness, completeness, representativeness, and fitness for a
+particular research question are distinct claims.
 
 ---
 
@@ -1266,23 +1275,211 @@ Evidence:
 
 ---
 
-# Phase 9 — Optional Paper Execution
+# Phase 8R — Empirical Research Readiness
 
-**Status:** DEFERRED
+**Status:** ACTIVE
+**Depends on:** Phase 8 for immutable artifacts, review history, deterministic reporting, and human-gated export.
+**Goal:** Prove that the repository can produce credible, reproducible research conclusions from realistic historical crypto data before adding execution.
 
-This phase is **not part of the current product commitment**. Start it only after an explicit product decision that the repository should become a trading/execution system.
+The central question is not merely “Does the software work?” It is whether the
+system can take a meaningful crypto hypothesis from raw historical observations
+to a defensible conclusion without leakage, selection bias, provenance ambiguity,
+or unsupported inference. Research validity, dataset fitness, falsification, and
+real-data research campaigns are first-class concerns in this phase.
 
-If authorized, it requires a new design/threat model and a hard boundary between research outputs and paper orders. At minimum it would require broker/exchange adapters, account-state reconciliation, independent risk controls, kill switches, idempotent order intent, audit logs, and paper-only acceptance evidence.
+## Slice 8R.1 — Dataset quality and coverage evidence
 
-Phase 8 completion does not imply Phase 9 should begin.
+**Status:** DONE
+
+Create the roadmap contract for deterministic dataset-profile artifacts. A
+profile should describe, where applicable, dataset/content identity, asset,
+provider, chain, and time-period coverage, launch-detection latency,
+price/liquidity observation density, missingness, gaps, source disagreement,
+censored rows, identity ambiguity, quote-conversion gaps, dead/delisted asset
+retention, eligibility/exclusion reasons and distributions, and unsupported or
+unavailable evidence. Experiments must bind to an exact dataset-profile identity.
+
+The contract must distinguish dataset correctness, completeness,
+representativeness, and fitness for a particular research question. No generic
+quality score may replace explicit evidence.
+
+Acceptance:
+
+- profile identity and all applicable coverage/missingness/exclusion evidence are deterministic and replayable;
+- unsupported or unavailable evidence remains explicit;
+- a research input can bind to and verify the exact profile identity;
+- correctness, completeness, representativeness, and question-specific fitness remain separately inspectable.
+
+Evidence:
+
+- `analysis/datasets/profile.py` builds a versioned, deterministic profile bound
+  to the exact `DatasetSnapshot.dataset_identity`, with per-series time bounds,
+  expected/observed/missing periods, internal gaps, launch-event latency,
+  quote-conversion gaps, label-horizon censoring, identity checks, and explicit
+  liquidity, source-disagreement, lifecycle, capability, representativeness,
+  and question-fitness unavailable states where the snapshot cannot support a
+  claim.
+- `write_dataset_profile` writes an immutable `profile.json` under its
+  content-derived profile identity and rejects conflicting rewrites. The
+  `python -m analysis.datasets` command provides the read-only local entry
+  point; README usage documents it.
+- `tests/test_dataset_profile.py` proves deterministic replay, exact dataset
+  binding, missing-period and gap accounting, explicit conversion
+  unavailability, and immutable artifact replay. The focused and complete
+  suites pass offline (123 focused; 458 repository-wide).
+
+## Slice 8R.2 — Scientific benchmark corpus
+
+**Status:** ACTIVE
+
+## Slice 8R.2 — Scientific benchmark corpus
+
+**Status:** PLANNED
+
+Define a deterministic synthetic or fixture-controlled corpus for offline/CI
+validation of methodological behavior, not profitability. It must include a
+random signal that is rejected, explicit future-data leakage that is detected or
+blocked, a survivorship-biased universe, known-null permutation, known-effect
+synthetic process, duplicate observations, future liquidity contamination,
+insufficient sample, discovery-only overfit, unstable cross-chain/provider
+results, missing conversion evidence, and ambiguous identity evidence.
+
+Acceptance: the benchmark suite is deterministic, offline, and produces the
+expected reject/block/pass behavior for each declared case.
+
+## Slice 8R.3 — Research question and hypothesis registry
+
+**Status:** PLANNED
+
+Define durable, non-generic contracts for research questions and hypotheses.
+Where applicable they must declare a stable ID, human-readable claim, universe,
+treatment/signal/features, labels/outcomes, temporal availability, confounders,
+baseline, minimum effect, statistical and validation policy, falsification
+expectations, failure interpretation, applicable datasets, and provenance/
+identity. Preserve the distinction:
+
+`question → hypothesis → experiment specification → experiment result`.
+
+Acceptance: identities are deterministic, declarations are sufficient to
+reconstruct the intended test, and results cannot silently change the declared
+question or hypothesis.
+
+## Slice 8R.4 — Generalized falsification framework
+
+**Status:** PLANNED
+
+Expand the existing negative-control and stability philosophy into a general
+falsification boundary. Applicable declared tests may include label permutation,
+placebo timestamps, delayed signals, shuffled identities, randomized event
+times, source substitution, alternative universes, leave-chain-out,
+leave-provider-out, liquidity/regime/era stratification, and robustness under
+cost assumptions.
+
+Acceptance:
+
+- each hypothesis declares its applicable falsification policy before results are seen;
+- falsification evidence is bound to the methodology and exact artifacts;
+- inapplicable, unavailable, failed, and passed tests remain distinct;
+- the framework does not require every test for every hypothesis or permit post-hoc selection.
+
+## Slice 8R.5 — Research campaign abstraction
+
+**Status:** PLANNED
+
+Introduce a reproducible research provenance object above individual
+experiments. A campaign binds the research question, dataset snapshot/profile,
+hypothesis set, experiment specifications, rejected and promoted hypotheses,
+validation and robustness/falsification evidence, limitations, campaign
+conclusion, and exact artifact identities. A campaign is not merely a folder or
+dashboard.
+
+Acceptance: a campaign can be verified and replayed from its declared immutable
+identities, including rejected hypotheses and limitations.
+
+## Slice 8R.6 — First complete real-data research campaign
+
+**Status:** PLANNED
+
+Execute at least one meaningful campaign against realistic persisted historical
+data through the governed path:
+
+`raw observations → dataset profile → question → hypotheses → discovery → validation → holdout → uncertainty → robustness/falsification → conclusion → deterministic report/package`.
+
+The campaign may reject its hypothesis. A negative result is a successful
+research outcome when the methodology behaved correctly. Alpha and profitability
+are not required; explicit limitations and data-quality caveats are required.
+
+Acceptance: the complete campaign is replayable, artifact identities and
+methodology are stable, and both positive and negative conclusions can be
+represented honestly without execution authority.
+
+## Slice 8R.7 — Independent methodological audit
+
+**Status:** PLANNED
+
+Close Phase 8R with an independent audit before Phase 9 may become active. The
+audit must verify point-in-time and holdout integrity, deterministic identities,
+dataset-profile binding, multiple-testing controls, effect-size semantics,
+uncertainty, falsification completeness, provenance, reproducibility,
+negative-result handling, and the absence of post-hoc methodology rewriting.
+
+This should build upon, rather than duplicate, the repository's existing
+`experiment-change-validation` workflow and any applicable
+`experiment_integrity_reviewer` procedure available in the governing review
+environment.
+
+## Phase 8R exit criteria
+
+Phase 8R is complete only when:
+
+- deterministic dataset-quality evidence exists;
+- the scientific benchmark corpus passes;
+- questions and hypotheses have durable identities;
+- falsification evidence is methodology-bound;
+- a research campaign can be replayed;
+- at least one realistic campaign completes end-to-end;
+- positive and negative outcomes are represented honestly;
+- independent methodological review passes; and
+- no research success implies execution authority.
 
 ---
 
-# Phase 10 — Optional Live Execution
+# Phase 9 — Paper / Forward Execution
 
 **Status:** DEFERRED
 
-Live-capital execution requires a separate explicit authorization after successful paper-execution validation, security review, operational monitoring, and failure-recovery testing. Nothing in Phases 1–8 authorizes live trading.
+Phase 9 remains execution-free-of-real-capital and requires a separate explicit
+activation decision. Successful Phase 8R closure is a prerequisite. Its purpose
+is forward validation of already-established research, not a new place to search
+for alpha.
+
+If activated, the design must address timestamped signal generation from only
+contemporaneously available evidence, paper order creation, realistic fill
+simulation/observation, market impact and slippage, latency, rejected or
+unfilled orders, portfolio state, risk limits, execution provenance, comparison
+of backtest assumptions with forward behavior, drift detection, strategy
+disablement, and human review.
+
+Phase 9 must not silently modify hypothesis methodology based on forward
+performance. Forward evidence may trigger a new research campaign, but it must
+not mutate historical experiment identity.
+
+---
+
+# Phase 10 — Live Execution
+
+**Status:** DEFERRED
+
+Phase 10 is a distinct product and safety boundary, not an automatic continuation
+of Phase 9. It remains deferred unless separately authorized by an explicit
+product decision.
+
+Separate design work must address real capital, exchange authentication,
+wallet/custody boundaries, secrets, order authorization, position/risk limits,
+emergency stop, reconciliation, idempotent execution and retries,
+external-system failure, audit trail, operator approval, disaster recovery,
+live monitoring, and applicable legal/regulatory considerations. Phase 10
+activation requires that separate decision and safety evidence.
 
 ---
 
@@ -1328,9 +1525,10 @@ For a fresh agent, the intended pickup sequence is:
 
 `AGENTS.md` → `ROADMAP.md` → active `docs/plans/phase-*.md` → relevant code/tests → Git history/status.
 
-The current frontier is **Phase 8 complete**. Phase 9 remains deferred and is
-not part of the current product commitment; no optional execution slice is
-activated by Phase 8 closure.
+The current frontier is **Phase 8R empirical research readiness**. Phase 8 is
+complete. Phase 9 remains deferred pending Phase 8R closure and an explicit
+activation decision; Phase 10 remains separately deferred and requires its own
+product decision. No roadmap phase authorizes paper or live execution.
 
 Phase 5 is DONE. Slice 5.7 closed the phase with
 `docs/plans/phase-5-data-plane-closure-matrix.md` and
