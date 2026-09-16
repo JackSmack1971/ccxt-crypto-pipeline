@@ -168,6 +168,9 @@ docs/                   Architecture and local operations documentation
 | `python -m analysis.experiments validate-question QUESTION.json` | Validate and identify a durable research question declaration |
 | `python -m analysis.experiments validate-hypothesis HYPOTHESIS.json` | Validate and identify a durable hypothesis declaration |
 | `python -m analysis.experiments write-registry REGISTRY.json --output REGISTRIES` | Write an immutable question/hypothesis registry |
+| `python -m analysis.experiments validate-campaign CAMPAIGN.json` | Validate and identify a research campaign declaration |
+| `python -m analysis.experiments write-campaign CAMPAIGN.json --output CAMPAIGNS` | Write an immutable research campaign |
+| `python -m analysis.experiments inspect-campaign CAMPAIGN_DIR` | Verify and inspect an immutable research campaign |
 | `python -m analysis.experiments run SPEC.json --db DB --output RUNS [--timeframe 1h] [--source SOURCE]` | Execute the canonical experiment runner against a read-only local snapshot |
 | `python -m analysis.experiments inspect RUN_DIR` | Hash-verify and inspect one immutable experiment run |
 | `python -m analysis.experiments approve RUN_DIR --approval-dir APPROVALS --reviewer NAME --reviewed-at ISO_TIME --rationale TEXT` | Record a separate, immutable human approval attestation |
@@ -194,6 +197,12 @@ hypothesis identities part of the spec and run identities, so a result cannot
 silently change what was declared. Declarations retain unavailable or
 question-specific evidence as explicit fields; they do not establish alpha or
 execution readiness.
+
+A research campaign binds a question, registry, exact dataset/profile identities,
+hypothesis outcomes, experiment/run identities, artifact identities, conclusion,
+and limitations into one immutable provenance object. Campaign validation is
+local and replayable; rejected hypotheses remain part of the record, and a
+campaign is research evidence only, not an execution authorization.
 
 Experiment runs also emit deterministic `uncertainty.json` evidence using the
 configured moving-block bootstrap policy. The policy records its method,
