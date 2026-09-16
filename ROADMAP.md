@@ -1217,9 +1217,14 @@ Evidence:
 
 ## Slice 8.4 — Optional model-assisted drafting boundary
 
-**Status:** ACTIVE
+**Status:** DONE
 
-If authorized, an LLM may draft from the validated claim ledger only. It may not create new facts, recompute research, or bypass claim validation. Deterministic evidence-bound output remains the source of truth.
+An opt-in caller-supplied model may draft only editorial connective prose from an
+immutable package's hash-verified claim ledger. The boundary rejects numeric,
+comparative, and secret-like output, records the model and ledger identities in an
+isolated immutable pending-review draft, and never changes the deterministic
+article or publication/review state. `tests/test_phase8.py` covers ledger-only
+model input, isolation, tamper rejection, and fact-like output rejection.
 
 ## Slice 8.5 — Publication export boundary
 

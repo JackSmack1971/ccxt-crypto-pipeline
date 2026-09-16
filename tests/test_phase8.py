@@ -6,6 +6,7 @@ import sys
 import pytest
 
 from reporting.package.catalog import catalog_artifacts
+from reporting.package.draft import build_draft_request, generate_assisted_draft
 from reporting.package.review_history import record_review, review_history
 from test_phase6 import runner_snapshot, runner_spec
 from analysis.experiments.runner import run_experiment
@@ -16,8 +17,12 @@ def _package(tmp_path):
     package.mkdir(parents=True)
     artifact = b"# reviewed\n"
     (package / "article.md").write_bytes(artifact)
+    ledger = b"[]\n"
+    (package / "claim-ledger.json").write_bytes(ledger)
     manifest = {"package_version": "phase4-v1", "package_id": package.name,
-                "immutable": True, "artifacts": {"article.md": hashlib.sha256(artifact).hexdigest()}}
+                "immutable": True, "review_status": "pending",
+                "artifacts": {"article.md": hashlib.sha256(artifact).hexdigest(),
+                               "claim-ledger.json": hashlib.sha256(ledger).hexdigest()}}
     (package / "package-manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
     return package
 
@@ -92,3 +97,30 @@ def test_catalog_rejects_tampered_package_and_cli_returns_metadata(tmp_path):
     (package / "article.md").write_bytes(b"tampered\n")
     with pytest.raises(ValueError, match="artifact hash mismatch"):
         catalog_artifacts(package_root=package.parent)
+
+
+def test_assisted_draft_receives_only_validated_ledger_and_is_isolated(tmp_path):
+    package = _package(tmp_path)
+    prompts = []
+
+    def model(prompt):
+        prompts.append(json.loads(prompt))
+        return "A concise editorial transition for reviewer consideration."
+
+    request = build_draft_request(package)
+    draft = generate_assisted_draft(package, tmp_path / "drafts", model, model_id="fixture-model")
+    assert prompts == [request]
+    assert (draft / "draft.md").read_text(encoding="utf-8").startswith("A concise")
+    metadata = json.loads((draft / "draft-manifest.json").read_text(encoding="utf-8"))
+    assert metadata["source_of_truth"] == "deterministic-package"
+    assert metadata["review_status"] == "pending"
+    assert (package / "article.md").read_bytes() == b"# reviewed\n"
+
+
+def test_assisted_draft_rejects_fact_like_output_and_tampered_ledger(tmp_path):
+    package = _package(tmp_path)
+    with pytest.raises(ValueError, match="factual or comparative"):
+        generate_assisted_draft(package, tmp_path / "drafts", lambda _: "The result was 12% higher.", model_id="fixture")
+    (package / "claim-ledger.json").write_text("[]", encoding="utf-8")
+    with pytest.raises(ValueError, match="claim ledger hash mismatch"):
+        build_draft_request(package)
