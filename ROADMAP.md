@@ -1395,7 +1395,7 @@ The next eligible slice is **8R.4 — Generalized falsification framework**.
 
 ## Slice 8R.4 — Generalized falsification framework
 
-**Status:** PLANNED
+**Status:** DONE
 
 Expand the existing negative-control and stability philosophy into a general
 falsification boundary. Applicable declared tests may include label permutation,
@@ -1410,6 +1410,22 @@ Acceptance:
 - falsification evidence is bound to the methodology and exact artifacts;
 - inapplicable, unavailable, failed, and passed tests remain distinct;
 - the framework does not require every test for every hypothesis or permit post-hoc selection.
+
+Evidence:
+
+- `analysis/experiments/spec.py` defines the versioned `FalsificationPolicy`,
+  which is serialized into experiment identity and validates a unique,
+  pre-result method declaration.
+- `analysis/experiments/falsification.py` emits deterministic, explicit
+  passed/failed/unavailable results for every declared method. Existing
+  permutation/null and leave-one-out evidence is bound by artifact reference;
+  unsupported methods remain unavailable and cannot be omitted after results.
+- Runs include immutable `falsification.json`; `catalog.load_run` requires it
+  for current manifests. `tests/test_falsification.py` proves all-method
+  requirement, deterministic replay, failed/unavailable distinction, and
+  invalid declaration rejection.
+
+The next eligible slice is **8R.5 — Research campaign abstraction**.
 
 ## Slice 8R.5 — Research campaign abstraction
 

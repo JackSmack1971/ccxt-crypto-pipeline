@@ -98,6 +98,8 @@ class ResearchHypothesis:
     provenance: Mapping[str, Any]
     hypothesis_id: str = ""
     version: str = HYPOTHESIS_VERSION
+    falsification_methods: tuple[str, ...] = ()
+    falsification_inapplicable_methods: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
         if self.version != HYPOTHESIS_VERSION:
@@ -109,6 +111,13 @@ class ResearchHypothesis:
             _required(label, getattr(self, label))
         for label in ("features", "confounders", "applicable_datasets"):
             object.__setattr__(self, label, _items(label, getattr(self, label)))
+        if any(not isinstance(value, str) or not value.strip() for value in self.falsification_methods):
+            raise ValueError("research hypothesis falsification methods must be non-blank")
+        if len(set(self.falsification_methods)) != len(self.falsification_methods):
+            raise ValueError("research hypothesis falsification methods must be unique")
+        if (any(value not in self.falsification_methods for value in self.falsification_inapplicable_methods) or
+                len(set(self.falsification_inapplicable_methods)) != len(self.falsification_inapplicable_methods)):
+            raise ValueError("research hypothesis inapplicable methods must be declared and unique")
         if not isinstance(self.provenance, Mapping):
             raise ValueError("research hypothesis provenance must be an object")
         if not self.hypothesis_id:
@@ -139,7 +148,9 @@ def research_hypothesis_from_dict(value: Mapping[str, Any]) -> ResearchHypothesi
     try:
         return ResearchHypothesis(**{**dict(value), "features": tuple(value["features"]),
                                     "confounders": tuple(value["confounders"]),
-                                    "applicable_datasets": tuple(value["applicable_datasets"])})
+                                    "applicable_datasets": tuple(value["applicable_datasets"]),
+                                    "falsification_methods": tuple(value.get("falsification_methods", ())),
+                                    "falsification_inapplicable_methods": tuple(value.get("falsification_inapplicable_methods", ()))})
     except (KeyError, TypeError) as exc:
         raise ValueError("invalid research hypothesis structure") from exc
 
@@ -194,6 +205,11 @@ class ResearchRegistry:
             raise ValueError("experiment spec does not declare every hypothesis feature")
         if spec.candidate.horizon not in hypothesis.outcome:
             raise ValueError("experiment candidate horizon is not declared by the hypothesis outcome")
+        if hypothesis.falsification_methods and (
+                tuple(spec.falsification.methods) != tuple(hypothesis.falsification_methods) or
+                tuple(spec.falsification.inapplicable_methods) != tuple(
+                    hypothesis.falsification_inapplicable_methods)):
+            raise ValueError("experiment falsification policy does not match the hypothesis")
         return replace(spec, research_question_id=question.question_id,
                        research_hypothesis_id=hypothesis.hypothesis_id)
 

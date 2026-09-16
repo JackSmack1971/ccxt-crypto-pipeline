@@ -8,6 +8,7 @@ from analysis.experiments import (ResearchHypothesis, ResearchQuestion, Research
                                   hypothesis_dict, hypothesis_identity, question_dict, question_identity,
                                   write_registry)
 from analysis.experiments.spec import experiment_spec_from_dict, experiment_spec_id, experiment_spec_dict
+from analysis.experiments import FalsificationPolicy
 from test_phase6 import build_spec
 
 
@@ -66,6 +67,20 @@ def test_registry_rejects_unknown_link_and_incomplete_binding():
         ResearchRegistry((question,), (_hypothesis(question, question_id="missing"),))
     with pytest.raises(ValueError, match="bound together"):
         build_spec(research_question_id="question-only")
+
+
+def test_registry_rejects_falsification_policy_mismatch():
+    question = _question()
+    hypothesis = _hypothesis(question, falsification_methods=("known_null",))
+    with pytest.raises(ValueError, match="falsification policy"):
+        ResearchRegistry((question,), (hypothesis,)).bind_experiment(build_spec(falsification=FalsificationPolicy()),
+                                                                      hypothesis.hypothesis_id)
+
+    hypothesis = _hypothesis(question, falsification_methods=("known_null",),
+                             falsification_inapplicable_methods=("known_null",))
+    registry = ResearchRegistry((question,), (hypothesis,))
+    assert registry.bind_experiment(build_spec(falsification=FalsificationPolicy(
+        methods=("known_null",), inapplicable_methods=("known_null",))), hypothesis.hypothesis_id)
 
 
 def test_registry_artifact_is_immutable_and_replayable(tmp_path):

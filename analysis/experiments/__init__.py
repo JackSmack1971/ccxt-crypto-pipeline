@@ -18,6 +18,7 @@ from .spec import (BaselinePolicy, CandidateDefinition, CostPolicy, ExperimentSp
                    StressPolicy,
                    StabilityPolicy,
                    NegativeControlPolicy,
+                   FalsificationPolicy, FALSIFICATION_METHODS,
                    SUPPORTED_BASELINE_FAMILIES, SUPPORTED_CONFIRMATION_CORRECTIONS,
                    SUPPORTED_DISCOVERY_CORRECTIONS, experiment_spec_dict, experiment_spec_from_dict,
                    experiment_spec_id)
@@ -29,6 +30,7 @@ from .uncertainty import UncertaintyPolicy, bootstrap_mean
 from .stress import STRESS_MATRIX_VERSION
 from .stability import STABILITY_VERSION, build_stability_evidence
 from .negative_controls import NEGATIVE_CONTROL_VERSION, build_negative_control_evidence
+from .falsification import FALSIFICATION_VERSION, build_falsification_evidence
 from .closure import CLOSURE_VERSION, build_validation_closure
 from .research import (HYPOTHESIS_VERSION, QUESTION_VERSION, REGISTRY_VERSION,
                        ResearchHypothesis, ResearchQuestion, ResearchRegistry,
@@ -52,6 +54,8 @@ __all__ = [
     "STRESS_MATRIX_VERSION",
     "STABILITY_VERSION", "build_stability_evidence",
     "NEGATIVE_CONTROL_VERSION", "build_negative_control_evidence",
+    "FALSIFICATION_VERSION", "FALSIFICATION_METHODS", "FalsificationPolicy",
+    "build_falsification_evidence",
     "CLOSURE_VERSION", "build_validation_closure",
     "QUESTION_VERSION", "HYPOTHESIS_VERSION", "REGISTRY_VERSION", "ResearchQuestion",
     "ResearchHypothesis", "ResearchRegistry", "question_dict", "hypothesis_dict",

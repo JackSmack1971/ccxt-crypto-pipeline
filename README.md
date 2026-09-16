@@ -240,6 +240,11 @@ holdout confirmation; configured walk-forward evidence is included as well. A
 passing closure is replayable research evidence, not a profitability claim or
 authorization to trade.
 
+Runs also emit `falsification.json`. Its versioned policy is part of the
+experiment identity and requires every declared falsification method to have
+passed, failed, or explicitly unavailable evidence. Unsupported tests remain
+unavailable; results cannot be selected post-hoc from an undeclared menu.
+
 Review history is stored separately from immutable research runs and report
 packages. Each record is content-addressed and linked to the target's exact
 manifest hash; supported decisions are `approved`, `rejected`, `superseded`,

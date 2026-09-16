@@ -95,9 +95,12 @@ def load_run(run_dir: str | Path) -> RunRecord:
         required.add("negative_controls.json")
     if manifest_version in {LEGACY_CLOSURE_MANIFEST_VERSION, MANIFEST_VERSION}:
         required.add("validation_closure.json")
+    if manifest_version == MANIFEST_VERSION:
+        required.add("falsification.json")
     if not required <= set(artifacts):
         raise ValueError(f"experiment run manifest lacks required artifacts: {path}")
     spec = _read_json(path / "spec.json")
+    falsification = _read_json(path / "falsification.json") if manifest_version == MANIFEST_VERSION else None
     if manifest_version == MANIFEST_VERSION:
         parsed_spec = experiment_spec_from_dict(spec)
         if experiment_spec_id(parsed_spec) != inputs["experiment_spec_id"]:
@@ -105,6 +108,11 @@ def load_run(run_dir: str | Path) -> RunRecord:
         if (parsed_spec.research_question_id != inputs.get("research_question_id") or
                 parsed_spec.research_hypothesis_id != inputs.get("research_hypothesis_id")):
             raise ValueError(f"experiment research binding mismatch: {path}")
+        expected_falsification_policy = {"version": parsed_spec.falsification.version,
+                                         "methods": list(parsed_spec.falsification.methods),
+                                         "inapplicable_methods": list(parsed_spec.falsification.inapplicable_methods)}
+        if falsification.get("policy") != expected_falsification_policy:
+            raise ValueError(f"experiment falsification policy mismatch: {path}")
     candidate = _read_json(path / "candidate.json")
     promotion = _read_json(path / "promotion.json")
     return RunRecord(run_id, path, inputs["experiment_spec_id"], inputs["dataset_identity"],
