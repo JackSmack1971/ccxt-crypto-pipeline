@@ -1359,7 +1359,7 @@ The next eligible slice is **8R.3 — Research question and hypothesis registry*
 
 ## Slice 8R.3 — Research question and hypothesis registry
 
-**Status:** ACTIVE
+**Status:** DONE
 
 Define durable, non-generic contracts for research questions and hypotheses.
 Where applicable they must declare a stable ID, human-readable claim, universe,
@@ -1373,6 +1373,25 @@ identity. Preserve the distinction:
 Acceptance: identities are deterministic, declarations are sufficient to
 reconstruct the intended test, and results cannot silently change the declared
 question or hypothesis.
+
+Evidence:
+
+- `analysis/experiments/research.py` defines versioned question and hypothesis
+  declarations with required universe, treatment/features, outcomes, temporal
+  availability, confounders, baseline, minimum effect, statistical/validation
+  policy, falsification policy, failure interpretation, applicable dataset
+  identities, and provenance.
+- `ResearchRegistry` validates unique question/hypothesis identities and links,
+  binds compatible declarations to an `ExperimentSpec`, and causes both IDs to
+  participate in the content-addressed spec and run manifest identities.
+- Registry JSON is immutable and replayable; the experiment CLI validates
+  individual declarations and writes registries locally without network access.
+- `tests/test_research_registry.py` covers deterministic identity, linkage and
+  binding, incomplete/unknown references, spec round-trip identity, immutable
+  replay, and conflict rejection. Focused and repository-wide verification
+  pass offline (129 focused; 466 repository-wide).
+
+The next eligible slice is **8R.4 — Generalized falsification framework**.
 
 ## Slice 8R.4 — Generalized falsification framework
 

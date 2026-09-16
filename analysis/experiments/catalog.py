@@ -11,6 +11,7 @@ from typing import Any
 from analysis.alpha import assert_feature_versions_compatible, assert_label_versions_compatible
 
 from .runner import MANIFEST_VERSION
+from .spec import experiment_spec_from_dict, experiment_spec_id
 
 LEGACY_MANIFEST_VERSION = "phase6-run-v1"
 LEGACY_ROBUST_MANIFEST_VERSION = "phase7-run-v1"
@@ -29,6 +30,8 @@ class RunRecord:
     candidate_name: str
     candidate_horizon: str
     promotion_state: str
+    research_question_id: str | None = None
+    research_hypothesis_id: str | None = None
 
 
 @dataclass(frozen=True)
@@ -95,11 +98,19 @@ def load_run(run_dir: str | Path) -> RunRecord:
     if not required <= set(artifacts):
         raise ValueError(f"experiment run manifest lacks required artifacts: {path}")
     spec = _read_json(path / "spec.json")
+    if manifest_version == MANIFEST_VERSION:
+        parsed_spec = experiment_spec_from_dict(spec)
+        if experiment_spec_id(parsed_spec) != inputs["experiment_spec_id"]:
+            raise ValueError(f"experiment spec identity mismatch: {path}")
+        if (parsed_spec.research_question_id != inputs.get("research_question_id") or
+                parsed_spec.research_hypothesis_id != inputs.get("research_hypothesis_id")):
+            raise ValueError(f"experiment research binding mismatch: {path}")
     candidate = _read_json(path / "candidate.json")
     promotion = _read_json(path / "promotion.json")
     return RunRecord(run_id, path, inputs["experiment_spec_id"], inputs["dataset_identity"],
                      inputs["code_version"], spec["name"], candidate["name"], candidate["horizon"],
-                     promotion["state"])
+                     promotion["state"], inputs.get("research_question_id"),
+                     inputs.get("research_hypothesis_id"))
 
 
 def catalog_runs(root: str | Path) -> tuple[RunRecord, ...]:

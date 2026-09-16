@@ -266,6 +266,8 @@ class ExperimentSpec:
     stress: StressPolicy = StressPolicy()
     stability: StabilityPolicy = StabilityPolicy()
     negative_controls: NegativeControlPolicy = NegativeControlPolicy()
+    research_question_id: str | None = None
+    research_hypothesis_id: str | None = None
 
     def __post_init__(self):
         if self.spec_version != SPEC_VERSION:
@@ -315,6 +317,11 @@ class ExperimentSpec:
 
         if not self.code_version.strip() or not self.config_identity.strip():
             raise ValueError("experiment spec requires code and config identities")
+        if (self.research_question_id is None) != (self.research_hypothesis_id is None):
+            raise ValueError("experiment research question and hypothesis ids must be bound together")
+        if self.research_question_id is not None:
+            if not self.research_question_id.strip() or not self.research_hypothesis_id.strip():
+                raise ValueError("experiment research ids cannot be blank")
 
 
 def _dump(value: Any) -> bytes:
@@ -341,7 +348,8 @@ def experiment_spec_from_dict(value: dict[str, Any]) -> ExperimentSpec:
     if not isinstance(value, dict):
         raise ValueError("experiment spec must be a JSON object")
     required = {field.name for field in ExperimentSpec.__dataclass_fields__.values()}
-    required_without_defaults = required - {"uncertainty", "stress", "stability", "negative_controls"}
+    required_without_defaults = required - {"uncertainty", "stress", "stability", "negative_controls",
+                                           "research_question_id", "research_hypothesis_id"}
     if not required_without_defaults <= set(value) or set(value) - required:
         missing = sorted(required_without_defaults - set(value))
         extra = sorted(set(value) - required)
@@ -374,6 +382,8 @@ def experiment_spec_from_dict(value: dict[str, Any]) -> ExperimentSpec:
             baselines=BaselinePolicy(families=tuple(value["baselines"]["families"])),
             promotion_policy=PromotionPolicy(**value["promotion_policy"]),
             code_version=value["code_version"], config_identity=value["config_identity"],
+            research_question_id=value.get("research_question_id"),
+            research_hypothesis_id=value.get("research_hypothesis_id"),
             uncertainty=UncertaintyPolicy(**value.get("uncertainty", {})),
             stress=StressPolicy(**{**value.get("stress", {}),
                                    "fee_rates": tuple(value.get("stress", {}).get("fee_rates", StressPolicy().fee_rates)),

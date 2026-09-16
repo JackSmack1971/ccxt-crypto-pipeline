@@ -30,6 +30,11 @@ from .stress import STRESS_MATRIX_VERSION
 from .stability import STABILITY_VERSION, build_stability_evidence
 from .negative_controls import NEGATIVE_CONTROL_VERSION, build_negative_control_evidence
 from .closure import CLOSURE_VERSION, build_validation_closure
+from .research import (HYPOTHESIS_VERSION, QUESTION_VERSION, REGISTRY_VERSION,
+                       ResearchHypothesis, ResearchQuestion, ResearchRegistry,
+                       hypothesis_dict, hypothesis_identity, question_dict, question_identity,
+                       research_hypothesis_from_dict,
+                       research_question_from_dict, verify_registry, write_registry)
 
 __all__ = [
     "BaselinePolicy", "CandidateDefinition", "CostPolicy", "ExperimentSpec",
@@ -48,4 +53,8 @@ __all__ = [
     "STABILITY_VERSION", "build_stability_evidence",
     "NEGATIVE_CONTROL_VERSION", "build_negative_control_evidence",
     "CLOSURE_VERSION", "build_validation_closure",
+    "QUESTION_VERSION", "HYPOTHESIS_VERSION", "REGISTRY_VERSION", "ResearchQuestion",
+    "ResearchHypothesis", "ResearchRegistry", "question_dict", "hypothesis_dict",
+    "question_identity", "hypothesis_identity",
+    "research_question_from_dict", "research_hypothesis_from_dict", "write_registry", "verify_registry",
 ]
