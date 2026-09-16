@@ -35,8 +35,9 @@ from .walk_forward import build_walk_forward_evaluation
 from .uncertainty import bootstrap_mean
 from .stress import _build_stress_matrix
 from .stability import build_stability_evidence
+from .negative_controls import build_negative_control_evidence
 
-MANIFEST_VERSION = "phase7-run-v1"
+MANIFEST_VERSION = "phase7-run-v2"
 
 
 def resolve_feature_registry(spec: ExperimentSpec) -> FeatureRegistry:
@@ -252,10 +253,15 @@ def run_experiment(spec: ExperimentSpec, snapshot: DatasetSnapshot, output_dir: 
     stability = build_stability_evidence(
         selected_token_ids=selected_ids, labels=discovery_labels, cohort=cohort,
         feature_rows=discovery_features, horizon=spec.candidate.horizon, policy=spec.stability)
+    negative_controls = build_negative_control_evidence(
+        selected_token_ids=selected_ids, labels=discovery_labels, horizon=spec.candidate.horizon,
+        turnover=spec.costs.turnover, costs=spec.costs.scenarios,
+        min_coverage=spec.candidate.min_coverage, policy=spec.negative_controls,
+        score_candidate=score_candidate, baseline_families=baseline_families)
 
     spec_id = experiment_spec_id(spec)
     inputs = {"experiment_spec_id": spec_id, "dataset_identity": snapshot.dataset_identity,
-              "code_version": spec.code_version}
+              "code_version": spec.code_version, "manifest_version": MANIFEST_VERSION}
     run_id = hashlib.sha256(_dump(inputs)).hexdigest()[:24]
     target = Path(output_dir) / run_id
     target.mkdir(parents=True, exist_ok=True)
@@ -281,6 +287,7 @@ def run_experiment(spec: ExperimentSpec, snapshot: DatasetSnapshot, output_dir: 
         "uncertainty.json": uncertainty,
         "stress_matrix.json": stress_matrix,
         "stability.json": stability,
+        "negative_controls.json": negative_controls,
     }
     if walk_forward is not None:
         artifacts["walk_forward.json"] = _walk_forward_results(

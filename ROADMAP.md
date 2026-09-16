@@ -1107,7 +1107,25 @@ Evidence:
 
 Introduce shuffled/permuted/known-null controls designed to reveal leakage and research-process false positives.
 
+**Status:** DONE
+
+Evidence:
+
+- `NegativeControlPolicy` declares deterministic label-permutation and known-null
+  controls as part of the content-addressed experiment specification; invalid
+  methods, duplicate declarations, and invalid seeds/counts fail closed.
+- The runner persists hash-bound `negative_controls.json` using the fixed
+  discovery-selected candidate. Synthetic controls retain explicit method,
+  scope, and missingness evidence and never alter selection, promotion, or
+  sealed-holdout membership.
+- Focused Phase 6/7 tests cover deterministic policy validation, fixed
+  selection, known-null behavior, missingness, holdout exclusion, manifest
+  linkage, and legacy spec loading. Offline fixture verification passed with
+  120 tests; live-provider behavior remains outside scope and unverified.
+
 ## Slice 7.7 — Validation closure matrix
+
+**Status:** ACTIVE
 
 Require replayable evidence that promoted results survive the configured robustness suite; passing remains a research result, not a profitability claim.
 

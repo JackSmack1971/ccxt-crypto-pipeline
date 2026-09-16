@@ -17,6 +17,7 @@ from .spec import (BaselinePolicy, CandidateDefinition, CostPolicy, ExperimentSp
                    HypothesisFamily, SPEC_VERSION, SplitPolicy,
                    StressPolicy,
                    StabilityPolicy,
+                   NegativeControlPolicy,
                    SUPPORTED_BASELINE_FAMILIES, SUPPORTED_CONFIRMATION_CORRECTIONS,
                    SUPPORTED_DISCOVERY_CORRECTIONS, experiment_spec_dict, experiment_spec_from_dict,
                    experiment_spec_id)
@@ -27,10 +28,11 @@ from .walk_forward import (WalkForwardEvaluation, WalkForwardFold,
 from .uncertainty import UncertaintyPolicy, bootstrap_mean
 from .stress import STRESS_MATRIX_VERSION
 from .stability import STABILITY_VERSION, build_stability_evidence
+from .negative_controls import NEGATIVE_CONTROL_VERSION, build_negative_control_evidence
 
 __all__ = [
     "BaselinePolicy", "CandidateDefinition", "CostPolicy", "ExperimentSpec",
-    "HypothesisFamily", "SPEC_VERSION", "SplitPolicy", "StressPolicy", "StabilityPolicy",
+    "HypothesisFamily", "SPEC_VERSION", "SplitPolicy", "StressPolicy", "StabilityPolicy", "NegativeControlPolicy",
     "SUPPORTED_BASELINE_FAMILIES", "SUPPORTED_CONFIRMATION_CORRECTIONS",
     "SUPPORTED_DISCOVERY_CORRECTIONS", "experiment_spec_dict", "experiment_spec_from_dict", "experiment_spec_id",
     "MANIFEST_VERSION", "resolve_feature_registry", "run_experiment",
@@ -43,4 +45,5 @@ __all__ = [
     "UncertaintyPolicy", "bootstrap_mean",
     "STRESS_MATRIX_VERSION",
     "STABILITY_VERSION", "build_stability_evidence",
+    "NEGATIVE_CONTROL_VERSION", "build_negative_control_evidence",
 ]

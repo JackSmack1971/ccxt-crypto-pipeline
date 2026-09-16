@@ -1,6 +1,8 @@
 """Offline acceptance evidence for Phase 7 robust-validation slices."""
 
+import hashlib
 import json
+import shutil
 from dataclasses import replace
 from datetime import datetime, timedelta
 from types import SimpleNamespace
@@ -10,7 +12,10 @@ import pytest
 from analysis.experiments import (SplitPolicy, UncertaintyPolicy, bootstrap_mean,
                                   build_walk_forward_evaluation, experiment_spec_dict,
                                   experiment_spec_from_dict, run_experiment, StressPolicy)
-from analysis.experiments import StabilityPolicy
+from analysis.experiments import NegativeControlPolicy, StabilityPolicy
+from analysis.experiments.negative_controls import build_negative_control_evidence
+from analysis.alpha import baseline_families, score_candidate
+from analysis.alpha.labels import LabelRow
 from analysis.experiments.stress import _build_stress_matrix
 from analysis.experiments.stability import build_stability_evidence
 from analysis.experiments.catalog import load_run
@@ -249,3 +254,68 @@ def test_current_run_requires_stability_artifact_at_catalog_boundary(tmp_path):
     manifest_path.write_text(json.dumps(manifest, sort_keys=True, separators=(",", ":")) + "\n")
     with pytest.raises(ValueError, match="lacks required artifacts"):
         load_run(run)
+
+
+def test_current_manifest_cannot_be_downgraded_to_legacy_phase7(tmp_path):
+    run = run_experiment(runner_spec(), runner_snapshot(), tmp_path / "runs")
+    manifest_path = run / "manifest.json"
+    manifest = json.loads(manifest_path.read_text())
+    manifest["manifest_version"] = "phase7-run-v1"
+    manifest["artifacts"].pop("negative_controls.json")
+    manifest_path.write_text(json.dumps(manifest, sort_keys=True, separators=(",", ":")) + "\n")
+    with pytest.raises(ValueError, match="identity-bound"):
+        load_run(run)
+
+
+def test_genuine_legacy_phase7_manifest_remains_loadable(tmp_path):
+    current = run_experiment(runner_spec(), runner_snapshot(), tmp_path / "runs")
+    legacy = tmp_path / "legacy" / current.name
+    legacy.parent.mkdir()
+    shutil.copytree(current, legacy)
+    manifest_path = legacy / "manifest.json"
+    manifest = json.loads(manifest_path.read_text())
+    manifest["manifest_version"] = "phase7-run-v1"
+    manifest["artifacts"].pop("negative_controls.json")
+    manifest["inputs"].pop("manifest_version")
+    legacy_id = hashlib.sha256(
+        (json.dumps(manifest["inputs"], sort_keys=True, separators=(",", ":")) + "\n").encode()
+    ).hexdigest()[:24]
+    renamed = legacy.parent / legacy_id
+    legacy.rename(renamed)
+    manifest["run_id"] = legacy_id
+    (renamed / "manifest.json").write_text(
+        json.dumps(manifest, sort_keys=True, separators=(",", ":")) + "\n")
+    assert load_run(renamed).run_id == legacy_id
+
+
+def test_negative_controls_are_deterministic_fixed_selection_and_discovery_only(tmp_path):
+    first = run_experiment(runner_spec(), runner_snapshot(), tmp_path / "runs")
+    evidence = json.loads((first / "negative_controls.json").read_text())
+    assert evidence["version"] == "phase7-negative-controls-v1"
+    assert evidence["selection_scope"] == "discovery_selected_candidate"
+    assert len(evidence["results"]) == 26
+    assert {row["method"] for row in evidence["results"]} == {"label_permutation", "known_null"}
+    assert all(row["synthetic"] is True for row in evidence["results"])
+    assert all(row["selected_token_ids"] == ["ethereum:0xtok3"] for row in evidence["results"])
+    assert all("ethereum:0xtok06" not in row["selected_token_ids"] for row in evidence["results"])
+    assert json.loads((first / "manifest.json").read_text())["artifacts"]["negative_controls.json"]
+
+
+def test_negative_controls_keep_null_and_missingness_explicit():
+    labels = (LabelRow("a", "24h", 0.2, "COMPLETE", "2025-01-01", "2025-01-02", 1.0, 1.2, {}),
+              LabelRow("b", "24h", None, "DATA_CENSORED", "2025-01-01", "2025-01-02", None, None, {}))
+    result = build_negative_control_evidence(
+        selected_token_ids=frozenset({"a"}), labels=labels, horizon="24h", turnover=0.0,
+        costs=(0.0,), min_coverage=0.1, policy=NegativeControlPolicy(methods=("known_null",)),
+        score_candidate=score_candidate, baseline_families=baseline_families)
+    row = result["results"][0]
+    assert row["candidate"]["mean_return"] == 0.0
+    assert row["candidate"]["baseline_comparison"]["difference"] == 0.0
+    assert row["candidate"]["sample_size"] == 1
+    with pytest.raises(ValueError, match="unsupported negative-control method"):
+        NegativeControlPolicy(methods=("shuffle_features",))
+    for kwargs in ({"methods": ("known_null",), "permutations": 0},
+                   {"methods": ("known_null",), "permutations": -1},
+                   {"methods": ("known_null",), "seed": -1}):
+        with pytest.raises(ValueError, match="negative-control"):
+            NegativeControlPolicy(**kwargs)
