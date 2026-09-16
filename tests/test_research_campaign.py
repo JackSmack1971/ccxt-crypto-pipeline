@@ -10,6 +10,7 @@ from analysis.experiments import (ResearchCampaign, ResearchHypothesis, Research
                                   ResearchRegistry, campaign_identity, load_campaign,
                                   execute_campaign, verify_campaign, write_campaign)
 from test_phase6 import runner_snapshot, runner_spec
+from test_phase8r_significance import (_runner_bundle, _sequential_snapshot, _sequential_spec)
 
 
 def _registry():
@@ -135,3 +136,25 @@ def test_execute_campaign_rejects_unclosed_promoted_outcome(tmp_path):
                          campaign_root=tmp_path / "campaigns",
                          promoted_hypothesis_ids=(hypothesis.hypothesis_id,),
                          conclusion="The hypothesis was promoted.", limitations=("fixture data only",))
+
+
+def test_execute_campaign_reaches_holdout_with_bound_stage_evidence(tmp_path):
+    registry, question, hypothesis = _registry()
+    spec = _sequential_spec(research_question_id=question.question_id,
+                            research_hypothesis_id=hypothesis.hypothesis_id)
+    snapshot = _sequential_snapshot()
+    profile_body = {"dataset_identity": snapshot.dataset_identity, "profile_version": "fixture"}
+    profile = {**profile_body, "profile_identity": hashlib.sha256(
+        (json.dumps(profile_body, sort_keys=True, separators=(",", ":")) + "\n").encode()).hexdigest()}
+    path = execute_campaign(
+        registry, (spec,), snapshot, profile, run_root=tmp_path / "runs",
+        campaign_root=tmp_path / "campaigns",
+        promoted_hypothesis_ids=(hypothesis.hypothesis_id,),
+        conclusion="The hypothesis completed all governed stages.", limitations=("fixture data only",),
+        significance_evidence={hypothesis.hypothesis_id: _runner_bundle(spec, snapshot)},
+        confirmation_significance_evidence={
+            hypothesis.hypothesis_id: _runner_bundle(spec, snapshot, stage="confirmation")})
+    campaign = load_campaign(path)
+    assert campaign.promoted_hypothesis_ids == (hypothesis.hypothesis_id,)
+    assert verify_campaign(campaign, registry=registry, profile=profile,
+                           run_root=tmp_path / "runs") == campaign

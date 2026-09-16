@@ -234,7 +234,11 @@ When caller-supplied significance evidence is available, pass a validated
 `SignificanceEvidenceBundle` to `run_experiment(...)`. The runner rechecks its
 frozen-family, experiment-spec, dataset, stage, and temporal bindings, applies
 the declared family correction, persists the raw evidence and corrected
-evaluation, and includes the evidence in immutable run identity. Omitted or
+evaluation, and includes the evidence in immutable run identity. Provide a
+second `confirmation_significance_evidence` bundle to enable the sealed-holdout
+gate; validation reuses the discovery-frozen selection threshold and does not
+reselect from later partitions. `execute_campaign(...)` accepts the same two
+bundle types as mappings keyed by bound research-hypothesis id. Omitted or
 explicitly unavailable p-values remain fail-closed and cannot promote a
 candidate.
 

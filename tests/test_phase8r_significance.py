@@ -16,6 +16,7 @@ from analysis.experiments import (BaselinePolicy, CandidateDefinition, CostPolic
                                   build_significance_evidence, build_significance_evidence_bundle,
                                   freeze_hypothesis_family, run_experiment)
 from analysis.alpha import CohortConfig, LabelDefinition, PromotionPolicy
+from analysis.datasets import Bar, DatasetSnapshot
 from test_phase6 import runner_snapshot, runner_spec
 
 
@@ -212,6 +213,53 @@ def _runner_bundle(spec, snapshot, *, raw_p_values=(0.01, 0.8), stage="discovery
         family, entries, stage=stage, dataset_version=snapshot.dataset_identity)
 
 
+def _sequential_snapshot(*, validation_positive=True, holdout_positive=True):
+    source = runner_snapshot()
+    bars = []
+    for bar in source.bars:
+        token_index = int(bar.canonical_id.rsplit("tok", 1)[1], 16)
+        slope = 0.1 + 0.05 * token_index
+        if token_index >= 4 and not validation_positive:
+            slope = 0.01
+        if token_index >= 6 and not holdout_positive:
+            slope = 0.01
+        hour = int((bar.timestamp - source.assets[token_index].first_seen).total_seconds() // 3600)
+        price = 10 + token_index + hour * slope
+        bars.append(Bar(bar.canonical_id, bar.timestamp, price, price, price, price,
+                        bar.volume, bar.timeframe, bar.source))
+    events = []
+    for event in source.events:
+        item = dict(event)
+        token_index = int(item["canonical_id"].rsplit("tok", 1)[1], 16)
+        payload = json.loads(item["payload_json"])
+        if token_index in {4, 6}:
+            payload["reserve_usd"] = 1_000
+        elif token_index in {5, 7}:
+            payload["reserve_usd"] = 100_000
+        item["payload_json"] = json.dumps(payload)
+        events.append(item)
+    return DatasetSnapshot(source.assets, tuple(bars), source.metadata, tuple(events), source.lineage,
+                            source.policy, source.dataset_identity,
+                            asset_relationships=source.asset_relationships,
+                            quote_assets=source.quote_assets, reference_series=source.reference_series)
+
+
+def _sequential_spec(**overrides):
+    family = replace(runner_spec().hypothesis_family, thresholds=(">=p25",))
+    candidate = replace(runner_spec().candidate, selection_rule="launch_liquidity_usd>=p25")
+    policy = replace(runner_spec().promotion_policy, minimum_sample_size=1,
+                     minimum_independent_launches=1, minimum_coverage=0.5,
+                     minimum_effect_size=0.0001)
+    uncertainty = replace(runner_spec().uncertainty, block_size=1)
+    stability = replace(runner_spec().stability, dimensions=("leave_one_out",))
+    negative_controls = replace(runner_spec().negative_controls,
+                                methods=("known_null",), permutations=1)
+    falsification = replace(runner_spec().falsification, methods=("known_null", "leave_one_out"))
+    return runner_spec(hypothesis_family=family, candidate=candidate,
+                       promotion_policy=policy, uncertainty=uncertainty, stability=stability,
+                       negative_controls=negative_controls, falsification=falsification, **overrides)
+
+
 def test_runner_consumes_bound_discovery_evidence_and_persists_correction(tmp_path):
     spec, snapshot = runner_spec(), runner_snapshot()
     bundle = _runner_bundle(spec, snapshot)
@@ -257,3 +305,60 @@ def test_runner_rejects_evidence_bound_to_another_dataset(tmp_path):
                                     reference_series=snapshot.reference_series)
     with pytest.raises(ValueError, match="different dataset version"):
         run_experiment(spec, other_snapshot, tmp_path / "runs", bundle)
+
+
+def test_runner_advances_sequentially_to_holdout_with_frozen_selection(tmp_path):
+    spec, snapshot = _sequential_spec(), _sequential_snapshot()
+    run = run_experiment(
+        spec, snapshot, tmp_path / "runs", _runner_bundle(spec, snapshot),
+        confirmation_significance_evidence=_runner_bundle(
+            spec, snapshot, stage="confirmation"))
+
+    promotion = json.loads((run / "promotion.json").read_text())
+    stages = json.loads((run / "promotion_stages.json").read_text())
+    split = json.loads((run / "split.json").read_text())
+    assert promotion["state"] == "holdout_confirmed"
+    assert [item["stage"] for item in stages] == ["discovery", "validation", "holdout"]
+    assert all(item["selection_threshold"] == stages[0]["selection_threshold"] for item in stages)
+    assert all(item["selected_token_ids"] for item in stages)
+    assert all(not set(left["selected_token_ids"]).intersection(right["selected_token_ids"])
+               for index, left in enumerate(stages) for right in stages[index + 1:])
+    assert split["sealed"] is True
+    assert json.loads((run / "confirmation_significance_evaluation.json").read_text())["stage"] == "confirmation"
+    assert run_experiment(
+        spec, snapshot, tmp_path / "runs", _runner_bundle(spec, snapshot),
+        confirmation_significance_evidence=_runner_bundle(spec, snapshot, stage="confirmation")) == run
+
+
+def test_runner_stops_before_validation_when_discovery_fails(tmp_path):
+    spec, snapshot = _sequential_spec(), _sequential_snapshot()
+    run = run_experiment(
+        spec, snapshot, tmp_path / "runs",
+        _runner_bundle(spec, snapshot, raw_p_values=(0.9, 0.8)),
+        confirmation_significance_evidence=_runner_bundle(spec, snapshot, stage="confirmation"))
+    stages = json.loads((run / "promotion_stages.json").read_text())
+    assert json.loads((run / "promotion.json").read_text())["state"] == "rejected"
+    assert [item["stage"] for item in stages] == ["discovery"]
+    assert not (run / "validation_candidate.json").exists()
+
+
+def test_runner_stops_before_holdout_when_validation_fails(tmp_path):
+    spec, snapshot = _sequential_spec(), _sequential_snapshot(validation_positive=False)
+    run = run_experiment(spec, snapshot, tmp_path / "runs", _runner_bundle(spec, snapshot))
+    stages = json.loads((run / "promotion_stages.json").read_text())
+    assert [item["stage"] for item in stages] == ["discovery", "validation"]
+    assert json.loads((run / "promotion.json").read_text())["state"] == "rejected"
+    assert not (run / "holdout_candidate.json").exists()
+
+
+def test_runner_reports_holdout_correction_failure_after_validation(tmp_path):
+    spec, snapshot = _sequential_spec(), _sequential_snapshot()
+    run = run_experiment(
+        spec, snapshot, tmp_path / "runs", _runner_bundle(spec, snapshot),
+        confirmation_significance_evidence=_runner_bundle(
+            spec, snapshot, raw_p_values=(0.9, 0.8), stage="confirmation"))
+    stages = json.loads((run / "promotion_stages.json").read_text())
+    promotion = json.loads((run / "promotion.json").read_text())
+    assert [item["stage"] for item in stages] == ["discovery", "validation", "holdout"]
+    assert promotion["state"] == "rejected"
+    assert "HOLDOUT_CORRECTION_FAILED" in promotion["reasons"]

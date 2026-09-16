@@ -96,25 +96,71 @@ def _percentile(values: list[float], pct: float) -> float:
     return ordered[lower] + (ordered[upper] - ordered[lower]) * (rank - lower)
 
 
-def _selected_token_ids(feature_rows: tuple[dict[str, Any], ...], rule: str) -> frozenset[str]:
-    """Resolve a declarative selection rule within one partition only.
-
-    The percentile threshold is computed from feature values observed inside
-    the same partition being scored, so no other-partition information can
-    leak into the selection boundary. A missing feature value is excluded
-    from selection rather than defaulted.
-    """
+def _selection_threshold(feature_rows: tuple[dict[str, Any], ...], rule: str) -> tuple[str, str, float | None]:
     feature_name, operator, pct = _parse_selection_rule(rule)
     if feature_name not in {"launch_liquidity_usd", "lookback_return"}:
         raise ValueError(f"unsupported candidate selection feature: {feature_name}")
     available = [(row["token_id"], row.get(feature_name)) for row in feature_rows]
     numeric_values = [value for _, value in available if isinstance(value, (int, float)) and math.isfinite(value)]
     if not numeric_values:
+        return feature_name, operator, None
+    return feature_name, operator, _percentile(numeric_values, pct)
+
+
+def _select_token_ids(feature_rows: tuple[dict[str, Any], ...], feature_name: str,
+                      operator: str, threshold: float | None) -> frozenset[str]:
+    if threshold is None:
         return frozenset()
-    threshold = _percentile(numeric_values, pct)
     compare = _OPERATORS[operator]
-    return frozenset(token_id for token_id, value in available
+    return frozenset(row["token_id"] for row in feature_rows
+                     for value in (row.get(feature_name),)
                      if isinstance(value, (int, float)) and math.isfinite(value) and compare(value, threshold))
+
+
+def _selected_token_ids(feature_rows: tuple[dict[str, Any], ...], rule: str) -> frozenset[str]:
+    """Resolve a declarative selection rule within one partition.
+
+    This helper is retained for the discovery-only callers. Sequential runner
+    stages learn the threshold once from discovery and call
+    ``_select_token_ids`` with that frozen threshold for later partitions.
+    """
+    feature_name, operator, threshold = _selection_threshold(feature_rows, rule)
+    return _select_token_ids(feature_rows, feature_name, operator, threshold)
+
+
+def _enrich_uncertainty(candidate: Any, selected_labels: tuple[Any, ...], spec: ExperimentSpec) -> tuple[Any, dict[str, Any]]:
+    uncertainty = {**bootstrap_mean((label.value for label in selected_labels), spec.uncertainty),
+                   "scope": "selected_candidate_observations",
+                   "candidate": {"name": spec.candidate.name, "horizon": spec.candidate.horizon,
+                                 "selected_token_ids": sorted(label.token_id for label in selected_labels)}}
+    return replace(candidate, uncertainty={
+        **candidate.uncertainty,
+        "standard_ci95_low": candidate.uncertainty["ci95_low"],
+        "standard_ci95_high": candidate.uncertainty["ci95_high"],
+        "ci95_low": uncertainty["ci95_low"], "ci95_high": uncertainty["ci95_high"],
+        "method": uncertainty["method"], "policy": uncertainty["config"],
+    }), uncertainty
+
+
+def _promotion_evidence(candidate: Any, *, target_stage: str,
+                        discovery_adjusted_p_value: float | None = None,
+                        validation_replicated: bool | None = None,
+                        validation_semantics_frozen: bool | None = None,
+                        holdout_adjusted_p_value: float | None = None) -> PromotionEvidence:
+    difference = candidate.baseline_comparison.get("difference")
+    ci95_low = candidate.uncertainty.get("ci95_low")
+    return PromotionEvidence(
+        target_stage=target_stage,
+        discovery_adjusted_p_value=discovery_adjusted_p_value,
+        effect_size=difference,
+        validation_replicated=validation_replicated,
+        validation_semantics_frozen=validation_semantics_frozen,
+        holdout_adjusted_p_value=holdout_adjusted_p_value,
+        baseline_superior=difference is not None and difference > 0,
+        uncertainty_supports_effect=ci95_low is not None and ci95_low > 0,
+        cost_sensitivity_passed=bool(candidate.cost_sensitivity)
+        and all(value is not None and value > 0 for value in candidate.cost_sensitivity.values()),
+    )
 
 
 def _candidate_hypothesis(family: FrozenHypothesisFamily, rule: str, horizon: str):
@@ -199,7 +245,8 @@ def _dump(value: Any) -> bytes:
 
 
 def run_experiment(spec: ExperimentSpec, snapshot: DatasetSnapshot, output_dir: str | Path,
-                   significance_evidence: SignificanceEvidenceBundle | None = None) -> Path:
+                   significance_evidence: SignificanceEvidenceBundle | None = None, *,
+                   confirmation_significance_evidence: SignificanceEvidenceBundle | None = None) -> Path:
     """Execute ``spec`` against ``snapshot`` and write one immutable run directory.
 
     The run identity is keyed by the spec's own content-addressed identity
@@ -253,7 +300,10 @@ def run_experiment(spec: ExperimentSpec, snapshot: DatasetSnapshot, output_dir: 
     discovery_features = tuple(row for row in feature_rows if row["token_id"] in discovery_ids)
     discovery_labels = tuple(row for row in candidate_labels if row.token_id in discovery_ids)
 
-    selected_ids = _selected_token_ids(discovery_features, spec.candidate.selection_rule)
+    selection_feature, selection_operator, selection_threshold = _selection_threshold(
+        discovery_features, spec.candidate.selection_rule)
+    selected_ids = _select_token_ids(discovery_features, selection_feature,
+                                     selection_operator, selection_threshold)
     baselines = baseline_families(discovery_labels, horizon=spec.candidate.horizon, feature_rows=discovery_features)
     candidate = score_candidate(spec.candidate.name, discovery_labels, horizon=spec.candidate.horizon,
                                 selected=lambda row: row.token_id in selected_ids,
@@ -262,32 +312,114 @@ def run_experiment(spec: ExperimentSpec, snapshot: DatasetSnapshot, output_dir: 
                                 min_coverage=spec.candidate.min_coverage)
     selected_labels = tuple(label for label in discovery_labels if label.token_id in selected_ids
                             and label.status == "COMPLETE" and label.value is not None)
-    uncertainty = {**bootstrap_mean((label.value for label in selected_labels), spec.uncertainty),
-                   "scope": "selected_candidate_observations",
-                   "candidate": {"name": spec.candidate.name, "horizon": spec.candidate.horizon,
-                                 "selected_token_ids": sorted(label.token_id for label in selected_labels)}}
-    candidate = replace(candidate, uncertainty={
-        **candidate.uncertainty,
-        "standard_ci95_low": candidate.uncertainty["ci95_low"],
-        "standard_ci95_high": candidate.uncertainty["ci95_high"],
-        "ci95_low": uncertainty["ci95_low"], "ci95_high": uncertainty["ci95_high"],
-        "method": uncertainty["method"], "policy": uncertainty["config"],
-    })
+    candidate, uncertainty = _enrich_uncertainty(candidate, selected_labels, spec)
 
-    difference = candidate.baseline_comparison.get("difference")
-    ci95_low = candidate.uncertainty.get("ci95_low")
-    evidence = PromotionEvidence(
-        target_stage="discovery",
+    discovery_evidence = _promotion_evidence(
+        candidate, target_stage="discovery",
         discovery_adjusted_p_value=(candidate_adjusted_p_value
                                     if significance_bundle is not None
-                                    and significance_bundle.stage == "discovery" else None),
-        effect_size=difference,
-        baseline_superior=difference is not None and difference > 0,
-        uncertainty_supports_effect=ci95_low is not None and ci95_low > 0,
-        cost_sensitivity_passed=bool(candidate.cost_sensitivity)
-        and all(value is not None and value > 0 for value in candidate.cost_sensitivity.values()),
-    )
-    decision = evaluate_candidate_promotion(candidate, evidence, spec.promotion_policy)
+                                    and significance_bundle.stage == "discovery" else None))
+    decision = evaluate_candidate_promotion(candidate, discovery_evidence, spec.promotion_policy)
+    stage_records: list[dict[str, Any]] = [{
+        "stage": "discovery", "selection_threshold": selection_threshold,
+        "selected_token_ids": sorted(selected_ids), "candidate": candidate, "promotion": decision,
+    }]
+    validation_candidate = None
+    holdout_candidate = None
+    confirmation_bundle = None
+    confirmation_evaluation = None
+
+    # A later partition is scored only after the preceding governed decision
+    # succeeds. The discovery-learned threshold, not a later-partition
+    # percentile, defines the candidate in every subsequent stage.
+    if decision.state == "discovery_promoted":
+        validation_ids = frozenset(split.validation)
+        validation_features = tuple(row for row in feature_rows if row["token_id"] in validation_ids)
+        validation_labels = tuple(row for row in candidate_labels if row.token_id in validation_ids)
+        validation_selected_ids = _select_token_ids(
+            validation_features, selection_feature, selection_operator, selection_threshold)
+        validation_baselines = baseline_families(
+            validation_labels, horizon=spec.candidate.horizon, feature_rows=validation_features)
+        validation_candidate = score_candidate(
+            spec.candidate.name, validation_labels, horizon=spec.candidate.horizon,
+            selected=lambda row: row.token_id in validation_selected_ids,
+            baseline_mean=validation_baselines["no_trade"]["mean_return"],
+            turnover=spec.costs.turnover, costs=spec.costs.scenarios,
+            min_coverage=spec.candidate.min_coverage)
+        validation_selected_labels = tuple(
+            label for label in validation_labels if label.token_id in validation_selected_ids
+            and label.status == "COMPLETE" and label.value is not None)
+        validation_candidate, _ = _enrich_uncertainty(
+            validation_candidate, validation_selected_labels, spec)
+        validation_replicated = (
+            validation_candidate.baseline_comparison.get("difference") is not None
+            and validation_candidate.baseline_comparison["difference"] > 0)
+        validation_evidence = _promotion_evidence(
+            validation_candidate, target_stage="validation",
+            discovery_adjusted_p_value=candidate_adjusted_p_value,
+            validation_replicated=validation_replicated,
+            validation_semantics_frozen=split.sealed and selection_threshold is not None)
+        decision = evaluate_candidate_promotion(
+            validation_candidate, validation_evidence, spec.promotion_policy)
+        stage_records.append({
+            "stage": "validation", "selection_threshold": selection_threshold,
+            "selected_token_ids": sorted(validation_selected_ids), "candidate": validation_candidate,
+            "promotion": decision,
+        })
+
+    if decision.state == "validation_confirmed":
+        if confirmation_significance_evidence is not None:
+            if confirmation_significance_evidence.manifest_version != SIGNIFICANCE_MANIFEST_VERSION:
+                raise ValueError("unsupported confirmation significance evidence manifest version")
+            confirmation_bundle = build_significance_evidence_bundle(
+                hypothesis_family, confirmation_significance_evidence.entries,
+                stage="confirmation", dataset_version=snapshot.dataset_identity)
+            confirmation_evaluation = evaluate_hypothesis_family(
+                hypothesis_family, confirmation_bundle.raw_p_values(), stage="confirmation",
+                dataset_version=snapshot.dataset_identity,
+                date_tested=confirmation_bundle.entries[0].observed_through)
+            candidate_hypothesis = _candidate_hypothesis(
+                hypothesis_family, spec.candidate.selection_rule, spec.candidate.horizon)
+            holdout_adjusted_p_value = next(
+                item.adjusted_value for item in confirmation_evaluation.hypotheses
+                if (item.feature, item.threshold, item.horizon, item.subgroup,
+                    item.model_specification) == (
+                        candidate_hypothesis.feature, candidate_hypothesis.threshold,
+                        candidate_hypothesis.horizon, candidate_hypothesis.subgroup,
+                        candidate_hypothesis.model_specification))
+        else:
+            holdout_adjusted_p_value = None
+
+        holdout_ids = frozenset(split.holdout)
+        holdout_features = tuple(row for row in feature_rows if row["token_id"] in holdout_ids)
+        holdout_labels = tuple(row for row in candidate_labels if row.token_id in holdout_ids)
+        holdout_selected_ids = _select_token_ids(
+            holdout_features, selection_feature, selection_operator, selection_threshold)
+        holdout_baselines = baseline_families(
+            holdout_labels, horizon=spec.candidate.horizon, feature_rows=holdout_features)
+        holdout_candidate = score_candidate(
+            spec.candidate.name, holdout_labels, horizon=spec.candidate.horizon,
+            selected=lambda row: row.token_id in holdout_selected_ids,
+            baseline_mean=holdout_baselines["no_trade"]["mean_return"],
+            turnover=spec.costs.turnover, costs=spec.costs.scenarios,
+            min_coverage=spec.candidate.min_coverage)
+        holdout_selected_labels = tuple(
+            label for label in holdout_labels if label.token_id in holdout_selected_ids
+            and label.status == "COMPLETE" and label.value is not None)
+        holdout_candidate, _ = _enrich_uncertainty(
+            holdout_candidate, holdout_selected_labels, spec)
+        holdout_evidence = _promotion_evidence(
+            holdout_candidate, target_stage="holdout",
+            discovery_adjusted_p_value=candidate_adjusted_p_value,
+            validation_replicated=True, validation_semantics_frozen=True,
+            holdout_adjusted_p_value=holdout_adjusted_p_value)
+        decision = evaluate_candidate_promotion(
+            holdout_candidate, holdout_evidence, spec.promotion_policy)
+        stage_records.append({
+            "stage": "holdout", "selection_threshold": selection_threshold,
+            "selected_token_ids": sorted(holdout_selected_ids), "candidate": holdout_candidate,
+            "promotion": decision,
+        })
     stress_matrix = _build_stress_matrix(
         selected_token_ids=selected_ids, labels=discovery_labels,
         feature_rows=discovery_features, horizon=spec.candidate.horizon,
@@ -315,6 +447,9 @@ def run_experiment(spec: ExperimentSpec, snapshot: DatasetSnapshot, output_dir: 
     if significance_bundle is not None:
         inputs["significance_evidence_id"] = hashlib.sha256(
             _dump(significance_bundle)).hexdigest()[:24]
+    if confirmation_significance_evidence is not None:
+        inputs["confirmation_significance_evidence_id"] = hashlib.sha256(
+            _dump(confirmation_significance_evidence)).hexdigest()[:24]
     if spec.research_question_id is not None:
         inputs["research_question_id"] = spec.research_question_id
         inputs["research_hypothesis_id"] = spec.research_hypothesis_id
@@ -338,6 +473,7 @@ def run_experiment(spec: ExperimentSpec, snapshot: DatasetSnapshot, output_dir: 
         "baselines.json": baselines,
         "candidate.json": candidate,
         "promotion.json": decision,
+        "promotion_stages.json": stage_records,
         "definitions.json": definitions,
         "hypothesis_family.json": hypothesis_family,
         "uncertainty.json": uncertainty,
@@ -350,6 +486,13 @@ def run_experiment(spec: ExperimentSpec, snapshot: DatasetSnapshot, output_dir: 
     if significance_bundle is not None:
         artifacts["significance_evidence.json"] = significance_bundle
         artifacts["significance_evaluation.json"] = significance_evaluation
+    if validation_candidate is not None:
+        artifacts["validation_candidate.json"] = validation_candidate
+    if holdout_candidate is not None:
+        artifacts["holdout_candidate.json"] = holdout_candidate
+    if confirmation_bundle is not None:
+        artifacts["confirmation_significance_evidence.json"] = confirmation_bundle
+        artifacts["confirmation_significance_evaluation.json"] = confirmation_evaluation
     if walk_forward is not None:
         artifacts["walk_forward.json"] = walk_forward_evidence
     manifest = {"manifest_version": MANIFEST_VERSION, "run_id": run_id, "immutable": True,
