@@ -1508,15 +1508,82 @@ currently reachable end-to-end through the governed path.
 `.agents/skills/experiment-change-validation`'s `REVIEWER_HANDOFF.md` requires an independent
 `experiment_integrity_reviewer` verdict and is explicit that self-review does not satisfy it: *"If
 the named reviewer is not configured or cannot be invoked, the parent workflow returns `BLOCKED`."*
-No such reviewer is configured in the environment this audit ran in (`ListAgents` returned no
-reachable agents). The audit therefore terminates `BLOCKED`, not `PASS`, per that skill's own
-completion table. This slice does **not** close Phase 8R.
+The audit therefore terminates `BLOCKED`, not `PASS`, per that skill's own completion table. This
+slice does **not** close Phase 8R. There are two distinct, independently-resolvable blockers; do
+not collapse them into one:
 
-Next eligible action: either (a) run the named independent reviewer against
-`docs/audits/phase-8r-methodological-audit.md` when that role becomes available and record its
-verdict here, or (b) an explicit repository-authority decision to accept an alternative review path
-— and, orthogonally, a follow-up slice to wire validation/holdout evaluation into the governed
-runner so a positive campaign outcome is actually reachable (see the audit's §4 finding).
+**Blocker A — independent review unavailable.** No independent reviewer context satisfying
+`.agents/skills/experiment-change-validation`'s `experiment_integrity_reviewer` contract is
+currently reachable in this environment (`ListAgents` returned no such role). Resolution: (a) run
+the named independent reviewer against
+[`docs/audits/phase-8r-methodological-audit.md`](docs/audits/phase-8r-methodological-audit.md)
+(§8 of that document is the exact handoff instruction for that reviewer) when the role becomes
+available and record its verdict here, or (b) an explicit, documented repository-authority decision
+to accept an alternative review path.
+
+**Blocker B — material audit finding.** The governed campaign execution path
+(`analysis/experiments/runner.py:run_experiment`, called from `campaign.py:execute_campaign`)
+cannot currently demonstrate a fully promoted positive candidate through validation and sealed
+holdout: `target_stage` is hardcoded to `"discovery"`, so `execute_campaign` can only ever reach
+`discovery_promoted`, never `validation_confirmed`/`holdout_confirmed`, even though
+`evaluate_candidate_promotion` implements and unit-tests both later stages
+(`analysis/alpha/evaluation.py`; see the audit's §4). Resolution: a follow-up remediation slice
+(see [§5 handoff below](#next-remediation-slice-8r7a-governed-validationholdout-promotion)) to wire
+validation/holdout evaluation into the governed runner so a positive campaign outcome is actually
+reachable, with the same fail-closed evidence discipline the discovery stage already has.
+
+Neither blocker resolves the other: an independent `PASS` verdict on the current methodology does
+not make Blocker B disappear, and fixing Blocker B does not by itself satisfy Blocker A. Phase 8R
+closes only when both are resolved.
+
+### Next remediation slice: 8R.7a — governed validation/holdout promotion
+
+Not implemented in this slice (scope discipline). Implementation-ready description for a future
+slice:
+
+- **Affected contracts:** candidate promotion state machine (Slice 4R.3's contract in
+  `analysis/alpha/evaluation.py`); governed experiment execution (`analysis/experiments/runner.py`,
+  `control.py`, `campaign.py`); deterministic run/campaign identity and immutable artifacts
+  (`runner.py`'s `manifest.json`, `campaign.py`'s `verify_campaign`).
+- **Relevant files:** `analysis/experiments/runner.py` (`run_experiment`, currently hardcodes
+  `PromotionEvidence(target_stage="discovery", ...)` before writing `promotion.json`);
+  `analysis/alpha/evaluation.py` (`evaluate_candidate_promotion`, `PromotionEvidence` — already
+  supports `target_stage="validation"`/`"holdout"` and the `validation_replicated`,
+  `validation_semantics_frozen`, `holdout_adjusted_p_value` fields, unused today);
+  `analysis/experiments/campaign.py` (`verify_campaign`'s promoted-outcome check, which already
+  requires `promotion.state == "holdout_confirmed"` and a passed `validation_closure.json`).
+- **Relevant tests:** `tests/test_phase6.py` (existing standalone `target_stage="holdout"` unit
+  coverage to extend, not replace); `tests/test_research_campaign.py` (currently only
+  `test_execute_campaign_rejects_unclosed_promoted_outcome` exercises the rejection path — needs a
+  new positive-path test); `tests/test_phase6_closure.py`, `tests/test_phase7.py` for any shared
+  fixtures.
+- **Expected promotion sequence:** discovery evaluation continues exactly as today
+  (`split.discovery`); the same frozen selection threshold (not recomputed) must then be applied to
+  `split.validation` to score a candidate for `validation_replicated`/`validation_semantics_frozen`
+  evidence, and separately to the sealed `split.holdout` partition for a
+  `holdout_adjusted_p_value`, following whatever corrected-testing contract
+  `PromotionPolicy.confirmation_correction` already declares. Holdout scoring MUST NOT influence
+  discovery/validation results (no re-selection from holdout data) — this repeats the existing
+  sealed-holdout discipline already enforced by `SplitResult.sealed` and `build_split`.
+- **Required negative cases:** validation-stage failure (replication or frozen-semantics evidence
+  absent/failed) must still yield `insufficient_evidence`/`rejected` and must not silently retry at
+  a lower bar; holdout correction failure must still yield `rejected`, not a partial promotion.
+- **Required positive case:** at least one deterministic fixture where discovery, validation, and
+  holdout all pass, producing a real `holdout_confirmed` promotion.json and a campaign that
+  `execute_campaign`/`verify_campaign` accepts as promoted end-to-end (extends
+  `test_research_campaign.py`).
+- **Deterministic/artifact implications:** `run_experiment`'s `manifest.json`/`promotion.json`
+  identity discipline (content-addressed, immutable-overwrite-rejecting) must be preserved; adding
+  validation/holdout evidence to the written artifacts is an additive, backward-compatible change
+  to the run contract, not a new artifact system.
+- **`experiment-change-validation` requirements:** this slice squarely affects "candidate scoring or
+  promotion" and "experiment/artifact identity" per that skill's own scope — it MUST be run through
+  `.agents/skills/experiment-change-validation` before merge, including temporal/holdout boundary
+  re-verification (§3 of that skill) given holdout data becomes newly consumed by the governed path.
+- **Independent reviewer:** yes — after implementation, `experiment_integrity_reviewer` should be
+  invoked per that skill's §6, both because this changes promotion/identity contracts and because it
+  directly remediates Blocker B recorded above; if still unavailable, report `BLOCKED` rather than
+  self-certifying the remediation, consistent with how this audit itself was handled.
 
 ## Phase 8R exit criteria
 
