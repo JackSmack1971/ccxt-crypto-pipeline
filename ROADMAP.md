@@ -2,16 +2,18 @@
 
 **Status:** Active execution authority for forward work  
 **Current phase:** None ACTIVE. Phase 8R is complete; the next open question is a separate, explicit Phase 9 activation decision (not yet made)
-**Baseline:** `main` at `a8bf2dc` (merge of PR #71, Slice 8R.7d) plus this change's Slice 8R.7 closure
-remediation (multiple-testing-denominator, legacy-manifest-verification, and confirmation-evidence-
-identity fixes)
+**Baseline:** `main` at `6e93da3` (Slice 8R.7 closure remediation plus tracked `.claude/agents`/
+`.claude/skills`) plus this change's Slice 8R.8 (non-finite promotion-evidence guard)
 **Last reconciled:** 2026-09-17 (Slice 8R.7 closed: two independent `experiment-integrity-reviewer`
 rounds ran against the 8R.7a-d state -- the first returned `FAIL` with a demonstrated
 multiple-testing-correction bypass plus two related provenance/identity defects, all three were
 remediated with regression tests, and a second independent round returned `PASS`; Phase 8R is DONE.
-Campaign outcome/run-state binding, non-finite promotion values, semantic manifest versioning for
-pre-8R legacy formats, and canonical research IDs remain open, non-blocking follow-up items; Phase 9
-remains deferred pending an explicit activation decision; Phase 10 remains separately deferred)
+Slice 8R.8 additionally closes the "non-finite promotion values" follow-up with defensive
+`isfinite` guards on `discovery_adjusted_p_value`, `holdout_adjusted_p_value`,
+`uncertainty["ci95_low"]`, and `cost_sensitivity` values in `evaluate_candidate_promotion`. Campaign
+outcome/run-state binding, semantic manifest versioning for pre-8R legacy formats, and canonical
+research IDs remain open, non-blocking follow-up items; Phase 9 remains deferred pending an
+explicit activation decision; Phase 10 remains separately deferred)
 
 This file is the durable forward roadmap for `ccxt-crypto-pipeline`. It exists so a new agent can determine the repository's actual execution frontier without reconstructing intent from chat history, stale phase prose, or commit messages.
 
@@ -1818,11 +1820,11 @@ rather than trusting the caller-supplied identity field, covered by
 At the time this slice landed, this remediation was not self-certified as methodologically `PASS`;
 the next eligible action was recorded as an independent re-review once `experiment_integrity_reviewer`
 (or an equivalent authorized reviewer) became reachable. That re-review has since happened -- see the
-Slice 8R.7 entry above for both review rounds and their outcome. The remaining review findings
-(campaign outcome/run-state binding, non-finite promotion values, semantic manifest versioning for
-pre-8R legacy formats, and canonical research IDs) remain separate, non-blocking follow-up slices;
-one further finding (the multiple-testing-denominator bypass) was found by that re-review and is
-also fixed and documented in the Slice 8R.7 entry above.
+Slice 8R.7 entry above for both review rounds and their outcome. Of the remaining review findings,
+non-finite promotion values is closed by Slice 8R.8 below; campaign outcome/run-state binding,
+semantic manifest versioning for pre-8R legacy formats, and canonical research IDs remain separate,
+non-blocking follow-up items. One further finding (the multiple-testing-denominator bypass) was
+found by that re-review and is also fixed and documented in the Slice 8R.7 entry above.
 
 Each of 8R.7a/8R.7b/8R.7c/8R.7d that changes promotion, correction, or run/campaign identity semantics
 MUST be run through `.agents/skills/experiment-change-validation` before merge, including
@@ -1830,6 +1832,45 @@ temporal/holdout boundary re-verification (that skill's §3) once holdout data b
 by the governed path. After implementation, `experiment_integrity_reviewer` should be invoked per
 that skill's §6; if still unavailable, report `BLOCKED` rather than self-certifying the remediation.
 This discipline was followed for the Slice 8R.7 closure remediation described above.
+
+## Slice 8R.8 — Non-finite promotion-evidence guard
+
+**Status:** DONE
+
+Closes one of Slice 8R.7's recorded non-blocking follow-up items: "non-finite promotion values."
+The independent reviewer's round-1 pass noted `analysis/alpha/evaluation.py`'s `evaluate_candidate_promotion`
+guarded `isfinite` for `effect_size`/`measured_effect` only, leaving `discovery_adjusted_p_value`,
+`holdout_adjusted_p_value`, `candidate.uncertainty["ci95_low"]`, and `candidate.cost_sensitivity`
+values unguarded against non-finite (`NaN`/`inf`) input, with reachability through the governed
+runner alone assessed as `INCONCLUSIVE` (the runner's own internal computations cannot currently
+produce a non-finite value for these fields). This slice closes the gap defensively rather than
+leaving it open: `evaluate_candidate_promotion` is a public `analysis.alpha` function usable
+directly (not only through the governed runner), and a non-finite value must fail closed rather
+than silently pass a `<=`/`>` comparison, per `AGENTS.md`'s "invalid/non-finite values ... MUST fail
+closed."
+
+Evidence:
+
+- `analysis/alpha/evaluation.py` adds `_valid_finite`, applied to `discovery_adjusted_p_value`
+  (`DISCOVERY_CORRECTION_FAILED`), `holdout_adjusted_p_value` (`HOLDOUT_CORRECTION_FAILED`),
+  `candidate.uncertainty["ci95_low"]` (`UNCERTAINTY_EVIDENCE_NOT_POSITIVE`), and each
+  `candidate.cost_sensitivity` value (`COST_EVIDENCE_NOT_ROBUST`). A non-finite value now fails the
+  same gate a `None` value already failed, rather than silently satisfying a `<= 0`/`> threshold`
+  comparison (Python's `float('nan') <= 0` and `float('nan') > x` are both `False`).
+- `tests/test_phase3.py::test_candidate_promotion_rejects_non_finite_evidence_rather_than_silently_passing`
+  proves each of the four guards independently, starting from a fixture that reaches
+  `holdout_confirmed` with valid evidence and showing a `NaN` substitution in any one of the four
+  fields flips the outcome to `rejected` with the corresponding reason. Verified against the
+  pre-fix code (temporarily reverted in-session) that the discovery-evidence case previously let a
+  `NaN` `discovery_adjusted_p_value` reach `holdout_confirmed` silently.
+- Full repository suite: `python -m pytest` passed with 520 tests (519 prior + 1 new);
+  `python -m compileall -q analysis ingestion normalization reporting scheduler storage tests` and
+  `git diff --check` both passed. No public signature, CLI flag, or artifact schema changed, so no
+  README update was required.
+
+Remaining recorded follow-up items from Slice 8R.7 -- campaign outcome/run-state binding, semantic
+manifest versioning for pre-8R legacy formats, and canonical research IDs -- remain open,
+non-blocking, and unaddressed by this slice.
 
 ## Phase 8R exit criteria
 
@@ -1931,11 +1972,15 @@ For a fresh agent, the intended pickup sequence is:
 Phase 8R is DONE: Slice 8R.7 closed with two independent `experiment-integrity-reviewer` review
 rounds (the first returned `FAIL` with a demonstrated multiple-testing-correction bypass plus two
 related provenance/identity defects; both were remediated and a second independent round returned
-`PASS`). Phase 9 remains deferred pending an explicit activation decision -- Phase 8R closure is a
-prerequisite, not an activation. Phase 10 remains separately deferred and requires its own product
-decision. No roadmap phase authorizes paper or live execution. There is no other ACTIVE phase at
-this time; the next step for a fresh agent is the explicit Phase 9 activation decision described
-in that phase's section, which this roadmap does not make on its own.
+`PASS`), and Slice 8R.8 additionally closed the "non-finite promotion values" follow-up with
+defensive `isfinite` guards in `evaluate_candidate_promotion`. Phase 9 remains deferred pending an
+explicit activation decision -- Phase 8R closure is a prerequisite, not an activation. Phase 10
+remains separately deferred and requires its own product decision. No roadmap phase authorizes
+paper or live execution. There is no other ACTIVE phase at this time; the next step for a fresh
+agent is either picking up one of the remaining non-blocking Slice 8R.7 follow-up items (campaign
+outcome/run-state binding, semantic manifest versioning for pre-8R legacy formats, canonical
+research IDs) or the explicit Phase 9 activation decision described in that phase's section, which
+this roadmap does not make on its own.
 
 Phase 5 is DONE. Slice 5.7 closed the phase with
 `docs/plans/phase-5-data-plane-closure-matrix.md` and
