@@ -74,6 +74,13 @@ def test_significance_evidence_constructs_and_is_content_addressed():
     assert changed.evidence_id != entry.evidence_id
 
 
+def test_significance_evidence_rejects_tampered_content_id():
+    family = freeze_hypothesis_family(build_spec())
+    entry = _evidence_for(family, family.hypotheses[0])
+    with pytest.raises(ValueError, match="content does not match its evidence_id"):
+        replace(entry, evidence_id="tampered")
+
+
 @pytest.mark.parametrize("kwargs,message", [
     ({"raw_p_value": float("nan")}, "finite"),
     ({"raw_p_value": 1.5}, "finite"),
@@ -206,8 +213,11 @@ def test_significance_evidence_bundle_rejects_mixed_observation_boundaries():
 
 def _runner_bundle(spec, snapshot, *, raw_p_values=(0.01, 0.8), stage="discovery"):
     family = freeze_hypothesis_family(spec)
+    observed_through = ("2025-01-13T00:00:00+00:00"
+                         if stage == "discovery" else "2025-06-01T00:00:00+00:00")
     entries = [_evidence_for(family, hypothesis, raw_p_value=p_value, stage=stage,
-                             dataset_version=snapshot.dataset_identity)
+                             dataset_version=snapshot.dataset_identity,
+                             observed_through=observed_through)
                for hypothesis, p_value in zip(family.hypotheses, raw_p_values)]
     return build_significance_evidence_bundle(
         family, entries, stage=stage, dataset_version=snapshot.dataset_identity)
@@ -273,6 +283,8 @@ def test_runner_consumes_bound_discovery_evidence_and_persists_correction(tmp_pa
     assert evaluation["hypotheses"][0]["adjusted_value"] == pytest.approx(0.02)
     manifest = json.loads((run / "manifest.json").read_text())
     assert "significance_evidence_id" in manifest["inputs"]
+    assert manifest["manifest_version"] == "phase8r-run-v2"
+    assert manifest["inputs"]["manifest_version"] == "phase8r-run-v2"
     assert {"significance_evidence.json", "significance_evaluation.json"} <= set(manifest["artifacts"])
 
 
@@ -285,14 +297,11 @@ def test_runner_significance_evidence_changes_immutable_run_identity(tmp_path):
     assert first != changed
 
 
-def test_runner_confirmation_evidence_is_corrected_but_not_used_as_discovery(tmp_path):
+def test_runner_rejects_confirmation_evidence_in_primary_argument(tmp_path):
     spec, snapshot = runner_spec(), runner_snapshot()
     bundle = _runner_bundle(spec, snapshot, stage="confirmation")
-    run = run_experiment(spec, snapshot, tmp_path / "runs", bundle)
-    promotion = json.loads((run / "promotion.json").read_text())
-    evaluation = json.loads((run / "significance_evaluation.json").read_text())
-    assert promotion["inputs"]["discovery_adjusted_p_value"] is None
-    assert evaluation["stage"] == "confirmation"
+    with pytest.raises(ValueError, match="primary significance evidence must be discovery-stage"):
+        run_experiment(spec, snapshot, tmp_path / "runs", bundle)
 
 
 def test_runner_rejects_evidence_bound_to_another_dataset(tmp_path):
@@ -305,6 +314,32 @@ def test_runner_rejects_evidence_bound_to_another_dataset(tmp_path):
                                     reference_series=snapshot.reference_series)
     with pytest.raises(ValueError, match="different dataset version"):
         run_experiment(spec, other_snapshot, tmp_path / "runs", bundle)
+
+
+def test_runner_rejects_discovery_evidence_observed_after_discovery_boundary(tmp_path):
+    spec, snapshot = runner_spec(), runner_snapshot()
+    family = freeze_hypothesis_family(spec)
+    late_entries = [_evidence_for(
+        family, hypothesis, dataset_version=snapshot.dataset_identity,
+        observed_through="2025-06-01T00:00:00+00:00")
+                    for hypothesis in family.hypotheses]
+    late_bundle = build_significance_evidence_bundle(
+        family, late_entries, stage="discovery", dataset_version=snapshot.dataset_identity)
+    with pytest.raises(ValueError, match="after the discovery/validation boundary"):
+        run_experiment(spec, snapshot, tmp_path / "runs", late_bundle)
+
+
+def test_runner_rejects_confirmation_evidence_before_holdout_boundary(tmp_path):
+    spec, snapshot = _sequential_spec(), _sequential_snapshot()
+    family = freeze_hypothesis_family(spec)
+    entries = _full_evidence(
+        family, stage="confirmation", dataset_version=snapshot.dataset_identity,
+        observed_through="2025-01-13T00:00:00+00:00")
+    bundle = build_significance_evidence_bundle(
+        family, entries, stage="confirmation", dataset_version=snapshot.dataset_identity)
+    with pytest.raises(ValueError, match="before the validation/holdout boundary"):
+        run_experiment(spec, snapshot, tmp_path / "runs", _runner_bundle(spec, snapshot),
+                       confirmation_significance_evidence=bundle)
 
 
 def test_runner_advances_sequentially_to_holdout_with_frozen_selection(tmp_path):

@@ -278,6 +278,25 @@ def test_current_manifest_cannot_be_downgraded_to_legacy_phase7(tmp_path):
         load_run(run)
 
 
+def test_legacy_phase8_manifest_requires_phase8_artifacts(tmp_path):
+    run = run_experiment(runner_spec(), runner_snapshot(), tmp_path / "runs")
+    manifest_path = run / "manifest.json"
+    manifest = json.loads(manifest_path.read_text())
+    manifest["manifest_version"] = "phase8r-run-v1"
+    manifest["inputs"]["manifest_version"] = "phase8r-run-v1"
+    manifest["artifacts"].pop("falsification.json")
+    legacy_id = hashlib.sha256(
+        (json.dumps(manifest["inputs"], sort_keys=True, separators=(",", ":")) + "\n").encode()
+    ).hexdigest()[:24]
+    legacy = run.parent / legacy_id
+    run.rename(legacy)
+    manifest["run_id"] = legacy_id
+    (legacy / "manifest.json").write_text(
+        json.dumps(manifest, sort_keys=True, separators=(",", ":")) + "\n")
+    with pytest.raises(ValueError, match="lacks required artifacts"):
+        load_run(legacy)
+
+
 def test_genuine_legacy_phase7_manifest_remains_loadable(tmp_path):
     current = run_experiment(runner_spec(), runner_snapshot(), tmp_path / "runs")
     legacy = tmp_path / "legacy" / current.name
