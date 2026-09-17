@@ -278,6 +278,35 @@ def test_current_manifest_cannot_be_downgraded_to_legacy_phase7(tmp_path):
         load_run(run)
 
 
+def test_legacy_phase8_manifest_keeps_spec_identity_verification(tmp_path):
+    """The demoted phase8r-run-v1 catalog format must keep the same experiment
+    spec identity / research-binding / falsification-policy verification
+    strength as phase8r-run-v2; demotion must not weaken provenance checks."""
+    run = run_experiment(runner_spec(), runner_snapshot(), tmp_path / "runs")
+    manifest = json.loads((run / "manifest.json").read_text())
+    manifest["manifest_version"] = "phase8r-run-v1"
+    manifest["inputs"]["manifest_version"] = "phase8r-run-v1"
+    legacy_id = hashlib.sha256(
+        (json.dumps(manifest["inputs"], sort_keys=True, separators=(",", ":")) + "\n").encode()
+    ).hexdigest()[:24]
+    legacy = run.parent / legacy_id
+    run.rename(legacy)
+    manifest["run_id"] = legacy_id
+
+    spec_path = legacy / "spec.json"
+    spec = json.loads(spec_path.read_text())
+    spec["name"] = "a-completely-different-experiment"
+    tampered_spec_bytes = (json.dumps(spec, sort_keys=True, separators=(",", ":")) + "\n").encode()
+    spec_path.write_bytes(tampered_spec_bytes)
+    manifest["artifacts"]["spec.json"] = hashlib.sha256(tampered_spec_bytes).hexdigest()
+
+    (legacy / "manifest.json").write_text(
+        json.dumps(manifest, sort_keys=True, separators=(",", ":")) + "\n")
+
+    with pytest.raises(ValueError, match="experiment spec identity mismatch"):
+        load_run(legacy)
+
+
 def test_legacy_phase8_manifest_requires_phase8_artifacts(tmp_path):
     run = run_experiment(runner_spec(), runner_snapshot(), tmp_path / "runs")
     manifest_path = run / "manifest.json"

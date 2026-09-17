@@ -91,8 +91,11 @@ derivations, charts, and approved handoffs into deterministic packages. Phases
 6–7 add governed experiment identity, frozen hypothesis families, uncertainty,
 practical effect, stress, stability, negative controls, and validation closure.
 Phase 8 adds immutable review history, catalog/navigation, and human-gated local
-publication export. Phase 8R is the active empirical research-readiness
-frontier; its planned runtime additions are governed by `ROADMAP.md`.
+publication export. Phase 8R adds empirical research-readiness evidence
+(dataset-quality profiles, a scientific benchmark corpus, durable question/
+hypothesis identity, falsification, research campaigns, and independent
+methodological review) and is complete; Phase 9/10 activation decisions are
+governed by `ROADMAP.md`.
 
 Analysis consumes persisted local data and reporting consumes approved local
 artifacts; neither calls providers or changes canonical ingestion rows.

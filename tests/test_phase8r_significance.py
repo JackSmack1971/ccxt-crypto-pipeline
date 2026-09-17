@@ -365,6 +365,69 @@ def test_runner_advances_sequentially_to_holdout_with_frozen_selection(tmp_path)
         confirmation_significance_evidence=_runner_bundle(spec, snapshot, stage="confirmation")) == run
 
 
+def test_runner_denominator_is_full_family_even_when_sibling_evidence_is_missing(tmp_path):
+    """A caller must not be able to evade discovery/confirmation correction by
+    declaring a sibling hypothesis's raw p-value explicitly unavailable. The
+    correction burden (m) is the full frozen family, so omitting sibling
+    evidence must not make an otherwise-rejected candidate reach
+    holdout_confirmed."""
+    spec, snapshot = _sequential_spec(), _sequential_snapshot()
+    complete = run_experiment(
+        spec, snapshot, tmp_path / "runs" / "complete",
+        _runner_bundle(spec, snapshot, raw_p_values=(0.04, 0.9)),
+        confirmation_significance_evidence=_runner_bundle(
+            spec, snapshot, raw_p_values=(0.04, 0.9), stage="confirmation"))
+    missing = run_experiment(
+        spec, snapshot, tmp_path / "runs" / "missing",
+        _runner_bundle(spec, snapshot, raw_p_values=(0.04, None)),
+        confirmation_significance_evidence=_runner_bundle(
+            spec, snapshot, raw_p_values=(0.04, None), stage="confirmation"))
+    complete_promotion = json.loads((complete / "promotion.json").read_text())
+    missing_promotion = json.loads((missing / "promotion.json").read_text())
+    assert complete_promotion["state"] == missing_promotion["state"] == "rejected"
+    assert complete_promotion["inputs"]["discovery_adjusted_p_value"] == pytest.approx(
+        missing_promotion["inputs"]["discovery_adjusted_p_value"])
+
+
+def test_runner_confirmation_evidence_identity_is_canonical_and_scoped_to_consumption(tmp_path):
+    """Run identity for confirmation evidence must derive from the validated,
+    canonicalized bundle actually persisted -- not the caller's raw container
+    object's own (unverified) metadata fields -- and must not depend on
+    confirmation evidence that was supplied but never consumed because the
+    run never reached validation_confirmed."""
+    spec, snapshot = _sequential_spec(), _sequential_snapshot()
+    canonical = _runner_bundle(spec, snapshot, stage="confirmation")
+    # The confirmation slot only ever consumes `.entries`; a caller-supplied
+    # container whose own family_id/dataset_version metadata is stale or
+    # wrong must not change run identity, since the real correction is
+    # always re-derived from a freshly rebuilt, re-verified bundle.
+    junk_metadata = replace(canonical, family_id="not-the-family", dataset_version="not-the-dataset")
+
+    canonical_run = run_experiment(
+        spec, snapshot, tmp_path / "runs" / "canonical",
+        _runner_bundle(spec, snapshot), confirmation_significance_evidence=canonical)
+    junk_metadata_run = run_experiment(
+        spec, snapshot, tmp_path / "runs" / "junk-metadata",
+        _runner_bundle(spec, snapshot), confirmation_significance_evidence=junk_metadata)
+    canonical_manifest = json.loads((canonical_run / "manifest.json").read_text())
+    junk_metadata_manifest = json.loads((junk_metadata_run / "manifest.json").read_text())
+    assert (canonical_manifest["inputs"]["confirmation_significance_evidence_id"]
+            == junk_metadata_manifest["inputs"]["confirmation_significance_evidence_id"])
+    assert canonical_manifest["run_id"] == junk_metadata_manifest["run_id"]
+
+    with_unused_confirmation = run_experiment(
+        spec, snapshot, tmp_path / "runs" / "with-unused",
+        _runner_bundle(spec, snapshot, raw_p_values=(0.9, 0.8)),
+        confirmation_significance_evidence=canonical)
+    without_confirmation = run_experiment(
+        spec, snapshot, tmp_path / "runs" / "without",
+        _runner_bundle(spec, snapshot, raw_p_values=(0.9, 0.8)))
+    with_unused_manifest = json.loads((with_unused_confirmation / "manifest.json").read_text())
+    without_manifest = json.loads((without_confirmation / "manifest.json").read_text())
+    assert with_unused_manifest["run_id"] == without_manifest["run_id"]
+    assert "confirmation_significance_evidence_id" not in with_unused_manifest["inputs"]
+
+
 def test_runner_stops_before_validation_when_discovery_fails(tmp_path):
     spec, snapshot = _sequential_spec(), _sequential_snapshot()
     run = run_experiment(

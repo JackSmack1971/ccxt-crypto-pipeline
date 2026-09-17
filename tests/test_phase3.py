@@ -247,6 +247,24 @@ def test_split_is_chronological_sealed_and_corrections_are_recorded():
     assert apply_holm(hs)[0].adjusted_value == pytest.approx(.03)
 
 
+def test_bh_and_holm_denominator_is_the_declared_family_not_the_available_evidence():
+    """A sibling hypothesis with no raw p-value must not shrink the correction
+    burden for the hypotheses that do have evidence -- otherwise a caller could
+    evade multiple-testing correction simply by omitting sibling evidence."""
+    complete = [Hypothesis("e", "f", (), None, "24h", None, "m", "2025-01-01", "d", p)
+                for p in (.04, .9)]
+    missing = [Hypothesis("e", "f", (), None, "24h", None, "m", "2025-01-01", "d", p)
+               for p in (.04, None)]
+    complete_bh, missing_bh = apply_bh_fdr(complete), apply_bh_fdr(missing)
+    assert missing_bh[0].adjusted_value == pytest.approx(complete_bh[0].adjusted_value)
+    assert missing_bh[0].decision == complete_bh[0].decision == "rejected"
+    assert missing_bh[1].adjusted_value is None
+    complete_holm, missing_holm = apply_holm(complete), apply_holm(missing)
+    assert missing_holm[0].adjusted_value == pytest.approx(complete_holm[0].adjusted_value)
+    assert missing_holm[0].decision == complete_holm[0].decision == "rejected"
+    assert missing_holm[1].adjusted_value is None
+
+
 def test_split_purges_feature_and_label_windows_at_fixed_boundaries():
     class Row:
         def __init__(self, i):

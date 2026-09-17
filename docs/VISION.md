@@ -61,15 +61,15 @@ like this same profile, not a general retail audience.
 
 ## Product Direction
 
-The active frontier is Phase 8R empirical research readiness: proving that
-research questions can be evaluated against realistic historical data with
-dataset-quality evidence, durable hypothesis identity, falsification, and
-independent methodological review. Phase 8 research product and publication
-operations are complete, providing locally reviewable, evidence-bound report
-packages with claim-level provenance and human-gated export. Paper/forward
-execution (Phase 9) and live execution (Phase 10) remain separately gated,
-deferred decisions requiring their own threat models, controls, and
-authorization.
+Phase 8R empirical research readiness is complete: research questions can be
+evaluated against realistic historical data with dataset-quality evidence,
+durable hypothesis identity, falsification, and independent methodological
+review. Phase 8 research product and publication operations are also
+complete, providing locally reviewable, evidence-bound report packages with
+claim-level provenance and human-gated export. Paper/forward execution
+(Phase 9) and live execution (Phase 10) remain separately gated, deferred
+decisions requiring their own threat models, controls, and authorization;
+Phase 8R closure is a prerequisite for Phase 9, not an authorization of it.
 
 ## Non-Goals
 
