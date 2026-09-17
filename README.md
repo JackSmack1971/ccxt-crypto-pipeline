@@ -231,8 +231,12 @@ the effect floor is rejected, while missing effect evidence remains
 unavailable.
 
 When caller-supplied significance evidence is available, pass a validated
-`SignificanceEvidenceBundle` to `run_experiment(...)`. The runner rechecks its
-frozen-family, experiment-spec, dataset, stage, and temporal bindings, applies
+discovery-stage `SignificanceEvidenceBundle` as the primary argument to
+`run_experiment(...)`; pass confirmation evidence only through
+`confirmation_significance_evidence` after validation eligibility. The runner rechecks its
+frozen-family, experiment-spec, dataset, stage, and split-boundary temporal
+bindings: discovery evidence must stop at the discovery/validation boundary,
+and confirmation evidence cannot precede the validation/holdout boundary. It applies
 the declared family correction, persists the raw evidence and corrected
 evaluation, and includes the evidence in immutable run identity. Provide a
 second `confirmation_significance_evidence` bundle to enable the sealed-holdout

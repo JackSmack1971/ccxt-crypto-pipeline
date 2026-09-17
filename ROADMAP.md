@@ -2,10 +2,13 @@
 
 **Status:** Active execution authority for forward work  
 **Current phase:** Phase 8R empirical research readiness
-**Baseline:** `main` at `666dd49` (Slice 8R.7b merged; Slice 8R.7c focused evidence: 38 passed)
-**Last reconciled:** 2026-09-16 (Slice 8R.7c integrates sequential governed promotion through
-holdout and campaign verification; Phase 8R remains blocked only on the unavailable independent
-methodological reviewer; Phases 9–10 remain deferred)
+**Baseline:** `main` at `94d1c7f` (Slice 8R.7c merged; independent review failed with
+demonstrated methodology defects)
+**Last reconciled:** 2026-09-17 (remediation Slice 8R.7d implements and self-reviews fixes for the
+independent review's temporal-boundary and significance-evidence content-ID findings, but remains
+`BLOCKED` on an independent `experiment_integrity_reviewer` re-review that is unreachable in this
+session; campaign outcome/run-state binding, non-finite promotion values, semantic manifest
+versioning, and canonical research IDs remain open follow-up slices; Phases 9–10 remain deferred)
 
 This file is the durable forward roadmap for `ccxt-crypto-pipeline`. It exists so a new agent can determine the repository's actual execution frontier without reconstructing intent from chat history, stale phase prose, or commit messages.
 
@@ -1695,8 +1698,8 @@ Confirmation evidence is consumed only at the eligible holdout stage, and staged
 promotion artifacts preserve the exact path and selected memberships. `execute_campaign` accepts
 per-bound-hypothesis discovery and confirmation evidence mappings and the positive fixture reaches
 `holdout_confirmed` through `execute_campaign`/`verify_campaign`; discovery, validation, holdout,
-and deterministic-replay cases are covered. The independent methodological reviewer remains the
-sole unresolved 8R.7 blocker. The next eligible action is that review, not Phase 9 activation.
+and deterministic-replay cases are covered. The independent review subsequently found additional
+methodological defects; Slice 8R.7 remains open pending remediation and a passing re-review.
 
 Original scope: only after significance evidence can legitimately
 satisfy discovery should `run_experiment`/`execute_campaign` advance the frozen candidate through
@@ -1710,7 +1713,29 @@ replay. If the repository's actual promotion contract does not require a validat
 (as observed above — `PromotionEvidence` has no such field), preserve that asymmetry rather than
 inventing one for symmetry with discovery/holdout.
 
-Each of 8R.7a/8R.7b/8R.7c that changes promotion, correction, or run/campaign identity semantics
+**Slice 8R.7d — Temporal significance-evidence boundary.** **Status: BLOCKED (implementation and
+self-review complete; independent `experiment_integrity_reviewer` re-review unavailable in this
+session — `ListAgents` found no reachable reviewer, consistent with how the 8R.7 audit itself was
+handled in `docs/audits/phase-8r-methodological-audit.md`).** Focused evidence:
+`tests/test_phase7.py` and `tests/test_phase8r_significance.py`, 68 passed; the full locked suite
+passed with 515 tests, `compileall`, and `git diff --check`. Bind supplied significance evidence to
+the split boundary at the governed runner: discovery evidence must be observed no later than the
+discovery/validation boundary, and confirmation evidence must not be observed before the
+validation/holdout boundary. Missing boundaries fail closed. Adversarial tests cover future
+discovery evidence and premature confirmation evidence. The runner manifest is now
+`phase8r-run-v2`, preserving v1 as a legacy catalog format so remediated and pre-remediation run
+identities cannot collide. This remediation addresses the independent review's critical
+temporal/holdout finding. It also closes the content-ID-verification finding: `SignificanceEvidence`
+now recomputes its content hash on construction and rejects a mismatched/tampered `evidence_id`
+rather than trusting the caller-supplied identity field, covered by
+`test_significance_evidence_rejects_tampered_content_id`.
+Do not self-certify this remediation as methodologically `PASS`; the next eligible action is an
+independent re-review once `experiment_integrity_reviewer` (or an equivalent authorized reviewer)
+is reachable. The remaining review findings are separate follow-up slices: campaign
+outcome/run-state binding, non-finite promotion values, semantic manifest versioning, and canonical
+research IDs.
+
+Each of 8R.7a/8R.7b/8R.7c/8R.7d that changes promotion, correction, or run/campaign identity semantics
 MUST be run through `.agents/skills/experiment-change-validation` before merge, including
 temporal/holdout boundary re-verification (that skill's §3) once holdout data becomes newly consumed
 by the governed path. After implementation, `experiment_integrity_reviewer` should be invoked per

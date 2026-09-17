@@ -18,7 +18,7 @@ import json
 import math
 import re
 from dataclasses import asdict, is_dataclass, replace
-from datetime import timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Callable
 
@@ -42,7 +42,38 @@ from .negative_controls import build_negative_control_evidence
 from .closure import build_validation_closure
 from .falsification import build_falsification_evidence
 
-MANIFEST_VERSION = "phase8r-run-v1"
+MANIFEST_VERSION = "phase8r-run-v2"
+
+
+def _validate_significance_temporal_boundary(bundle: SignificanceEvidenceBundle,
+                                             split: Any) -> None:
+    """Keep supplied significance evidence within its eligible partition."""
+    def parse(value: str) -> datetime:
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+        return parsed if parsed.tzinfo is not None else parsed.replace(tzinfo=timezone.utc)
+
+    boundaries = {item["name"]: item["timestamp"] for item in split.boundaries}
+    try:
+        observed_through = parse(bundle.entries[0].observed_through)
+    except (AttributeError, ValueError) as exc:
+        raise ValueError("invalid significance evidence temporal boundary") from exc
+
+    if bundle.stage == "discovery":
+        boundary_name = "discovery_validation"
+        boundary = boundaries.get(boundary_name)
+        if boundary is None:
+            raise ValueError("discovery significance evidence requires a discovery/validation boundary")
+        if observed_through > parse(boundary):
+            raise ValueError(
+                "discovery significance evidence observed after the discovery/validation boundary")
+    elif bundle.stage == "confirmation":
+        boundary_name = "validation_holdout"
+        boundary = boundaries.get(boundary_name)
+        if boundary is None:
+            raise ValueError("confirmation significance evidence requires a validation/holdout boundary")
+        if observed_through < parse(boundary):
+            raise ValueError(
+                "confirmation significance evidence observed before the validation/holdout boundary")
 
 
 def resolve_feature_registry(spec: ExperimentSpec) -> FeatureRegistry:
@@ -256,15 +287,24 @@ def run_experiment(spec: ExperimentSpec, snapshot: DatasetSnapshot, output_dir: 
     """
     # Commit the family before any research result is inspected.
     hypothesis_family = freeze_hypothesis_family(spec)
+    cohort = extract_cohort(snapshot, spec.cohort)
+    split = build_split(cohort, embargo_days=spec.split.embargo_days,
+                        feature_lookback=timedelta(seconds=spec.split.feature_lookback_seconds),
+                        label_horizon=timedelta(seconds=spec.split.label_horizon_seconds))
     significance_bundle = None
     significance_evaluation = None
     candidate_adjusted_p_value = None
     if significance_evidence is not None:
         if significance_evidence.manifest_version != SIGNIFICANCE_MANIFEST_VERSION:
             raise ValueError("unsupported significance evidence manifest version")
+        if significance_evidence.stage != "discovery":
+            raise ValueError(
+                "primary significance evidence must be discovery-stage; "
+                "confirmation evidence requires confirmation_significance_evidence")
         significance_bundle = build_significance_evidence_bundle(
             hypothesis_family, significance_evidence.entries,
             stage=significance_evidence.stage, dataset_version=snapshot.dataset_identity)
+        _validate_significance_temporal_boundary(significance_bundle, split)
         significance_evaluation = evaluate_hypothesis_family(
             hypothesis_family, significance_bundle.raw_p_values(), stage=significance_bundle.stage,
             dataset_version=snapshot.dataset_identity,
@@ -278,7 +318,6 @@ def run_experiment(spec: ExperimentSpec, snapshot: DatasetSnapshot, output_dir: 
                                         candidate_hypothesis.horizon, candidate_hypothesis.subgroup,
                                         candidate_hypothesis.model_specification))
         candidate_adjusted_p_value = candidate_result.adjusted_value
-    cohort = extract_cohort(snapshot, spec.cohort)
     registry = resolve_feature_registry(spec)
     feature_rows = compute_features(snapshot, cohort, registry)
 
@@ -286,9 +325,6 @@ def run_experiment(spec: ExperimentSpec, snapshot: DatasetSnapshot, output_dir: 
     candidate_labels = labels_by_horizon[spec.candidate.horizon]
     validate_temporal_alignment(cohort, feature_rows, candidate_labels)
 
-    split = build_split(cohort, embargo_days=spec.split.embargo_days,
-                        feature_lookback=timedelta(seconds=spec.split.feature_lookback_seconds),
-                        label_horizon=timedelta(seconds=spec.split.label_horizon_seconds))
     walk_forward = None
     if spec.split.evaluation_mode == "walk_forward":
         walk_forward = build_walk_forward_evaluation(
@@ -374,6 +410,7 @@ def run_experiment(spec: ExperimentSpec, snapshot: DatasetSnapshot, output_dir: 
             confirmation_bundle = build_significance_evidence_bundle(
                 hypothesis_family, confirmation_significance_evidence.entries,
                 stage="confirmation", dataset_version=snapshot.dataset_identity)
+            _validate_significance_temporal_boundary(confirmation_bundle, split)
             confirmation_evaluation = evaluate_hypothesis_family(
                 hypothesis_family, confirmation_bundle.raw_p_values(), stage="confirmation",
                 dataset_version=snapshot.dataset_identity,

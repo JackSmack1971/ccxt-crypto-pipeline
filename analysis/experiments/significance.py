@@ -97,6 +97,15 @@ class SignificanceEvidence:
         _parse_boundary(self.observed_through)
         if self.seed is not None and (isinstance(self.seed, bool) or type(self.seed) is not int or self.seed < 0):
             raise ValueError("significance evidence seed must be a non-negative integer")
+        expected_id = _content_id(_evidence_payload(
+            hypothesis=self.hypothesis, family_id=self.family_id,
+            experiment_spec_id=self.experiment_spec_id, dataset_version=self.dataset_version,
+            stage=self.stage, raw_p_value=self.raw_p_value,
+            statistical_test=self.statistical_test, test_version=self.test_version,
+            observed_through=self.observed_through, provenance=self.provenance,
+            parameters=self.parameters, seed=self.seed))
+        if self.evidence_id != expected_id:
+            raise ValueError("significance evidence content does not match its evidence_id")
 
 
 def _evidence_payload(*, hypothesis: HypothesisIdentity, family_id: str, experiment_spec_id: str,
