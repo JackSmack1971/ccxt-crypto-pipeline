@@ -65,14 +65,18 @@ def test_campaign_artifact_is_immutable_and_replayable(tmp_path):
         write_campaign(campaign, tmp_path)
 
 
-def test_campaign_verification_binds_registry_profile_and_runs(monkeypatch):
+def test_campaign_verification_binds_registry_profile_and_runs(tmp_path, monkeypatch):
     registry, question, hypothesis = _registry()
     profile_body = {"dataset_identity": "dataset-fixture", "profile_version": "test"}
     profile = {**profile_body, "profile_identity": hashlib.sha256(
         (json.dumps(profile_body, sort_keys=True, separators=(",", ":")) + "\n").encode()).hexdigest()}
     campaign = _campaign(registry, question, hypothesis,
                          dataset_profile_identity=profile["profile_identity"])
-    run = SimpleNamespace(run_id="run-1", dataset_identity="dataset-fixture",
+    run_path = tmp_path / "run-1"
+    run_path.mkdir()
+    (run_path / "promotion.json").write_text(json.dumps({"state": "rejected"}))
+    (run_path / "validation_closure.json").write_text(json.dumps({"passed": False}))
+    run = SimpleNamespace(run_id="run-1", path=run_path, dataset_identity="dataset-fixture",
                           experiment_spec_id="spec-1", research_question_id=question.question_id,
                           research_hypothesis_id=hypothesis.hypothesis_id)
     monkeypatch.setattr("analysis.experiments.campaign.load_run", lambda path: run)
@@ -158,3 +162,67 @@ def test_execute_campaign_reaches_holdout_with_bound_stage_evidence(tmp_path):
     assert campaign.promoted_hypothesis_ids == (hypothesis.hypothesis_id,)
     assert verify_campaign(campaign, registry=registry, profile=profile,
                            run_root=tmp_path / "runs") == campaign
+
+
+def test_execute_campaign_rejects_mislabeling_a_holdout_confirmed_hypothesis_as_rejected(tmp_path):
+    """A hypothesis whose run actually reached holdout_confirmed must not be
+    declared 'rejected' -- that would misrepresent a positive outcome as
+    negative, which honest outcome reporting (Phase 8R's exit criterion)
+    forbids."""
+    registry, question, hypothesis = _registry()
+    spec = _sequential_spec(research_question_id=question.question_id,
+                            research_hypothesis_id=hypothesis.hypothesis_id)
+    snapshot = _sequential_snapshot()
+    profile_body = {"dataset_identity": snapshot.dataset_identity, "profile_version": "fixture"}
+    profile = {**profile_body, "profile_identity": hashlib.sha256(
+        (json.dumps(profile_body, sort_keys=True, separators=(",", ":")) + "\n").encode()).hexdigest()}
+    with pytest.raises(ValueError, match="omits or mislabels"):
+        execute_campaign(
+            registry, (spec,), snapshot, profile, run_root=tmp_path / "runs",
+            campaign_root=tmp_path / "campaigns",
+            rejected_hypothesis_ids=(hypothesis.hypothesis_id,),
+            conclusion="The hypothesis was rejected.", limitations=("fixture data only",),
+            significance_evidence={hypothesis.hypothesis_id: _runner_bundle(spec, snapshot)},
+            confirmation_significance_evidence={
+                hypothesis.hypothesis_id: _runner_bundle(spec, snapshot, stage="confirmation")})
+
+
+def test_execute_campaign_rejects_omitting_a_successful_outcome_from_both_lists(tmp_path):
+    """A hypothesis whose run actually reached holdout_confirmed must appear
+    in promoted_hypothesis_ids -- silently omitting it from both outcome
+    lists would let a campaign avoid honestly representing a positive
+    result."""
+    registry, question, hypothesis = _registry()
+    spec = _sequential_spec(research_question_id=question.question_id,
+                            research_hypothesis_id=hypothesis.hypothesis_id)
+    snapshot = _sequential_snapshot()
+    profile_body = {"dataset_identity": snapshot.dataset_identity, "profile_version": "fixture"}
+    profile = {**profile_body, "profile_identity": hashlib.sha256(
+        (json.dumps(profile_body, sort_keys=True, separators=(",", ":")) + "\n").encode()).hexdigest()}
+    with pytest.raises(ValueError, match="omits or mislabels"):
+        execute_campaign(
+            registry, (spec,), snapshot, profile, run_root=tmp_path / "runs",
+            campaign_root=tmp_path / "campaigns",
+            conclusion="Undetermined.", limitations=("fixture data only",),
+            significance_evidence={hypothesis.hypothesis_id: _runner_bundle(spec, snapshot)},
+            confirmation_significance_evidence={
+                hypothesis.hypothesis_id: _runner_bundle(spec, snapshot, stage="confirmation")})
+
+
+def test_execute_campaign_rejects_omitting_a_negative_outcome_from_both_lists(tmp_path):
+    """A hypothesis whose run did not reach holdout_confirmed must still
+    appear in rejected_hypothesis_ids -- silently omitting a negative result
+    from both outcome lists is as dishonest as omitting a positive one."""
+    registry, question, hypothesis = _registry()
+    spec = _sequential_spec(research_question_id=question.question_id,
+                            research_hypothesis_id=hypothesis.hypothesis_id)
+    snapshot = _sequential_snapshot(validation_positive=False)
+    profile_body = {"dataset_identity": snapshot.dataset_identity, "profile_version": "fixture"}
+    profile = {**profile_body, "profile_identity": hashlib.sha256(
+        (json.dumps(profile_body, sort_keys=True, separators=(",", ":")) + "\n").encode()).hexdigest()}
+    with pytest.raises(ValueError, match="omits an outcome classification"):
+        execute_campaign(
+            registry, (spec,), snapshot, profile, run_root=tmp_path / "runs",
+            campaign_root=tmp_path / "campaigns",
+            conclusion="Undetermined.", limitations=("fixture data only",),
+            significance_evidence={hypothesis.hypothesis_id: _runner_bundle(spec, snapshot)})

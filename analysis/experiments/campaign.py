@@ -180,12 +180,31 @@ def verify_campaign(campaign: ResearchCampaign, *, registry: ResearchRegistry,
         raise ValueError("research campaign run question mismatch")
     if any(record.research_hypothesis_id not in campaign.hypothesis_ids for record in records):
         raise ValueError("research campaign run hypothesis is not declared")
+    records_by_hypothesis = {record.research_hypothesis_id: record for record in records}
     for hypothesis_id in campaign.promoted_hypothesis_ids:
-        record = next(record for record in records if record.research_hypothesis_id == hypothesis_id)
+        record = records_by_hypothesis.get(hypothesis_id)
+        if record is None:
+            raise ValueError("research campaign promoted hypothesis has no corresponding run")
         promotion = json.loads((record.path / "promotion.json").read_text(encoding="utf-8"))
         closure = json.loads((record.path / "validation_closure.json").read_text(encoding="utf-8"))
         if promotion.get("state") != "holdout_confirmed" or closure.get("passed") is not True:
             raise ValueError("research campaign promoted outcome lacks complete holdout closure")
+    # Every hypothesis with a governed run that was NOT already verified above
+    # (i.e. not declared promoted) must still be classified, and classified
+    # honestly -- otherwise a caller could mislabel a hypothesis that actually
+    # reached holdout_confirmed as "rejected", or omit it from both outcome
+    # lists entirely, and this verifier would not catch it.
+    for hypothesis_id, record in records_by_hypothesis.items():
+        if hypothesis_id in campaign.promoted_hypothesis_ids:
+            continue
+        promotion = json.loads((record.path / "promotion.json").read_text(encoding="utf-8"))
+        closure = json.loads((record.path / "validation_closure.json").read_text(encoding="utf-8"))
+        if promotion.get("state") == "holdout_confirmed" and closure.get("passed") is True:
+            raise ValueError(
+                "research campaign omits or mislabels a hypothesis that reached holdout_confirmed")
+        if hypothesis_id not in campaign.rejected_hypothesis_ids:
+            raise ValueError(
+                "research campaign omits an outcome classification for a governed run")
     return campaign
 
 

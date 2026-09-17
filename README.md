@@ -210,7 +210,12 @@ Use `execute_campaign(...)` to run bound experiment specs against a persisted
 `DatasetSnapshot`, verify the resulting run artifacts and dataset profile, and
 write one immutable campaign. A promoted outcome is accepted only when its run
 has holdout confirmation and a passing validation closure; rejected outcomes
-remain valid research results.
+remain valid research results. Every hypothesis with a governed run must be
+classified into exactly one outcome list, matching what its run actually
+reached: `verify_campaign` rejects a campaign that mislabels a
+`holdout_confirmed` hypothesis as rejected, or that omits a hypothesis's
+outcome from both `promoted_hypothesis_ids` and `rejected_hypothesis_ids`
+entirely.
 
 Experiment runs also emit deterministic `uncertainty.json` evidence using the
 configured moving-block bootstrap policy. The policy records its method,

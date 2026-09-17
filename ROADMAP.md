@@ -2,18 +2,20 @@
 
 **Status:** Active execution authority for forward work  
 **Current phase:** None ACTIVE. Phase 8R is complete; the next open question is a separate, explicit Phase 9 activation decision (not yet made)
-**Baseline:** `main` at `6e93da3` (Slice 8R.7 closure remediation plus tracked `.claude/agents`/
-`.claude/skills`) plus this change's Slice 8R.8 (non-finite promotion-evidence guard)
+**Baseline:** `main` at `0e4f35a` (Slice 8R.7 closure remediation, tracked `.claude/agents`/
+`.claude/skills`, and Slice 8R.8) plus this change's Slice 8R.9 (campaign outcome/run-state binding)
 **Last reconciled:** 2026-09-17 (Slice 8R.7 closed: two independent `experiment-integrity-reviewer`
 rounds ran against the 8R.7a-d state -- the first returned `FAIL` with a demonstrated
 multiple-testing-correction bypass plus two related provenance/identity defects, all three were
 remediated with regression tests, and a second independent round returned `PASS`; Phase 8R is DONE.
-Slice 8R.8 additionally closes the "non-finite promotion values" follow-up with defensive
-`isfinite` guards on `discovery_adjusted_p_value`, `holdout_adjusted_p_value`,
-`uncertainty["ci95_low"]`, and `cost_sensitivity` values in `evaluate_candidate_promotion`. Campaign
-outcome/run-state binding, semantic manifest versioning for pre-8R legacy formats, and canonical
-research IDs remain open, non-blocking follow-up items; Phase 9 remains deferred pending an
-explicit activation decision; Phase 10 remains separately deferred)
+Slice 8R.8 closes the "non-finite promotion values" follow-up with defensive `isfinite` guards on
+`discovery_adjusted_p_value`, `holdout_adjusted_p_value`, `uncertainty["ci95_low"]`, and
+`cost_sensitivity` values in `evaluate_candidate_promotion`. Slice 8R.9 closes "campaign
+outcome/run-state binding": `verify_campaign` now requires every hypothesis with a governed run to
+be classified into exactly one outcome list, matching what its run actually reached. Semantic
+manifest versioning for pre-8R legacy formats and canonical research IDs remain open, non-blocking
+follow-up items; Phase 9 remains deferred pending an explicit activation decision; Phase 10 remains
+separately deferred)
 
 This file is the durable forward roadmap for `ccxt-crypto-pipeline`. It exists so a new agent can determine the repository's actual execution frontier without reconstructing intent from chat history, stale phase prose, or commit messages.
 
@@ -1872,6 +1874,48 @@ Remaining recorded follow-up items from Slice 8R.7 -- campaign outcome/run-state
 manifest versioning for pre-8R legacy formats, and canonical research IDs -- remain open,
 non-blocking, and unaddressed by this slice.
 
+## Slice 8R.9 — Campaign outcome/run-state binding
+
+**Status:** DONE
+
+Closes another of Slice 8R.7's recorded non-blocking follow-up items: "campaign outcome/run-state
+binding." The independent review's round-1 pass (MEDIUM-3) found `campaign.py`'s `verify_campaign`
+validated only that `rejected_hypothesis_ids`/`promoted_hypothesis_ids` were disjoint subsets of
+`hypothesis_ids`, and bound only *promoted* outcomes to their run's actual `holdout_confirmed`
+state. A caller could declare a hypothesis whose run actually reached `holdout_confirmed` as
+`rejected`, or omit a hypothesis's outcome from both lists entirely, and `verify_campaign` accepted
+it -- directly contradicting Phase 8R's exit criterion that "positive and negative outcomes are
+represented honestly." Assessed at the time as conservative-direction and non-blocking (it could
+only under-report a success, never fabricate one), it is closed here rather than left open.
+
+Evidence:
+
+- `analysis/experiments/campaign.py`'s `verify_campaign` now requires every hypothesis with a
+  corresponding governed run to be classified into exactly one outcome list, matching what its run
+  actually reached: a hypothesis whose run reached `holdout_confirmed` with a passed validation
+  closure must appear in `promoted_hypothesis_ids` (not `rejected_hypothesis_ids`, not omitted from
+  both); a hypothesis whose run did not must appear in `rejected_hypothesis_ids` (not omitted). The
+  existing promoted-outcome closure check is preserved verbatim (same error message), and a
+  promoted hypothesis with no corresponding run now fails with a clear `ValueError` instead of an
+  unhandled `StopIteration`.
+- `tests/test_research_campaign.py` adds
+  `test_execute_campaign_rejects_mislabeling_a_holdout_confirmed_hypothesis_as_rejected`,
+  `test_execute_campaign_rejects_omitting_a_successful_outcome_from_both_lists`, and
+  `test_execute_campaign_rejects_omitting_a_negative_outcome_from_both_lists`, each verified against
+  the pre-fix code (temporarily reverted in-session) to confirm the scenario previously succeeded
+  silently. The existing `test_campaign_verification_binds_registry_profile_and_runs` mock was
+  extended with real `promotion.json`/`validation_closure.json` files so the strengthened check has
+  real content to read.
+- Full repository suite: `python -m pytest` passed with 523 tests (520 prior + 3 new);
+  `python -m compileall -q analysis ingestion normalization reporting scheduler storage tests` and
+  `git diff --check` both passed. `execute_campaign`/`verify_campaign` are public, user-facing
+  functions whose accepted-input behavior changed, so `README.md`'s research-campaign section is
+  updated to document the new classification requirement.
+
+Remaining recorded follow-up items from Slice 8R.7 -- semantic manifest versioning for pre-8R
+legacy formats and canonical research IDs -- remain open, non-blocking, and unaddressed by this
+slice.
+
 ## Phase 8R exit criteria
 
 Phase 8R is complete only when:
@@ -1972,15 +2016,16 @@ For a fresh agent, the intended pickup sequence is:
 Phase 8R is DONE: Slice 8R.7 closed with two independent `experiment-integrity-reviewer` review
 rounds (the first returned `FAIL` with a demonstrated multiple-testing-correction bypass plus two
 related provenance/identity defects; both were remediated and a second independent round returned
-`PASS`), and Slice 8R.8 additionally closed the "non-finite promotion values" follow-up with
-defensive `isfinite` guards in `evaluate_candidate_promotion`. Phase 9 remains deferred pending an
+`PASS`). Slice 8R.8 closed the "non-finite promotion values" follow-up with defensive `isfinite`
+guards in `evaluate_candidate_promotion`. Slice 8R.9 closed "campaign outcome/run-state binding":
+`verify_campaign` now requires every hypothesis with a governed run to be classified into exactly
+one outcome list, matching what its run actually reached. Phase 9 remains deferred pending an
 explicit activation decision -- Phase 8R closure is a prerequisite, not an activation. Phase 10
 remains separately deferred and requires its own product decision. No roadmap phase authorizes
 paper or live execution. There is no other ACTIVE phase at this time; the next step for a fresh
-agent is either picking up one of the remaining non-blocking Slice 8R.7 follow-up items (campaign
-outcome/run-state binding, semantic manifest versioning for pre-8R legacy formats, canonical
-research IDs) or the explicit Phase 9 activation decision described in that phase's section, which
-this roadmap does not make on its own.
+agent is either picking up one of the remaining non-blocking Slice 8R.7 follow-up items (semantic
+manifest versioning for pre-8R legacy formats, canonical research IDs) or the explicit Phase 9
+activation decision described in that phase's section, which this roadmap does not make on its own.
 
 Phase 5 is DONE. Slice 5.7 closed the phase with
 `docs/plans/phase-5-data-plane-closure-matrix.md` and
