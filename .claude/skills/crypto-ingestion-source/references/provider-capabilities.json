@@ -1,0 +1,73 @@
+{
+  "snapshot": "2026-09",
+  "scope": "Research-backed capability guardrails for crypto-ingestion-source; repository config remains authoritative for enabled chains/providers.",
+  "providers": {
+    "dexscreener": {
+      "capabilities": ["profiles", "boosts", "pair_snapshot", "search", "token_pairs", "trending_metas"],
+      "forbidden_capabilities": ["ohlcv", "strict_new_pool_feed"],
+      "chain_scope": "provider-supported",
+      "auth": "keyless",
+      "notes": "Profiles/boosts are supplementary discovery signals, not a strict newest-pools feed. Two documented rate-limit bands: 60/min and 300/min."
+    },
+    "geckoterminal": {
+      "capabilities": ["new_pool", "trending_pool", "ohlcv", "recent_trades"],
+      "chain_scope": "provider-supported",
+      "auth": "keyless_native_api",
+      "notes": "Native api.geckoterminal.com/api/v2 researched at 30 calls/min free; CoinGecko shared keyless path differs."
+    },
+    "defillama": {
+      "capabilities": ["tvl", "yield_context", "stablecoin_context", "price_context"],
+      "forbidden_capabilities": ["strict_new_pool_feed"],
+      "chain_scope": "provider-supported",
+      "auth": "keyless_free_api",
+      "notes": "Context/enrichment source, not real-time new-token discovery. Free limits are fair-use/endpoint-dependent rather than one safe hardcoded number."
+    },
+    "etherscan_v2": {
+      "capabilities": ["contract_source", "contract_verification", "contract_creation", "token_holders", "transactions"],
+      "chain_scope": "etherscan-supported",
+      "auth": "api_key",
+      "free_capability_overrides": {
+        "ethereum": ["contract_source", "contract_verification", "contract_creation", "token_holders", "transactions"],
+        "arbitrum": ["contract_source", "contract_verification", "contract_creation", "token_holders", "transactions"],
+        "base": ["contract_source", "contract_verification"],
+        "bsc": ["contract_source", "contract_verification"],
+        "optimism": ["contract_source", "contract_verification"],
+        "avalanche": ["contract_source", "contract_verification"]
+      },
+      "notes": "Unified V2 API. Base/OP/BNB/Avalanche general free API access was removed in Nov 2025; verified-contract source/ABI remains separately free."
+    },
+    "routescan": {
+      "capabilities": ["contract_creation", "token_holders", "transactions"],
+      "chains": ["base", "optimism", "avalanche"],
+      "auth": "confirm_current_docs",
+      "verification_required": true,
+      "notes": "Research identifies a free 5 calls/s or 100k/day alternative, but key/auth details were not fully resolved in the supplied research."
+    },
+    "bsctrace_meganode": {
+      "capabilities": ["contract_creation", "token_holders", "transactions"],
+      "chains": ["bsc"],
+      "auth": "unresolved",
+      "verification_required": true,
+      "notes": "Recommended migration direction in research, but exact endpoint shape and rate limit are unresolved. Do not ship without current official verification."
+    },
+    "honeypot_is": {
+      "capabilities": ["risk_screen"],
+      "chains": ["ethereum", "bsc", "base"],
+      "auth": "keyless",
+      "notes": "No official numeric rate limit is published. Skill policy is conservative self-throttling/caching; that policy is not a provider-published limit."
+    },
+    "goplus": {
+      "capabilities": ["risk_screen"],
+      "chain_scope": "supported_evm",
+      "auth": "keyless_basic_researched",
+      "verification_required": true,
+      "notes": "Research documents 30 calls/min but also notes an emerging CU-model discrepancy. Verify current limits before production sizing."
+    },
+    "helius": {
+      "capabilities": ["solana_rpc", "das", "enhanced_transactions", "enhanced_webhooks", "token_mint_signal", "raydium_pool_signal", "pumpswap_pool_signal"],
+      "chains": ["solana"],
+      "auth": "api_key",
+      "notes": "Free snapshot: 1M credits/month, 10 standard RPC RPS, 2 DAS/Enhanced RPS. TOKEN_MINT is not a completeness guarantee."
+    }
+  }
+}
