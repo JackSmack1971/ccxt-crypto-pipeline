@@ -102,14 +102,19 @@ class HypothesisRegistry:
         return {"hypotheses": self.as_dicts(), "promotions": list(self.promotions)}
 
 def apply_bh_fdr(hypotheses: list[Hypothesis], q: float = .05) -> tuple[Hypothesis, ...]:
+    # m is the size of the whole declared family, not just the entries that carry a
+    # raw p-value: excluding an unavailable sibling from the denominator would let a
+    # caller shrink the correction burden simply by omitting evidence.
     indexed = sorted(((h.raw_p_value, i) for i, h in enumerate(hypotheses) if h.raw_p_value is not None), key=lambda x: x[0])
-    adjusted = [None] * len(hypotheses); running = 1.0; m = len(indexed)
+    adjusted = [None] * len(hypotheses); running = 1.0; m = len(hypotheses)
     for rank, (p, index) in reversed(list(enumerate(indexed, 1))):
         running = min(running, p * m / rank); adjusted[index] = running
     return tuple(Hypothesis(**{**asdict(h), "adjusted_value": adjusted[i], "decision": "promoted" if adjusted[i] is not None and adjusted[i] <= q else "rejected"}) for i, h in enumerate(hypotheses))
 
 def apply_holm(hypotheses: list[Hypothesis], alpha: float = .05) -> tuple[Hypothesis, ...]:
-    indexed = sorted(((h.raw_p_value, i) for i, h in enumerate(hypotheses) if h.raw_p_value is not None), key=lambda x: x[0]); m = len(indexed)
+    # Same rationale as apply_bh_fdr: m is the full family size, never just the
+    # count of hypotheses that happened to carry a raw p-value.
+    indexed = sorted(((h.raw_p_value, i) for i, h in enumerate(hypotheses) if h.raw_p_value is not None), key=lambda x: x[0]); m = len(hypotheses)
     adjusted = [None] * len(hypotheses)
     running = 0.0
     for rank, (p, index) in enumerate(indexed):

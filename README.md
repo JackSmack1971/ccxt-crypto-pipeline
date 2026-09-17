@@ -29,11 +29,13 @@ alpha, or execution readiness.
 
 ## Current frontier
 
-Phase 8 research product and publication operations are complete. The active
-frontier is **Phase 8R Empirical Research Readiness**, focused on dataset-
-quality evidence, scientific benchmarks, durable question/hypothesis identity,
-falsification, research campaigns, and independent methodological review. See
-the authoritative [roadmap](ROADMAP.md) for status and acceptance criteria.
+Phase 8R Empirical Research Readiness is complete: dataset-quality evidence,
+scientific benchmarks, durable question/hypothesis identity, falsification,
+research campaigns, and independent methodological review are all closed.
+Phase 9 (paper/forward execution) and Phase 10 (live execution) remain
+deferred pending their own separate, explicit activation decisions -- Phase 8R
+closure is a prerequisite for Phase 9, not an authorization of it. See the
+authoritative [roadmap](ROADMAP.md) for status and acceptance criteria.
 
 ## Contents
 
@@ -367,9 +369,10 @@ The canonical forward execution roadmap is [`ROADMAP.md`](ROADMAP.md). It record
 
 Phase 8 research product and publication operations are complete, including
 deterministic report output, local catalog/navigation, review history, and
-human-gated publication export. Phase 8R empirical research readiness is the
-active frontier. Phase 9 paper/forward execution and Phase 10 live execution
-remain deferred pending separate product and safety decisions.
+human-gated publication export. Phase 8R empirical research readiness is also
+complete, including independent methodological review. Phase 9 paper/forward
+execution and Phase 10 live execution remain deferred pending separate,
+explicit product and safety activation decisions.
 
 ## License
 

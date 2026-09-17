@@ -484,9 +484,16 @@ def run_experiment(spec: ExperimentSpec, snapshot: DatasetSnapshot, output_dir: 
     if significance_bundle is not None:
         inputs["significance_evidence_id"] = hashlib.sha256(
             _dump(significance_bundle)).hexdigest()[:24]
-    if confirmation_significance_evidence is not None:
+    if confirmation_bundle is not None:
+        # Identity is derived from the validated, canonicalized bundle actually
+        # persisted as confirmation_significance_evidence.json -- mirroring the
+        # discovery-stage significance_bundle pattern above -- so reordered or
+        # metadata-differing but semantically identical confirmation evidence
+        # resolves to one run, and evidence that was supplied but never
+        # consumed (no branch reaching validation_confirmed) does not affect
+        # run identity at all.
         inputs["confirmation_significance_evidence_id"] = hashlib.sha256(
-            _dump(confirmation_significance_evidence)).hexdigest()[:24]
+            _dump(confirmation_bundle)).hexdigest()[:24]
     if spec.research_question_id is not None:
         inputs["research_question_id"] = spec.research_question_id
         inputs["research_hypothesis_id"] = spec.research_hypothesis_id

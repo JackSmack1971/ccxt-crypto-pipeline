@@ -249,3 +249,69 @@ existing contract rather than through a new or parallel review procedure defined
 8. **Bind the verdict to the exact state reviewed.** Record the Git SHA (and, if applicable,
    campaign/run/profile/registry identities) the verdict applies to, using the same fields as §7,
    so the verdict cannot be silently carried forward to a different, unreviewed candidate state.
+
+## 9. Closure addendum (2026-09-17)
+
+This section records the independent review this document's §8 called for. It supersedes §5/§6's
+`BLOCKED` outcome; it does not edit them in place so the original record of why Blocker A was
+unresolved at that time remains intact.
+
+**Candidate state reviewed:** `main` at `a8bf2dcdb768c71a1504d311d9672446ddef81a7` (Slice 8R.7d),
+which had already superseded the `cd1a1a8`/`411cd27` states bound in §7.
+
+**Round 1 verdict: `FAIL`.** An `experiment-integrity-reviewer` agent role, reachable via this
+session's `Agent` tool (unavailable to the sessions that produced §5/§6), independently reviewed
+the 8R.7a-d diff against `cd1a1a8` and found:
+
+- **CRITICAL, demonstrated:** `analysis/alpha/evaluation.py`'s `apply_bh_fdr`/`apply_holm` computed
+  the multiple-testing denominator `m` over only hypotheses carrying a non-`None` raw p-value.
+  Declaring a frozen-family sibling's evidence explicitly unavailable (`None`) shrank `m` enough to
+  carry a candidate from `rejected` to `holdout_confirmed` through the governed path with the
+  identical p-value that would otherwise fail. This directly falsified the roadmap's and README's
+  existing claim that omitted/unavailable p-values "remain fail-closed."
+- **HIGH, demonstrated:** `analysis/experiments/catalog.py`'s `load_run` gated experiment-spec-
+  identity/research-binding/falsification-policy verification on the current `MANIFEST_VERSION`
+  only, so a run relabeled to the legacy `phase8r-run-v1` format (itself introduced by the same
+  8R.7d commit) silently skipped those checks.
+- **MEDIUM, demonstrated:** `analysis/experiments/runner.py` derived
+  `confirmation_significance_evidence_id` from the caller's raw confirmation-evidence container
+  rather than the validated, rebuilt bundle actually persisted, so semantically identical evidence
+  could mint distinct run identities and unconsumed evidence could affect identity despite no
+  artifact being written for it.
+
+Other findings (campaign outcome/run-state binding, non-finite promotion values, unreachable
+validation-semantics evidence gates) were assessed as pre-existing, legitimately deferred, or
+advisory-only, consistent with the open follow-up items already recorded in `ROADMAP.md`.
+
+**Remediation.** All three findings above were fixed in the same change that requested this
+addendum: `apply_bh_fdr`/`apply_holm` now use `m = len(hypotheses)` (the full frozen family, which
+`evaluate_hypothesis_family` structurally guarantees by rejecting any non-exact key match);
+`catalog.py:load_run`'s verification block now covers both `LEGACY_PHASE8_MANIFEST_VERSION` and the
+current manifest version; `runner.py` derives `confirmation_significance_evidence_id` from the
+validated `confirmation_bundle` actually persisted, only when consumed. Four regression tests were
+added across `tests/test_phase3.py`, `tests/test_phase7.py`, and `tests/test_phase8r_significance.py`.
+
+**Round 2 verdict: `PASS`.** A second independent `experiment-integrity-reviewer` invocation
+reviewed the remediation diff, independently reconstructed counterexamples for each of the three
+findings against the new code (not merely re-reading the new tests' names), proved the BH/Holm
+denominator fix is monotonically conservative (adjusted p-values can only move up or stay equal
+when sibling evidence is withheld), confirmed no new methodological defect, identity collision,
+fail-closed weakening, or determinism regression, and confirmed the four new tests would fail
+against the pre-remediation code. It recorded two non-blocking advisory notes: pre-8R legacy
+manifest formats (`phase6-run-v1`/`phase7-run-v1/v2/v3`) still lack `load_run`'s spec-identity
+verification (pre-existing, already an accepted contract per
+`tests/test_phase7.py::test_genuine_legacy_phase7_manifest_remains_loadable`, not attributable to
+this remediation); and unconsumed confirmation evidence has no explicit status artifact
+(an enhancement opportunity, not a defect).
+
+**Outcome.** Both `ROADMAP.md` Slice 8R.7 blockers are resolved. Phase 8R's independent-review exit
+criterion is satisfied by the Round 2 `PASS` verdict, and the material completeness finding this
+document's §4 raised (no reachable positive campaign outcome) was already closed by 8R.7a-c before
+this addendum, with the newly discovered correction-bypass defect now also closed. Full repository
+verification at the remediated state: `python -m pytest` passed with 519 tests (515 prior + 4 new);
+`python -m compileall -q analysis ingestion normalization reporting scheduler storage tests` and
+`git diff --check` both passed. See `ROADMAP.md`'s Slice 8R.7 entry for the summary and
+`git log`/the pull request for this change for the exact landed diff.
+
+This addendum does not authorize Phase 9 or Phase 10 activation; both remain separately deferred
+pending their own explicit product decisions.

@@ -107,8 +107,12 @@ def load_run(run_dir: str | Path) -> RunRecord:
     if not required <= set(artifacts):
         raise ValueError(f"experiment run manifest lacks required artifacts: {path}")
     spec = _read_json(path / "spec.json")
-    falsification = _read_json(path / "falsification.json") if manifest_version == MANIFEST_VERSION else None
-    if manifest_version == MANIFEST_VERSION:
+    # The legacy phase8r-run-v1 catalog format is produced by the same runner and
+    # spec schema as the current manifest; it must keep the same provenance
+    # verification strength rather than silently losing it when demoted.
+    _verified_manifest_versions = {LEGACY_PHASE8_MANIFEST_VERSION, MANIFEST_VERSION}
+    falsification = _read_json(path / "falsification.json") if manifest_version in _verified_manifest_versions else None
+    if manifest_version in _verified_manifest_versions:
         parsed_spec = experiment_spec_from_dict(spec)
         if experiment_spec_id(parsed_spec) != inputs["experiment_spec_id"]:
             raise ValueError(f"experiment spec identity mismatch: {path}")

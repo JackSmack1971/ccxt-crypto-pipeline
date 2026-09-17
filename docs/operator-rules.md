@@ -732,9 +732,10 @@ credential exfiltration, live offline-test dependencies, or unsanitized proof.
    said schema version 6, while `storage/schema.py` and tests pin 13. The current
    architecture records 13; runtime and storage code remain authoritative.
 2. **Current frontier versus root phase framing — resolved for the public surface.**
-   `ROADMAP.md` now records Phase 8 complete, Phase 8R active, and Phases 9–10
-   deferred. Root guidance remains the repository-wide invariant source, while
-   the roadmap is the forward phase authority.
+   `ROADMAP.md` now records Phase 8 and Phase 8R complete, with Phases 9–10
+   deferred pending their own separate, explicit activation decisions. Root
+   guidance remains the repository-wide invariant source, while the roadmap is
+   the forward phase authority and the source of truth for the current frontier.
 3. **Python support breadth.** Metadata promises `>=3.10`; CI exercises only 3.12. Whether 3.10/3.11 remain genuinely
    supported is **UNRESOLVED**.
 4. **Health semantics.** `scheduler.status` declares unhealthy if any historical run is failed/running, whereas an
