@@ -3,7 +3,8 @@
 **Status:** Active execution authority for forward work  
 **Current phase:** None ACTIVE. Phase 8R is complete; the next open question is a separate, explicit Phase 9 activation decision (not yet made)
 **Baseline:** `main` at `0e4f35a` (Slice 8R.7 closure remediation, tracked `.claude/agents`/
-`.claude/skills`, and Slice 8R.8) plus this change's Slice 8R.9 (campaign outcome/run-state binding)
+`.claude/skills`, and Slice 8R.8) plus Slice 8R.9 (campaign outcome/run-state binding) and this
+change's Slice 8R.10 (canonical research-question/hypothesis identity)
 **Last reconciled:** 2026-09-17 (Slice 8R.7 closed: two independent `experiment-integrity-reviewer`
 rounds ran against the 8R.7a-d state -- the first returned `FAIL` with a demonstrated
 multiple-testing-correction bypass plus two related provenance/identity defects, all three were
@@ -12,10 +13,12 @@ Slice 8R.8 closes the "non-finite promotion values" follow-up with defensive `is
 `discovery_adjusted_p_value`, `holdout_adjusted_p_value`, `uncertainty["ci95_low"]`, and
 `cost_sensitivity` values in `evaluate_candidate_promotion`. Slice 8R.9 closes "campaign
 outcome/run-state binding": `verify_campaign` now requires every hypothesis with a governed run to
-be classified into exactly one outcome list, matching what its run actually reached. Semantic
-manifest versioning for pre-8R legacy formats and canonical research IDs remain open, non-blocking
-follow-up items; Phase 9 remains deferred pending an explicit activation decision; Phase 10 remains
-separately deferred)
+be classified into exactly one outcome list, matching what its run actually reached. Slice 8R.10
+closes "canonical research IDs": `ResearchQuestion`/`ResearchHypothesis` now reject a caller-supplied
+`question_id`/`hypothesis_id` that does not match the content-derived identity, instead of trusting
+it as given. Semantic manifest versioning for pre-8R legacy formats remains open, non-blocking, and
+is a pre-existing accepted contract per `tests/test_phase7.py`, not a demonstrated defect; Phase 9
+remains deferred pending an explicit activation decision; Phase 10 remains separately deferred)
 
 This file is the durable forward roadmap for `ccxt-crypto-pipeline`. It exists so a new agent can determine the repository's actual execution frontier without reconstructing intent from chat history, stale phase prose, or commit messages.
 
@@ -1916,6 +1919,45 @@ Remaining recorded follow-up items from Slice 8R.7 -- semantic manifest versioni
 legacy formats and canonical research IDs -- remain open, non-blocking, and unaddressed by this
 slice.
 
+## Slice 8R.10 — Canonical research-question/hypothesis identity
+
+**Status:** DONE
+
+Closes the last of Slice 8R.7's recorded non-blocking follow-up items: "canonical research IDs."
+`ResearchQuestion.question_id` and `ResearchHypothesis.hypothesis_id`
+(`analysis/experiments/research.py`) default to a deterministic content hash when omitted, but a
+caller-supplied identity was previously accepted as-is with no verification against the
+declaration's actual content -- the same class of gap Slice 8R.7d already closed for
+`SignificanceEvidence.evidence_id` ("recomputes its content hash on construction and rejects a
+mismatched/tampered `evidence_id` rather than trusting the caller-supplied identity field"). A
+caller could therefore construct a `ResearchQuestion`/`ResearchHypothesis` whose declared identity
+did not match its own content, undermining the Slice 8R.3 acceptance criterion that identities are
+deterministic and "results cannot silently change the declared question or hypothesis."
+
+Evidence:
+
+- `analysis/experiments/research.py`'s `ResearchQuestion.__post_init__` and
+  `ResearchHypothesis.__post_init__` now recompute the expected content-derived identity whenever a
+  non-blank `question_id`/`hypothesis_id` is supplied and raise `ValueError` on a mismatch, mirroring
+  the existing `SignificanceEvidence` pattern exactly. The zero-argument (omitted-id) construction
+  path, used by every existing caller and by round-trip deserialization
+  (`research_question_from_dict`/`research_hypothesis_from_dict`), is unchanged.
+- `tests/test_research_registry.py::test_question_and_hypothesis_ids_reject_tampered_content` proves
+  both guards using `dataclasses.replace` to construct a copy with a tampered identity, verified
+  against the pre-fix code (temporarily reverted in-session) to confirm the scenario previously
+  succeeded silently.
+- Full repository suite: `python -m pytest` passed with 524 tests (523 prior + 1 new);
+  `python -m compileall -q analysis ingestion normalization reporting scheduler storage tests` and
+  `git diff --check` both passed. No documented public contract or README example relied on
+  supplying a mismatched identity, so no README update was required (consistent with Slice 8R.8's
+  precedent for a fail-closed tightening of previously-permissive input).
+
+All three of Slice 8R.7's recorded non-blocking follow-up items are now closed except semantic
+manifest versioning for pre-8R legacy formats, which remains open, non-blocking, and is a
+pre-existing accepted contract (`tests/test_phase7.py::test_genuine_legacy_phase7_manifest_remains_loadable`)
+rather than a demonstrated defect -- see the independent reviewer's Round 2 advisory note in
+`docs/audits/phase-8r-methodological-audit.md`.
+
 ## Phase 8R exit criteria
 
 Phase 8R is complete only when:
@@ -2019,12 +2061,15 @@ related provenance/identity defects; both were remediated and a second independe
 `PASS`). Slice 8R.8 closed the "non-finite promotion values" follow-up with defensive `isfinite`
 guards in `evaluate_candidate_promotion`. Slice 8R.9 closed "campaign outcome/run-state binding":
 `verify_campaign` now requires every hypothesis with a governed run to be classified into exactly
-one outcome list, matching what its run actually reached. Phase 9 remains deferred pending an
+one outcome list, matching what its run actually reached. Slice 8R.10 closed "canonical research
+IDs": `ResearchQuestion`/`ResearchHypothesis` now reject a caller-supplied `question_id`/
+`hypothesis_id` that does not match its content-derived identity. Phase 9 remains deferred pending an
 explicit activation decision -- Phase 8R closure is a prerequisite, not an activation. Phase 10
 remains separately deferred and requires its own product decision. No roadmap phase authorizes
 paper or live execution. There is no other ACTIVE phase at this time; the next step for a fresh
-agent is either picking up one of the remaining non-blocking Slice 8R.7 follow-up items (semantic
-manifest versioning for pre-8R legacy formats, canonical research IDs) or the explicit Phase 9
+agent is either picking up the one remaining non-blocking Slice 8R.7 follow-up item (semantic
+manifest versioning for pre-8R legacy formats -- itself a pre-existing accepted contract rather than
+a demonstrated defect, per the independent reviewer's Round 2 advisory note) or the explicit Phase 9
 activation decision described in that phase's section, which this roadmap does not make on its own.
 
 Phase 5 is DONE. Slice 5.7 closed the phase with

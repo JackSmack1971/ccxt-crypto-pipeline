@@ -73,8 +73,12 @@ class ResearchQuestion:
             raise ValueError("research question provenance must be an object")
         if not self.question_id:
             object.__setattr__(self, "question_id", _declared_identity(question_dict(self), "question_id"))
-        elif not self.question_id.strip():
-            raise ValueError("research question id cannot be blank")
+        else:
+            if not self.question_id.strip():
+                raise ValueError("research question id cannot be blank")
+            expected = _declared_identity(question_dict(self), "question_id")
+            if self.question_id != expected:
+                raise ValueError("research question content does not match its declared question_id")
 
 
 @dataclass(frozen=True)
@@ -122,8 +126,12 @@ class ResearchHypothesis:
             raise ValueError("research hypothesis provenance must be an object")
         if not self.hypothesis_id:
             object.__setattr__(self, "hypothesis_id", _declared_identity(hypothesis_dict(self), "hypothesis_id"))
-        elif not self.hypothesis_id.strip():
-            raise ValueError("research hypothesis id cannot be blank")
+        else:
+            if not self.hypothesis_id.strip():
+                raise ValueError("research hypothesis id cannot be blank")
+            expected = _declared_identity(hypothesis_dict(self), "hypothesis_id")
+            if self.hypothesis_id != expected:
+                raise ValueError("research hypothesis content does not match its declared hypothesis_id")
 
 
 def question_dict(question: ResearchQuestion) -> dict[str, Any]:

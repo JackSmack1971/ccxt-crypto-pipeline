@@ -1,6 +1,7 @@
 import json
 import subprocess
 import sys
+from dataclasses import replace
 
 import pytest
 
@@ -48,6 +49,15 @@ def test_question_and_hypothesis_ids_are_deterministic_and_distinct():
     assert question.question_id == _question().question_id == question_identity(question)
     assert hypothesis.hypothesis_id == _hypothesis(question).hypothesis_id == hypothesis_identity(hypothesis)
     assert hypothesis.hypothesis_id != question.question_id
+
+
+def test_question_and_hypothesis_ids_reject_tampered_content():
+    question = _question()
+    with pytest.raises(ValueError, match="content does not match its declared question_id"):
+        replace(question, question_id="tampered")
+    hypothesis = _hypothesis(question)
+    with pytest.raises(ValueError, match="content does not match its declared hypothesis_id"):
+        replace(hypothesis, hypothesis_id="tampered")
 
 
 def test_registry_validates_linkage_and_binds_spec_identity():
