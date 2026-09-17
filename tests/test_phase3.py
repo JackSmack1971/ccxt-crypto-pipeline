@@ -440,6 +440,46 @@ def test_candidate_promotion_requires_every_stage_gate_and_is_preserved_by_regis
     assert hypothesis_artifact["promotions"][0]["decision"]["state"] == "holdout_confirmed"
 
 
+def test_candidate_promotion_rejects_non_finite_evidence_rather_than_silently_passing():
+    """A NaN comparison like ``float('nan') <= 0`` or ``float('nan') > q`` is
+    silently False in Python, so an unguarded positivity/threshold check on
+    non-finite evidence would let it pass promotion instead of failing it.
+    Every numeric gate that can receive caller-supplied evidence must reject
+    non-finite values explicitly."""
+    class Label:
+        def __init__(self, i):
+            self.token_id = str(i); self.horizon = "1h"; self.status = "COMPLETE"; self.value = .12
+
+    candidate = score_candidate("non-finite-guard", tuple(Label(i) for i in range(20)), horizon="1h",
+                                baseline_mean=.02, turnover=1.0, costs=(.001, .005))
+    evidence = PromotionEvidence(
+        target_stage="holdout", discovery_adjusted_p_value=.01,
+        effect_size=.10,
+        validation_replicated=True, validation_semantics_frozen=True,
+        holdout_adjusted_p_value=.02, baseline_superior=True,
+        uncertainty_supports_effect=True, cost_sensitivity_passed=True,
+    )
+    baseline = evaluate_candidate_promotion(candidate, evidence)
+    assert baseline.state == "holdout_confirmed"
+
+    nan_discovery = evaluate_candidate_promotion(candidate, replace(evidence, discovery_adjusted_p_value=float("nan")))
+    assert nan_discovery.state == "rejected" and "DISCOVERY_CORRECTION_FAILED" in nan_discovery.reasons
+
+    nan_holdout = evaluate_candidate_promotion(candidate, replace(evidence, holdout_adjusted_p_value=float("nan")))
+    assert nan_holdout.state == "rejected" and nan_holdout.reasons == ("HOLDOUT_CORRECTION_FAILED",)
+
+    nan_uncertainty = replace(candidate, uncertainty={**candidate.uncertainty, "ci95_low": float("nan")})
+    uncertainty_decision = evaluate_candidate_promotion(nan_uncertainty, evidence)
+    assert uncertainty_decision.state == "rejected"
+    assert "UNCERTAINTY_EVIDENCE_NOT_POSITIVE" in uncertainty_decision.reasons
+
+    nan_cost = replace(candidate, cost_sensitivity={
+        key: float("nan") for key in candidate.cost_sensitivity})
+    cost_decision = evaluate_candidate_promotion(nan_cost, evidence)
+    assert cost_decision.state == "rejected"
+    assert "COST_EVIDENCE_NOT_ROBUST" in cost_decision.reasons
+
+
 def test_candidate_promotion_separates_practical_effect_from_uncertainty():
     class Label:
         def __init__(self, i):

@@ -193,6 +193,13 @@ def _promotion_decision(state: str, reasons: list[str], policy: PromotionPolicy,
     return PromotionDecision(state, tuple(reasons), asdict(policy), asdict(evidence))
 
 
+def _valid_finite(value: Any) -> bool:
+    """True only for an actual finite number, never NaN/inf -- a NaN comparison
+    like ``float('nan') <= 0`` is silently False in Python, so an unguarded
+    positivity/threshold check would let non-finite evidence pass promotion."""
+    return type(value) in (int, float) and math.isfinite(value)
+
+
 def evaluate_candidate_promotion(candidate: CandidateResult, evidence: PromotionEvidence,
                                  policy: PromotionPolicy = PromotionPolicy()) -> PromotionDecision:
     """Evaluate sequential research gates without inferring missing evidence.
@@ -228,7 +235,7 @@ def evaluate_candidate_promotion(candidate: CandidateResult, evidence: Promotion
             or not math.isclose(valid_effect_size, measured_effect, rel_tol=0.0, abs_tol=1e-12)):
         return _promotion_decision("rejected", ["EFFECT_SIZE_MISMATCH"], policy, evidence)
     failed = []
-    if evidence.discovery_adjusted_p_value > policy.discovery_q:
+    if not _valid_finite(evidence.discovery_adjusted_p_value) or evidence.discovery_adjusted_p_value > policy.discovery_q:
         failed.append("DISCOVERY_CORRECTION_FAILED")
     if measured_effect < policy.minimum_effect_size:
         failed.append("PRACTICAL_EFFECT_TOO_SMALL")
@@ -237,9 +244,9 @@ def evaluate_candidate_promotion(candidate: CandidateResult, evidence: Promotion
     if not evidence.cost_sensitivity_passed: failed.append("COST_SENSITIVITY_FAILED")
     if candidate.baseline_comparison.get("difference") is None or candidate.baseline_comparison["difference"] <= 0:
         failed.append("BASELINE_EVIDENCE_NOT_POSITIVE")
-    if candidate.uncertainty.get("ci95_low") is None or candidate.uncertainty["ci95_low"] <= 0:
+    if not _valid_finite(candidate.uncertainty.get("ci95_low")) or candidate.uncertainty["ci95_low"] <= 0:
         failed.append("UNCERTAINTY_EVIDENCE_NOT_POSITIVE")
-    if not candidate.cost_sensitivity or any(value is None or value <= 0
+    if not candidate.cost_sensitivity or any(not _valid_finite(value) or value <= 0
                                              for value in candidate.cost_sensitivity.values()):
         failed.append("COST_EVIDENCE_NOT_ROBUST")
     if failed: return _promotion_decision("rejected", failed, policy, evidence)
@@ -259,7 +266,7 @@ def evaluate_candidate_promotion(candidate: CandidateResult, evidence: Promotion
 
     if evidence.holdout_adjusted_p_value is None:
         return _promotion_decision("insufficient_evidence", ["MISSING_HOLDOUT_CORRECTION"], policy, evidence)
-    if evidence.holdout_adjusted_p_value > policy.confirmation_alpha:
+    if not _valid_finite(evidence.holdout_adjusted_p_value) or evidence.holdout_adjusted_p_value > policy.confirmation_alpha:
         return _promotion_decision("rejected", ["HOLDOUT_CORRECTION_FAILED"], policy, evidence)
     return _promotion_decision("holdout_confirmed", [], policy, evidence)
 
