@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import os
 import time
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -15,8 +14,9 @@ from ingestion.cex.common import load_config as load_cex_config
 from ingestion.cex.refresh import refresh_exchange
 from ingestion.cex.universe import discover_universe
 from ingestion.dex.tier0.poller import load_config as load_chain_config, poll
+from ingestion.evm.config import resolve_chain_rpc_url
 from ingestion.evm.listener import run_once as run_evm_once
-from ingestion.solana.config import load_config as load_solana_config
+from ingestion.solana.config import load_config as load_solana_config, resolve_helius_api_key
 from ingestion.solana.listener import run_once as run_solana_once
 from normalization.reconcile import reconcile_assets
 from storage.db import (classify_provider_failure, log_run_end, log_run_start,
@@ -114,7 +114,7 @@ class Pipeline:
         total = 0
         for chain in config.get("networks", []):
             name, env_name = chain.get("name"), chain.get("rpc_env")
-            if not (name and env_name and os.getenv(env_name)):
+            if not (name and env_name and resolve_chain_rpc_url(name, strict=False)):
                 continue
             lookback = int(chain.get("evm_lookback_blocks", config.get("evm_lookback_blocks", 1900)))
             started = time.monotonic()
@@ -137,8 +137,9 @@ class Pipeline:
         return total
 
     def solana_listener(self) -> int:
-        config = load_solana_config(Path(self.solana_config_path).resolve().parents[1])
-        if not os.getenv(config.get("api_key_env", "HELIUS_API_KEY")):
+        root = Path(self.solana_config_path).resolve().parents[1]
+        config = load_solana_config(root)
+        if not resolve_helius_api_key(root, strict=False, config=config):
             return 0
         return run_solana_once(db_path=self.db_path, config=config,
                                expected_interval_seconds=_MINUTE_SECONDS)
