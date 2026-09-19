@@ -12,7 +12,7 @@ from storage.db import (advance_ingestion_continuation, classify_provider_failur
                         record_provider_observation, safe_error_message, upsert_asset,
                         upsert_asset_relationship, upsert_metadata)
 
-from .config import ROOT, load_config
+from .config import ROOT, load_config, resolve_helius_api_key
 from .helius import HeliusClient
 
 _BASE58 = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz"
@@ -159,12 +159,14 @@ def _run_program(program_name: str, address: str, client: HeliusClient, *, types
 
 
 def run_once(*, db_path: str, config: dict[str, Any] | None = None, client: HeliusClient | None = None,
-             now: datetime | None = None, expected_interval_seconds: float | None = None) -> int:
-    config = config or load_config()
-    client = client or HeliusClient(config)
+             now: datetime | None = None, expected_interval_seconds: float | None = None,
+             root=ROOT) -> int:
+    config = config or load_config(root)
     run_id = log_run_start("solana_listener", db_path)
     written = 0
     try:
+        if client is None:
+            client = HeliusClient(config, resolve_helius_api_key(root, config=config))
         programs = config.get("programs", {})
         discovery = config.get("discovery", {})
         limit = int(discovery.get("limit", 20))

@@ -1,6 +1,10 @@
 import json
 from datetime import datetime, timezone
 
+import pytest
+
+from config.env import MissingEnvironmentValueError
+from ingestion.solana.config import resolve_helius_api_key
 from ingestion.solana.helius import HeliusClient
 from ingestion.solana.listener import extract_mints, extract_pool_addresses, is_solana_address, run_once
 from storage.db import (get_ingestion_continuation, provider_quality_summary,
@@ -30,13 +34,13 @@ def test_extract_mints_from_mint_and_pool_shapes():
     assert not is_solana_address("not-a-mint")
 
 
-def test_helius_client_normalizes_das_and_largest_accounts(monkeypatch):
-    monkeypatch.setenv("HELIUS_API_KEY", "test-key")
+def test_helius_client_normalizes_das_and_largest_accounts():
     session = Session([Response([{"type": "TOKEN_MINT", "mint": "MintA"}]),
                        Response({"result": {"content": {"metadata": {"name": "Test"}}}}),
                        Response({"result": {"value": [{"address": "holder"}]}})])
     client = HeliusClient({"enhanced_base_url": "https://enhanced", "das_url": "https://das",
-                           "rpc_url": "https://rpc", "max_requests_per_second": 1000}, session)
+                           "rpc_url": "https://rpc", "max_requests_per_second": 1000},
+                          "test-key", session)
     assert client.recent_transactions("program")
     assert client.get_asset("MintA")["content"]["metadata"]["name"] == "Test"
     assert len(client.largest_accounts("MintA")) == 1
@@ -231,3 +235,57 @@ def test_run_once_records_program_failure_before_failing_the_whole_run(tmp_path)
     log = read_provider_observation_log(db)
     assert [row["status"] for row in log] == ["success", "failure"]
     assert "was not reached" in log[-1]["error_message"]
+
+
+def test_helius_api_key_resolves_via_shared_env_boundary(monkeypatch):
+    monkeypatch.setenv("HELIUS_API_KEY", "shared-key")
+    assert resolve_helius_api_key(config={"api_key_env": "HELIUS_API_KEY"}) == "shared-key"
+
+
+def test_permissive_key_resolution_represents_unconfigured_solana_without_raising(monkeypatch):
+    monkeypatch.delenv("HELIUS_API_KEY", raising=False)
+    assert resolve_helius_api_key(config={"api_key_env": "HELIUS_API_KEY"}, strict=False) == ""
+
+
+def test_missing_helius_api_key_fails_before_any_network_call(tmp_path, monkeypatch):
+    monkeypatch.delenv("HELIUS_API_KEY", raising=False)
+
+    class NetworkCallDuringConfig(AssertionError):
+        pass
+
+    class Client:
+        def __init__(self, *args, **kwargs):
+            raise NetworkCallDuringConfig("HeliusClient must not be constructed before key resolution")
+
+    import ingestion.solana.listener as listener_module
+    monkeypatch.setattr(listener_module, "HeliusClient", Client)
+
+    cfg = {"programs": {"token_metadata": "program"},
+           "discovery": {"limit": 1, "transaction_types": ["TOKEN_MINT"]}}
+    db = str(tmp_path / "missing-key.duckdb")
+    with pytest.raises(MissingEnvironmentValueError):
+        run_once(db_path=db, config=cfg)
+
+
+def test_missing_helius_api_key_is_recorded_as_failed_run(tmp_path, monkeypatch):
+    monkeypatch.delenv("HELIUS_API_KEY", raising=False)
+    cfg = {"programs": {"token_metadata": "program"},
+           "discovery": {"limit": 1, "transaction_types": ["TOKEN_MINT"]}}
+    db = str(tmp_path / "missing-key-run.duckdb")
+    with pytest.raises(MissingEnvironmentValueError) as excinfo:
+        run_once(db_path=db, config=cfg)
+    assert "HELIUS_API_KEY" in str(excinfo.value)
+    run_row = read_runs(db)[0]
+    assert run_row["status"] == "failed"
+    assert "missing required environment value" in run_row["error_message"]
+    # storage.db.safe_error_message redacts anything matching an `api_key`-shaped token
+    # before persisting, so the persisted record carries the redaction, not the raw key.
+    assert "[REDACTED]" in run_row["error_message"]
+
+
+def test_missing_helius_api_key_error_never_leaks_a_credential_value(monkeypatch):
+    monkeypatch.delenv("HELIUS_API_KEY", raising=False)
+    monkeypatch.setenv("SOME_OTHER_SECRET", "hs-super-secret-should-never-leak")
+    with pytest.raises(MissingEnvironmentValueError) as excinfo:
+        resolve_helius_api_key(config={"api_key_env": "HELIUS_API_KEY"})
+    assert "hs-super-secret-should-never-leak" not in str(excinfo.value)
