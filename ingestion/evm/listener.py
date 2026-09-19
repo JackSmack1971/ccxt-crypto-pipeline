@@ -10,12 +10,12 @@ from storage.db import (advance_ingestion_cursor, get_ingestion_cursor, insert_e
                         log_run_start, record_evm_block_observation, safe_error_message, upsert_asset,
                         upsert_asset_relationship, upsert_metadata)
 
-from .config import ROOT, load_chain, load_evm_config
+from .config import ROOT, load_chain, load_evm_config, resolve_chain_rpc_url
 from .models import CapabilityStatus
 from .providers import build_provider
 from .risk import risk_flags
 from .risk import HoneypotRiskProvider
-from .rpc import EVMRPCClient, decode_created_market, rpc_url_from_env
+from .rpc import EVMRPCClient, decode_created_market
 
 
 def enrich_asset(chain: str, chain_id: int, address: str, provider, risk_provider, *, db_path: str,
@@ -128,8 +128,9 @@ def run_once(chain: str, *, db_path: str, from_block: int | None = None,
     run_id = log_run_start(f"evm_listener:{chain}", db_path)
     observation_started = False
     try:
+        rpc_url = resolve_chain_rpc_url(chain, root)
         provider_config = load_evm_config(root)
-        rpc = EVMRPCClient(rpc_url_from_env(chain_config["rpc_env"]))
+        rpc = EVMRPCClient(rpc_url)
         confirmation_depth = (int(chain_config.get("confirmation_depth", 12))
                               if confirmation_depth is None else confirmation_depth)
         reorg_lookback_blocks = (int(chain_config.get("reorg_lookback_blocks", 20))

@@ -1,6 +1,10 @@
 import json
 from datetime import datetime, timezone
 
+import pytest
+
+from config.env import MissingEnvironmentValueError
+from ingestion.evm.config import resolve_chain_rpc_url, resolve_explorer_credential
 from ingestion.evm.listener import observe_once, run_once
 from ingestion.evm.models import Capability, CapabilityStatus, EnrichmentResult
 from ingestion.evm.providers import EtherscanV2Provider, MegaNodeProvider, RoutescanProvider, build_provider
@@ -44,13 +48,12 @@ def test_provider_routing_and_shared_etherscan_credential(monkeypatch):
     assert isinstance(build_provider("bsc", 56, base), MegaNodeProvider)
 
 
-def test_provider_response_normalization_and_unsupported_capability(monkeypatch):
-    monkeypatch.setenv("ETHERSCAN_API_KEY", "key")
+def test_provider_response_normalization_and_unsupported_capability():
     cfg = {"base_url": "https://etherscan.test", "api_key_env": "ETHERSCAN_API_KEY"}
     session = Session([Response({"status": "1", "result": [{"SourceCode": "contract X {}"}]}),
                        Response({"status": "1", "result": [{"TokenHolderAddress": "0x1"}]}),
                        Response({"status": "1", "result": [{"contractCreator": "0x2"}]})])
-    result = EtherscanV2Provider(1, cfg, session).enrich("0xtoken")
+    result = EtherscanV2Provider(1, cfg, session, api_key="key").enrich("0xtoken")
     assert result.contract_verified.value is True
     assert result.holder_count == 1
     assert result.deployer_address.value == "0x2"
@@ -71,9 +74,40 @@ def test_routescan_keyless_mode_is_explicit_and_normalizes_holders():
 def test_rpc_and_explorer_credentials_are_independent(monkeypatch):
     monkeypatch.setenv("EVM_RPC_URL_ETHEREUM", "https://rpc.example")
     monkeypatch.setenv("ETHERSCAN_API_KEY", "explorer-only")
-    assert "rpc" in __import__("ingestion.evm.rpc", fromlist=["rpc"]).rpc_url_from_env("EVM_RPC_URL_ETHEREUM")
-    provider = EtherscanV2Provider(1, {"base_url": "https://x", "api_key_env": "ETHERSCAN_API_KEY"})
+    assert resolve_chain_rpc_url("ethereum") == "https://rpc.example"
+    assert resolve_explorer_credential("ETHERSCAN_API_KEY") == "explorer-only"
+    provider = EtherscanV2Provider(1, {"base_url": "https://x", "api_key_env": "ETHERSCAN_API_KEY"},
+                                   api_key="explorer-only")
     assert provider.api_key == "explorer-only"
+
+
+def test_explorer_credential_resolves_independently_of_rpc_availability(monkeypatch):
+    monkeypatch.delenv("EVM_RPC_URL_ETHEREUM", raising=False)
+    monkeypatch.setenv("ETHERSCAN_API_KEY", "explorer-only")
+    assert resolve_explorer_credential("ETHERSCAN_API_KEY") == "explorer-only"
+    with pytest.raises(MissingEnvironmentValueError):
+        resolve_chain_rpc_url("ethereum")
+
+    monkeypatch.setenv("EVM_RPC_URL_ETHEREUM", "https://rpc.example")
+    monkeypatch.delenv("ETHERSCAN_API_KEY", raising=False)
+    assert resolve_chain_rpc_url("ethereum") == "https://rpc.example"
+    assert resolve_explorer_credential("ETHERSCAN_API_KEY") == ""
+
+
+def test_permissive_rpc_resolution_represents_unconfigured_chain_without_raising(monkeypatch):
+    monkeypatch.delenv("EVM_RPC_URL_ETHEREUM", raising=False)
+    assert resolve_chain_rpc_url("ethereum", strict=False) == ""
+
+
+def test_routescan_remains_keyless_when_allow_keyless_true_and_no_api_key(monkeypatch):
+    monkeypatch.delenv("ROUTESCAN_API_KEY", raising=False)
+    config = {"providers": {"base": "routescan"},
+              "routescan": {"base_url": "https://routescan.test", "allow_keyless": True,
+                            "keyless_requests_per_second": 5}}
+    provider = build_provider("base", 8453, config)
+    assert isinstance(provider, RoutescanProvider)
+    assert provider.api_key == ""
+    assert provider.keyless_enabled is True
 
 
 def test_pair_created_decoding():
@@ -191,10 +225,38 @@ def test_chain_configuration_contains_all_required_evm_networks():
 def test_config_failure_is_recorded_as_failed_run(tmp_path, monkeypatch):
     monkeypatch.delenv("EVM_RPC_URL_ETHEREUM", raising=False)
     db = str(tmp_path / "db.duckdb")
-    try:
+    with pytest.raises(MissingEnvironmentValueError) as excinfo:
         run_once("ethereum", db_path=db)
-    except ValueError as exc:
-        assert str(exc) == "RPC URL is required"
-    else:
-        raise AssertionError("missing RPC configuration should fail")
-    assert read_runs(db)[0]["status"] == "failed"
+    assert "EVM_RPC_URL_ETHEREUM" in str(excinfo.value)
+    run_row = read_runs(db)[0]
+    assert run_row["status"] == "failed"
+    # storage.db.safe_error_message redacts anything matching an `rpc_url`-shaped token
+    # before persisting, so the persisted record carries the redaction, not the raw key.
+    assert "missing required environment value" in run_row["error_message"]
+    assert "[REDACTED]" in run_row["error_message"]
+
+
+def test_missing_rpc_url_fails_before_any_network_call(tmp_path, monkeypatch):
+    monkeypatch.delenv("EVM_RPC_URL_ETHEREUM", raising=False)
+
+    class NetworkCallDuringConfig(AssertionError):
+        pass
+
+    class RPC:
+        def __init__(self, rpc_url):
+            raise NetworkCallDuringConfig("RPC client must not be constructed before RPC URL resolution")
+
+    import ingestion.evm.listener as listener_module
+    monkeypatch.setattr(listener_module, "EVMRPCClient", RPC)
+
+    db = str(tmp_path / "db.duckdb")
+    with pytest.raises(MissingEnvironmentValueError):
+        run_once("ethereum", db_path=db)
+
+
+def test_missing_rpc_url_error_never_leaks_a_credential_value(monkeypatch):
+    monkeypatch.delenv("EVM_RPC_URL_ETHEREUM", raising=False)
+    monkeypatch.setenv("ETHERSCAN_API_KEY", "sk-super-secret-should-never-leak")
+    with pytest.raises(MissingEnvironmentValueError) as excinfo:
+        resolve_chain_rpc_url("ethereum")
+    assert "sk-super-secret-should-never-leak" not in str(excinfo.value)

@@ -1,8 +1,10 @@
-"""Chain-parameterized JSON-RPC log observation shared by all EVM chains."""
+"""Chain-parameterized JSON-RPC log observation shared by all EVM chains.
+
+Receives an already-resolved RPC URL; it never reads the environment itself.
+"""
 
 from __future__ import annotations
 
-import os
 from datetime import datetime, timezone
 from typing import Any
 
@@ -84,7 +86,3 @@ def decode_created_asset(log: dict[str, Any]) -> str | None:
     """Backward-compatible market-address decoder."""
     decoded = decode_created_market(log)
     return decoded["market_address"] if decoded else None
-
-
-def rpc_url_from_env(env_name: str) -> str:
-    return os.getenv(env_name, "")

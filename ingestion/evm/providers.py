@@ -1,8 +1,11 @@
-"""Explorer/indexer adapters. RPC observation is intentionally elsewhere."""
+"""Explorer/indexer adapters. RPC observation is intentionally elsewhere.
+
+Provider classes receive already-resolved credentials; only `build_provider` resolves
+them, via the `ingestion.evm.config` runtime-configuration boundary.
+"""
 
 from __future__ import annotations
 
-import os
 import time
 from typing import Any
 
@@ -10,6 +13,7 @@ from storage.db import safe_error_message
 
 import requests
 
+from .config import resolve_explorer_credential
 from .models import Capability, CapabilityStatus, EnrichmentResult
 
 
@@ -77,10 +81,10 @@ class HTTPProvider:
 class EtherscanV2Provider(HTTPProvider):
     name = "etherscan_v2"
 
-    def __init__(self, chain_id: int, config: dict[str, Any], session=None):
+    def __init__(self, chain_id: int, config: dict[str, Any], session=None, *, api_key: str = ""):
         super().__init__(config, session)
         self.chain_id = chain_id
-        self.api_key = os.getenv(config.get("api_key_env", "ETHERSCAN_API_KEY"), "")
+        self.api_key = api_key
 
     def _call(self, action: str, address: str) -> Any:
         return self._result(self._get(self.config["base_url"], params={
@@ -129,10 +133,10 @@ class EtherscanV2Provider(HTTPProvider):
 class RoutescanProvider(HTTPProvider):
     name = "routescan"
 
-    def __init__(self, chain_id: int, config: dict[str, Any], session=None):
+    def __init__(self, chain_id: int, config: dict[str, Any], session=None, *, api_key: str = ""):
         super().__init__(config, session)
         self.chain_id = chain_id
-        self.api_key = os.getenv(config.get("api_key_env", "ROUTESCAN_API_KEY"), "")
+        self.api_key = api_key
         if not self.api_key:
             if not config.get("allow_keyless", False):
                 self.keyless_enabled = False
@@ -192,9 +196,11 @@ def build_provider(chain: str, chain_id: int, config: dict[str, Any], session=No
     name = config.get("providers", {}).get(chain)
     provider_config = config.get(name, {})
     if name == "etherscan_v2":
-        return EtherscanV2Provider(chain_id, provider_config, session)
+        api_key = resolve_explorer_credential(provider_config.get("api_key_env", "ETHERSCAN_API_KEY"))
+        return EtherscanV2Provider(chain_id, provider_config, session, api_key=api_key)
     if name == "routescan":
-        return RoutescanProvider(chain_id, provider_config, session)
+        api_key = resolve_explorer_credential(provider_config.get("api_key_env", "ROUTESCAN_API_KEY"))
+        return RoutescanProvider(chain_id, provider_config, session, api_key=api_key)
     if name == "bsctrace_meganode":
         return MegaNodeProvider(provider_config, session)
     raise ValueError(f"no EVM provider configured for {chain}")
