@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import os
 import time
 from typing import Any
 
@@ -14,10 +13,10 @@ class SolanaProviderError(RuntimeError):
 
 
 class HeliusClient:
-    def __init__(self, config: dict[str, Any], session: requests.Session | None = None):
+    def __init__(self, config: dict[str, Any], api_key: str, session: requests.Session | None = None):
         self.config = config
         self.session = session or requests.Session()
-        self.api_key = os.getenv(config.get("api_key_env", "HELIUS_API_KEY"), "")
+        self.api_key = api_key
         self.timeout = float(config.get("timeout_seconds", 20))
         self.max_retries = int(config.get("max_retries", 2))
         self.min_interval = 1 / float(config.get("max_requests_per_second", 2))
