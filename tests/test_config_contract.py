@@ -1,15 +1,142 @@
+import ast
 import importlib
 import sys
+from pathlib import Path
 
 import pytest
 
 from config.env import MissingEnvironmentValueError, require_env, resolve_env
+
+REPO_ROOT = Path(__file__).resolve().parents[1]
+
+# The shared runtime-env boundary itself; every other module must resolve
+# environment values through `resolve_env`/`require_env` instead of reading
+# `os.getenv`/`os.environ` directly.
+ALLOWED_DIRECT_ENV_ACCESS_MODULES = {
+    REPO_ROOT / "config" / "env.py",
+}
+
+EXCLUDED_DIR_NAMES = {
+    ".git",
+    ".venv",
+    "venv",
+    "__pycache__",
+    ".pytest_cache",
+    ".mypy_cache",
+    ".ruff_cache",
+    "build",
+    "dist",
+    "node_modules",
+}
+
+
+def _iter_repo_python_files():
+    for path in REPO_ROOT.rglob("*.py"):
+        parts = path.relative_to(REPO_ROOT).parts
+        if any(part in EXCLUDED_DIR_NAMES or part.endswith(".egg-info") for part in parts):
+            continue
+        yield path
+
+
+def _is_os_getenv_call(node):
+    return (
+        isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Attribute)
+        and node.func.attr == "getenv"
+        and isinstance(node.func.value, ast.Name)
+        and node.func.value.id == "os"
+    )
+
+
+def _is_os_environ_node(node):
+    return (
+        isinstance(node, ast.Attribute)
+        and node.attr == "environ"
+        and isinstance(node.value, ast.Name)
+        and node.value.id == "os"
+    )
+
+
+def _is_os_environ_get_call(node):
+    return (
+        isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Attribute)
+        and node.func.attr == "get"
+        and _is_os_environ_node(node.func.value)
+    )
+
+
+def _is_os_environ_subscript(node):
+    return isinstance(node, ast.Subscript) and _is_os_environ_node(node.value)
+
+
+def _direct_env_access_lines(source: str) -> list[int]:
+    tree = ast.parse(source)
+    violations = []
+    for node in ast.walk(tree):
+        if _is_os_getenv_call(node) or _is_os_environ_get_call(node) or _is_os_environ_subscript(node):
+            violations.append(node.lineno)
+    return violations
 
 
 def write_env_file(tmp_path, contents):
     env_file = tmp_path / ".env"
     env_file.write_text(contents, encoding="utf-8")
     return env_file
+
+
+def test_no_direct_environment_reads_outside_shared_runtime_env_boundary():
+    offenders = {}
+    for path in _iter_repo_python_files():
+        if path in ALLOWED_DIRECT_ENV_ACCESS_MODULES:
+            continue
+        source = path.read_text(encoding="utf-8")
+        lines = _direct_env_access_lines(source)
+        if lines:
+            offenders[str(path.relative_to(REPO_ROOT))] = lines
+    assert offenders == {}, (
+        "os.getenv/os.environ.get/os.environ[...] must only be used inside "
+        f"the shared config.env runtime-env boundary; found direct access in: {offenders}"
+    )
+
+
+def test_env_example_declares_exactly_the_supported_keys():
+    env_example = REPO_ROOT / ".env.example"
+    declared_keys = {
+        line.split("=", 1)[0].strip()
+        for line in env_example.read_text(encoding="utf-8").splitlines()
+        if line.strip() and not line.strip().startswith("#")
+    }
+    assert declared_keys == {
+        "ETHERSCAN_API_KEY",
+        "ROUTESCAN_API_KEY",
+        "HELIUS_API_KEY",
+        "EVM_RPC_URL_ETHEREUM",
+        "EVM_RPC_URL_BASE",
+        "EVM_RPC_URL_ARBITRUM",
+        "EVM_RPC_URL_BSC",
+    }
+    assert "MEGANODE_API_KEY" not in env_example.read_text(encoding="utf-8")
+
+
+def test_gitignore_ignores_dotenv_files_but_preserves_dotenv_example(tmp_path):
+    import subprocess
+
+    gitignore = (REPO_ROOT / ".gitignore").read_text(encoding="utf-8")
+    assert ".env\n" in gitignore or gitignore.rstrip("\n").endswith(".env")
+    assert ".env.*" in gitignore
+    assert "!.env.example" in gitignore
+
+    for name, expect_ignored in (
+        (".env", True),
+        (".env.local", True),
+        (".env.example", False),
+    ):
+        result = subprocess.run(
+            ["git", "-C", str(REPO_ROOT), "check-ignore", "--quiet", name],
+            check=False,
+        )
+        assert (result.returncode == 0) == expect_ignored, name
 
 
 def test_resolve_env_falls_back_to_default_when_unset_everywhere(tmp_path):

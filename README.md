@@ -309,7 +309,24 @@ it makes no profitability or alpha claim.
 
 ## Configuration
 
-Safe examples are provided in [`.env.example`](.env.example). YAML settings live in `config/cex.yaml`, `config/chains.yaml`, `config/evm.yaml`, and `config/solana.yaml`. The complete variable and credential setup is in [`docs/RUNBOOK.md`](docs/RUNBOOK.md).
+Every credential and RPC URL is resolved at call time by the shared runtime-env boundary
+(`config/env.py`), which explicitly loads a local `.env` file and applies process environment
+variables ahead of it: a value already set in the process environment always overrides the same
+key in `.env`. Safe examples of every supported key are provided in
+[`.env.example`](.env.example); copy it to `.env` and fill only what the paths you run need.
+
+YAML files own routing and behavior, never credentials: `config/cex.yaml`, `config/chains.yaml`,
+`config/evm.yaml`, and `config/solana.yaml` name which environment variable to resolve for each
+chain/provider, but never embed a resolved value themselves.
+
+Requiredness differs by caller. Direct, single-chain entry points resolve strictly and raise
+before any network call if a required value is missing. The scheduler resolves permissively
+instead, so an unconfigured EVM chain or the Solana listener is skipped for that cycle rather than
+failing the whole run. Routescan (Base) is the one credential that is optional even under strict
+resolution: `config/evm.yaml` explicitly permits keyless Routescan access, so `ROUTESCAN_API_KEY`
+is not required for Base enrichment to run.
+
+The complete per-variable reference is in [`docs/RUNBOOK.md`](docs/RUNBOOK.md).
 
 ## Developer Command Center
 
